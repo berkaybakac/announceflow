@@ -34,6 +34,10 @@ echo ""
 echo "[1/5] Creating destination directory..."
 ssh ${SSH_OPTS} ${PI_USER}@${PI_HOST} "mkdir -p ${DEST_DIR}"
 
+# 1.5 Clean remote pycache to ensure fresh code
+echo "[1.5/5] Cleaning remote pycache..."
+ssh ${SSH_OPTS} ${PI_USER}@${PI_HOST} "find ${DEST_DIR} -name '__pycache__' -type d -exec rm -rf {} +"
+
 # 2. Sync files
 echo "[2/5] Syncing project files..."
 rsync -avz --progress \

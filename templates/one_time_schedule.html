@@ -1,6 +1,11 @@
 {% extends "base.html" %}
 {% block title %}Tek Seferlik Planlama - AnnounceFlow{% endblock %}
 
+{% block extra_css %}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/themes/dark.css">
+{% endblock %}
+
 {% block content %}
 <div class="page-header">
     <h1 class="page-title">📅 Tek Seferlik Planlama</h1>
@@ -108,6 +113,8 @@
 {% endblock %}
 
 {% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+<script src="https://npmcdn.com/flatpickr/dist/l10n/tr.js"></script>
 <script>
     document.addEventListener('DOMContentLoaded', () => {
         // Date Picker (DD.MM.YYYY)
@@ -130,7 +137,9 @@
             noCalendar: true,
             dateFormat: "H:i",
             time_24hr: true,
-            defaultDate: defaultTime
+            defaultDate: defaultTime,
+            minuteIncrement: 1,
+            allowInput: true // Allow typing time manually
         });
     });
 </script>

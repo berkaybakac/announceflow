@@ -7,7 +7,7 @@ import json
 import functools
 import subprocess
 import tempfile
-from datetime import datetime
+from datetime import datetime, timedelta
 from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify
 from werkzeug.utils import secure_filename
 
@@ -139,6 +139,29 @@ def _format_schedules(schedules):
         formatted.append(s_dict)
     return formatted
 
+def _format_media_files(files):
+    """Format media file dates (UTC -> UTC+3) and (DD.MM.YYYY HH:MM)."""
+    formatted = []
+    for f in files:
+        f_dict = dict(f)
+        try:
+            dt_str = f_dict['created_at']
+            # Parse UTC time
+            try:
+                dt = datetime.strptime(dt_str, '%Y-%m-%d %H:%M:%S')
+            except ValueError:
+                dt = datetime.strptime(dt_str, '%Y-%m-%d %H:%M')
+            
+            # Add 3 hours for Turkey Time (UTC+3) manual adjustment
+            # since we know the server stores UTC
+            dt_tr = dt + timedelta(hours=3)
+            
+            f_dict['created_at_formatted'] = dt_tr.strftime('%d.%m.%Y %H:%M')
+        except Exception:
+            f_dict['created_at_formatted'] = f_dict['created_at']
+        formatted.append(f_dict)
+    return formatted
+
 # ============ PAGE ROUTES ============
 
 @app.route('/')
@@ -182,10 +205,14 @@ def library():
     """Media library page."""
     music_files = db.get_all_media_files('music')
     announcement_files = db.get_all_media_files('announcement')
+    
+    music_fmt = _format_media_files(music_files)
+    announcements_fmt = _format_media_files(announcement_files)
+    
     return render_template('library.html',
                          active_page='library',
-                         music_files=music_files,
-                         announcement_files=announcement_files)
+                         music_files=music_fmt,
+                         announcement_files=announcements_fmt)
 
 @app.route('/settings')
 @login_required
