@@ -18,7 +18,7 @@ AnnounceFlow is an IoT solution for automated music and announcement broadcastin
 |---------|-------------|
 | **Web Dashboard** | Dark theme, responsive, Turkish UI, mobile-friendly |
 | **Scheduling** | One-time, recurring (weekly), interval modes |
-| **Media Library** | Upload, categorize (Music/Announcement), delete via web |
+| **Media Library** | Upload (MP3, WAV, AIFF, M4A, etc.), categorized, auto-convert to MP3 for Pi |
 | **Live Volume** | Logarithmic curve for natural audio control (ALSA) |
 | **Desktop Agent** | Quick access via Tkinter GUI (PyInstaller EXE) |
 | **IoT Ready** | Headless mode, systemd service, auto-start on boot |
@@ -107,11 +107,13 @@ python build_agent.py
 
 **config.json:**
 ```json
+```json
 {
-    "volume": 80,
-    "web_port": 5001,
-    "scheduler_interval_seconds": 30
+    "admin_username": "admin",
+    "admin_password": "admin123",
+    "secret_key": "gizli-anahtar"
 }
+```
 ```
 
 **deploy.sh:** Edit `PI_USER` and `PI_HOST` for your Pi connection.
@@ -128,7 +130,7 @@ python build_agent.py
 
 ## Version
 
-**v1.3.1** · Logarithmic volume control · mpg123 audio engine
+**v2.2.3** · UI/Date fixes · Logarithmic volume control · mpg123 audio engine · Multi-format support (MP3, WAV, AIFF, M4A, etc.)
 
 ---
 Proprietary. All rights reserved.
