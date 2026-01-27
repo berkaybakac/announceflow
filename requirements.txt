@@ -1,0 +1,13 @@
+# Core Framework
+flask>=3.0.0
+waitress>=3.0.0
+
+# Dependencies
+requests>=2.31.0
+pygame>=2.5.0
+pystray>=0.19.0
+Pillow>=10.0.0
+
+# System Dependencies (Pre-installed on Pi, required for operation)
+# - ffmpeg (for audio conversion & duration)
+# - mpg123 (for audio playback)

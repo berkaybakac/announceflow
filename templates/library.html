@@ -1,0 +1,153 @@
+{% extends "base.html" %}
+{% block title %}Medya Kütüphanesi - AnnounceFlow{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1 class="page-title">📁 Medya Kütüphanesi</h1>
+    <p class="page-subtitle">Müzik ve anons dosyalarınızı yönetin</p>
+</div>
+
+<!-- Upload Section -->
+<div class="card animate-in">
+    <div class="card-header">
+        <h3 class="card-title">📤 Dosya Yükle</h3>
+    </div>
+
+    <form action="/api/media/upload" method="POST" enctype="multipart/form-data">
+        <div style="display: grid; grid-template-columns: 1fr 200px auto; gap: 16px; align-items: end;">
+            <div class="form-group" style="margin: 0;">
+                <label class="form-label">Dosya Seç (MP3)</label>
+                <input type="file" class="form-input" name="file" accept=".mp3,.wav,.ogg,.aiff,.aif,.flac,.m4a,.wma,.mp2" required style="padding: 10px;">
+            </div>
+
+            <div class="form-group" style="margin: 0;">
+                <label class="form-label">Tür</label>
+                <select class="form-select" name="media_type" required>
+                    <option value="music">🎵 Müzik</option>
+                    <option value="announcement">📢 Anons</option>
+                </select>
+            </div>
+
+            <button type="submit" class="btn btn-success">
+                📤 Yükle
+            </button>
+        </div>
+    </form>
+</div>
+
+<!-- Music Files -->
+<div class="card animate-in">
+    <div class="card-header">
+        <h3 class="card-title">🎵 Müzik Dosyaları</h3>
+        <span class="badge badge-primary">{{ music_files|length }} dosya</span>
+    </div>
+
+    {% if music_files %}
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Dosya Adı</th>
+                <th>Eklenme Tarihi</th>
+                <th>İşlem</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for file in music_files %}
+            <tr>
+                <td>
+                    <div style="display: flex; align-items: center; gap: 12px;">
+                        <span style="font-size: 24px;">🎵</span>
+                        <strong>{{ file.filename }}</strong>
+                    </div>
+                </td>
+                <td style="color: var(--text-muted);">{{ file.created_at }}</td>
+                <td>
+                    <button class="btn btn-outline btn-sm" onclick="playFile({{ file.id }})">
+                        ▶️ Çal
+                    </button>
+                    <form action="/api/media/{{ file.id }}/delete" method="POST" style="display: inline;">
+                        <button type="submit" class="btn btn-danger btn-sm"
+                            onclick="return confirm('Bu dosyayı silmek istediğinize emin misiniz?')">
+                            🗑️
+                        </button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div style="text-align: center; padding: 40px; color: var(--text-muted);">
+        <div style="font-size: 48px; margin-bottom: 16px;">🎵</div>
+        <p>Henüz müzik dosyası yok.</p>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Announcement Files -->
+<div class="card animate-in">
+    <div class="card-header">
+        <h3 class="card-title">📢 Anons Dosyaları</h3>
+        <span class="badge badge-warning">{{ announcement_files|length }} dosya</span>
+    </div>
+
+    {% if announcement_files %}
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Dosya Adı</th>
+                <th>Eklenme Tarihi</th>
+                <th>İşlem</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for file in announcement_files %}
+            <tr>
+                <td>
+                    <div style="display: flex; align-items: center; gap: 12px;">
+                        <span style="font-size: 24px;">📢</span>
+                        <strong>{{ file.filename }}</strong>
+                    </div>
+                </td>
+                <td style="color: var(--text-muted);">{{ file.created_at }}</td>
+                <td>
+                    <button class="btn btn-outline btn-sm" onclick="playFile({{ file.id }})">
+                        ▶️ Çal
+                    </button>
+                    <form action="/api/media/{{ file.id }}/delete" method="POST" style="display: inline;">
+                        <button type="submit" class="btn btn-danger btn-sm"
+                            onclick="return confirm('Bu dosyayı silmek istediğinize emin misiniz?')">
+                            🗑️
+                        </button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div style="text-align: center; padding: 40px; color: var(--text-muted);">
+        <div style="font-size: 48px; margin-bottom: 16px;">📢</div>
+        <p>Henüz anons dosyası yok.</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    async function playFile(mediaId) {
+        try {
+            await fetch('/api/play', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ media_id: mediaId })
+            });
+            // Show feedback
+            alert('Çalınıyor!');
+        } catch (error) {
+            console.error('Error playing file:', error);
+        }
+    }
+</script>
+{% endblock %}

@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+{% block title %}Tek Seferlik Planlama - AnnounceFlow{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1 class="page-title">📅 Tek Seferlik Planlama</h1>
+    <p class="page-subtitle">Belirli bir tarih ve saatte çalacak planlar oluşturun</p>
+</div>
+
+<!-- Add New Schedule -->
+<div class="card animate-in">
+    <div class="card-header">
+        <h3 class="card-title">➕ Yeni Plan Ekle</h3>
+    </div>
+
+    <form action="/api/schedules/one-time" method="POST">
+        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 16px; align-items: end;">
+            <div class="form-group" style="margin: 0;">
+                <label class="form-label">Dosya</label>
+                <select class="form-select" name="media_id" required>
+                    <option value="">-- Dosya Seçin --</option>
+                    {% for file in media_files %}
+                    <option value="{{ file.id }}">{{ file.filename }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="form-group" style="margin: 0;">
+                <label class="form-label">Tarih</label>
+                <input type="date" class="form-input" name="date" required>
+            </div>
+
+            <div class="form-group" style="margin: 0;">
+                <label class="form-label">Saat</label>
+                <input type="time" class="form-input" name="time" required>
+            </div>
+
+            <button type="submit" class="btn btn-primary">
+                ➕ Planla
+            </button>
+        </div>
+    </form>
+</div>
+
+<!-- Scheduled Items -->
+<div class="card animate-in">
+    <div class="card-header">
+        <h3 class="card-title">📋 Planlanan Çalmalar</h3>
+        <span class="badge badge-primary">{{ schedules|length }} plan</span>
+    </div>
+
+    {% if schedules %}
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Dosya</th>
+                <th>Planlanan Zaman</th>
+                <th>Durum</th>
+                <th>İşlem</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for schedule in schedules %}
+            <tr>
+                <td>
+                    <strong>{{ schedule.filename }}</strong>
+                </td>
+                <td>{{ schedule.scheduled_datetime.replace('T', ' ') }}</td>
+                <td>
+                    {% if schedule.status == 'pending' %}
+                    <span class="badge badge-warning">⏳ Bekliyor</span>
+                    {% elif schedule.status == 'played' %}
+                    <span class="badge badge-success">✅ Çalındı</span>
+                    {% else %}
+                    <span class="badge badge-danger">❌ İptal</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if schedule.status == 'pending' %}
+                    <form action="/api/schedules/one-time/{{ schedule.id }}/cancel" method="POST"
+                        style="display: inline;">
+                        <button type="submit" class="btn btn-outline btn-sm"
+                            onclick="return confirm('Bu planı iptal etmek istediğinize emin misiniz?')">
+                            İptal
+                        </button>
+                    </form>
+                    {% endif %}
+                    <form action="/api/schedules/one-time/{{ schedule.id }}/delete" method="POST"
+                        style="display: inline;">
+                        <button type="submit" class="btn btn-danger btn-sm"
+                            onclick="return confirm('Bu planı silmek istediğinize emin misiniz?')">
+                            🗑️
+                        </button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div style="text-align: center; padding: 40px; color: var(--text-muted);">
+        <div style="font-size: 48px; margin-bottom: 16px;">📅</div>
+        <p>Henüz planlanmış bir çalma yok.</p>
+        <p>Yukarıdaki formu kullanarak yeni bir plan ekleyin.</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // Set minimum date to today
+    document.addEventListener('DOMContentLoaded', () => {
+        const dateInput = document.querySelector('input[name="date"]');
+        const today = new Date().toISOString().split('T')[0];
+        dateInput.setAttribute('min', today);
+        dateInput.value = today;
+
+        // Set default time to next hour
+        const timeInput = document.querySelector('input[name="time"]');
+        const now = new Date();
+        now.setHours(now.getHours() + 1, 0, 0, 0);
+        timeInput.value = now.toTimeString().slice(0, 5);
+    });
+</script>
+{% endblock %}

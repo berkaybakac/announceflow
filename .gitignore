@@ -1,0 +1,30 @@
+# System & Runtime
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+*.db
+.DS_Store
+Thumbs.db
+venv/
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Project Config & Docs
+config.json
+SUNUM_REHBERI.md
+
+# Media (Ignore all except placeholder)
+media/*
+!media/.gitkeep
+
+# Build
+agent/build/
+agent/dist/
+*.spec
+*.exe

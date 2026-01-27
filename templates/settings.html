@@ -1,0 +1,152 @@
+{% extends "base.html" %}
+{% block title %}Ayarlar - AnnounceFlow{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1 class="page-title">⚙️ Ayarlar</h1>
+    <p class="page-subtitle">Sistem ayarlarını yapılandırın</p>
+</div>
+
+<!-- Volume Control -->
+<div class="card animate-in">
+    <div class="card-header">
+        <h3 class="card-title">🔊 Ses Seviyesi</h3>
+        <span class="badge badge-primary" id="volumeBadge">{{ volume }}%</span>
+    </div>
+
+    <div style="padding: 20px 0;">
+        <div style="display: flex; align-items: center; gap: 20px;">
+            <span style="font-size: 24px;">🔈</span>
+            <input type="range" class="volume-slider" id="mainVolumeSlider" min="0" max="100" value="{{ volume }}"
+                style="flex: 1;" onchange="updateVolume(this.value)">
+            <span style="font-size: 24px;">🔊</span>
+        </div>
+
+        <div
+            style="display: flex; justify-content: space-between; margin-top: 12px; color: var(--text-muted); font-size: 0.85rem;">
+            <span>0%</span>
+            <span>50%</span>
+            <span>100%</span>
+        </div>
+    </div>
+
+    <div style="display: flex; gap: 12px; margin-top: 16px;">
+        <button class="btn btn-outline btn-sm" onclick="setQuickVolume(25)">25%</button>
+        <button class="btn btn-outline btn-sm" onclick="setQuickVolume(50)">50%</button>
+        <button class="btn btn-outline btn-sm" onclick="setQuickVolume(75)">75%</button>
+        <button class="btn btn-outline btn-sm" onclick="setQuickVolume(100)">100%</button>
+    </div>
+</div>
+
+<!-- System Status -->
+<div class="card animate-in">
+    <div class="card-header">
+        <h3 class="card-title">📊 Sistem Durumu</h3>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px;">
+        <div style="text-align: center; padding: 20px; background: var(--bg-input); border-radius: 12px;">
+            <div style="font-size: 32px; margin-bottom: 8px;">🎵</div>
+            <div style="font-size: 1.5rem; font-weight: 700; color: var(--primary);">{{ total_music }}</div>
+            <div style="color: var(--text-muted); font-size: 0.9rem;">Müzik Dosyası</div>
+        </div>
+
+        <div style="text-align: center; padding: 20px; background: var(--bg-input); border-radius: 12px;">
+            <div style="font-size: 32px; margin-bottom: 8px;">📢</div>
+            <div style="font-size: 1.5rem; font-weight: 700; color: var(--warning);">{{ total_announcements }}</div>
+            <div style="color: var(--text-muted); font-size: 0.9rem;">Anons Dosyası</div>
+        </div>
+
+        <div style="text-align: center; padding: 20px; background: var(--bg-input); border-radius: 12px;">
+            <div style="font-size: 32px; margin-bottom: 8px;">📅</div>
+            <div style="font-size: 1.5rem; font-weight: 700; color: var(--success);">{{ total_schedules }}</div>
+            <div style="color: var(--text-muted); font-size: 0.9rem;">Aktif Plan</div>
+        </div>
+    </div>
+</div>
+
+<!-- Scheduler Status -->
+<div class="card animate-in">
+    <div class="card-header">
+        <h3 class="card-title">⏰ Zamanlayıcı</h3>
+        <span class="badge badge-success">Çalışıyor</span>
+    </div>
+
+    <div style="color: var(--text-secondary);">
+        <p>Zamanlayıcı her 30 saniyede bir planları kontrol eder ve zamanı gelen dosyaları otomatik çalar.</p>
+
+        <div style="margin-top: 16px; padding: 16px; background: var(--bg-input); border-radius: 10px;">
+            <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                <span>Kontrol Aralığı:</span>
+                <strong>30 saniye</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between;">
+                <span>Gecikme Toleransı:</span>
+                <strong>1 dakika</strong>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Admin Credentials -->
+<div class="card animate-in">
+    <div class="card-header">
+        <h3 class="card-title">🔐 Yönetici Bilgileri</h3>
+    </div>
+
+    <form action="/api/settings/credentials" method="POST">
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+            <div class="form-group" style="margin: 0;">
+                <label class="form-label">Kullanıcı Adı</label>
+                <input type="text" class="form-input" name="username" value="{{ admin_username }}" required>
+            </div>
+
+            <div class="form-group" style="margin: 0;">
+                <label class="form-label">Yeni Şifre</label>
+                <input type="password" class="form-input" name="password" placeholder="Değiştirmek için doldurun">
+            </div>
+        </div>
+
+        <button type="submit" class="btn btn-primary" style="margin-top: 16px;">
+            💾 Kaydet
+        </button>
+    </form>
+</div>
+
+<!-- About -->
+<div class="card animate-in">
+    <div class="card-header">
+        <h3 class="card-title">ℹ️ Hakkında</h3>
+    </div>
+
+    <div style="text-align: center; padding: 20px; color: var(--text-secondary);">
+        <div style="font-size: 48px; margin-bottom: 16px;">🎵</div>
+        <h4 style="font-size: 1.25rem; margin-bottom: 8px; color: var(--text-primary);">AnnounceFlow</h4>
+        <p>Planlı Müzik & Anons Sistemi</p>
+        <p style="font-size: 0.85rem; margin-top: 16px;">Versiyon 1.0.0</p>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    async function updateVolume(value) {
+        document.getElementById('volumeBadge').textContent = `${value}%`;
+
+        try {
+            await fetch('/api/volume', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ volume: parseInt(value) })
+            });
+        } catch (error) {
+            console.error('Error updating volume:', error);
+        }
+    }
+
+    function setQuickVolume(value) {
+        document.getElementById('mainVolumeSlider').value = value;
+        updateVolume(value);
+    }
+</script>
+{% endblock %}

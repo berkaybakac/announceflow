@@ -1,0 +1,282 @@
+{% extends "base.html" %}
+{% block title %}Şu An Çalıyor - AnnounceFlow{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1 class="page-title">Şu An Çalıyor</h1>
+    <p class="page-subtitle">Oynatıcı kontrolü ve hızlı çalma</p>
+</div>
+
+<!-- Now Playing Widget -->
+<div class="now-playing-widget animate-in" id="nowPlayingWidget">
+    <div class="now-playing-cover" id="coverArt">
+        🎵
+    </div>
+
+    <h2 class="now-playing-title" id="trackTitle">Çalan parça yok</h2>
+    <p class="now-playing-status" id="trackStatus">Bir dosya seçerek başlayın</p>
+
+    <!-- Player Controls -->
+    <div class="player-controls">
+        <button class="control-btn" onclick="stopPlayback()" title="Durdur (Stop)">⏹️</button>
+        <!-- Only show Play button (mpg123 doesn't support Pause) -->
+        <div id="playBtnContainer">
+            <button class="control-btn control-btn-play" onclick="startPlayback()" id="playBtn"
+                title="Oynat">▶️</button>
+        </div>
+    </div>
+
+    <!-- Progress Bar -->
+    <div class="progress-bar">
+        <div class="progress-fill" id="progressFill" style="width: 0%;"></div>
+    </div>
+    <div class="progress-time">
+        <span id="currentTime">0:00</span>
+        <span id="totalTime">0:00</span>
+    </div>
+
+    <!-- Volume -->
+    <div style="margin-top: 24px;">
+        <div style="display: flex; align-items: center; gap: 16px;">
+            <span>🔊</span>
+            <input type="range" class="volume-slider" id="volumeSlider" min="0" max="100" value="80"
+                onchange="setVolume(this.value)">
+            <span id="volumeValue">80%</span>
+        </div>
+    </div>
+</div>
+
+<!-- Quick Play Section -->
+<div class="card animate-in" style="margin-top: 24px;">
+    <div class="card-header">
+        <h3 class="card-title">🚀 Hızlı Çal</h3>
+    </div>
+
+    <div style="display: grid; grid-template-columns: 1fr auto; gap: 16px; align-items: end;">
+        <div class="form-group" style="margin: 0;">
+            <label class="form-label">Dosya Seç</label>
+            <select class="form-select" id="quickPlaySelect">
+                <option value="">-- Dosya Seçin --</option>
+                {% for file in media_files %}
+                <option value="{{ file.id }}">{{ file.filename }} ({{ file.media_type }})</option>
+                {% endfor %}
+            </select>
+        </div>
+        <button class="btn btn-success" onclick="quickPlay()">
+            ▶️ Şimdi Çal
+        </button>
+    </div>
+</div>
+
+<!-- Recent Plays -->
+<div class="card animate-in" style="margin-top: 24px;">
+    <div class="card-header">
+        <h3 class="card-title">📋 Yaklaşan Planlar</h3>
+        <a href="/schedules/one-time" class="btn btn-outline btn-sm">Tümünü Gör</a>
+    </div>
+
+    {% if upcoming_schedules %}
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Dosya</th>
+                <th>Tarih/Saat</th>
+                <th>Durum</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for schedule in upcoming_schedules[:5] %}
+            <tr>
+                <td>{{ schedule.filename }}</td>
+                <td>{{ schedule.scheduled_datetime }}</td>
+                <td><span class="badge badge-warning">Bekliyor</span></td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p style="color: var(--text-muted); text-align: center; padding: 20px;">
+        Planlanmış herhangi bir oynatma yok.
+    </p>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    let isPlaying = false;
+    let currentMediaId = null;
+    let playStartedAt = 0;  // Unix timestamp ms when playback started
+    let totalDuration = 0;  // Duration in seconds
+    let timerInterval = null;
+
+    // Format seconds to M:SS
+    function formatTime(seconds) {
+        if (!seconds || seconds < 0) seconds = 0;
+        const mins = Math.floor(seconds / 60);
+        const secs = Math.floor(seconds % 60);
+        return `${mins}:${secs.toString().padStart(2, '0')}`;
+    }
+
+    // Update progress bar and time display based on elapsed time
+    function updateProgressDisplay() {
+        if (!isPlaying || !playStartedAt || !totalDuration) return;
+
+        const now = Date.now();
+        const elapsed = (now - playStartedAt) / 1000;  // seconds
+        const remaining = Math.max(0, totalDuration - elapsed);
+        const progress = Math.min(100, (elapsed / totalDuration) * 100);
+
+        document.getElementById('progressFill').style.width = `${progress}%`;
+        document.getElementById('currentTime').textContent = formatTime(elapsed);
+        document.getElementById('totalTime').textContent = formatTime(totalDuration);
+    }
+
+    // Start timer for smooth progress updates
+    function startProgressTimer() {
+        if (timerInterval) clearInterval(timerInterval);
+        timerInterval = setInterval(updateProgressDisplay, 500);  // Update every 500ms
+    }
+
+    // Stop timer
+    function stopProgressTimer() {
+        if (timerInterval) {
+            clearInterval(timerInterval);
+            timerInterval = null;
+        }
+    }
+
+    // Fetch and update player state
+    async function updatePlayerState() {
+        try {
+            const response = await fetch('/api/now-playing');
+            const data = await response.json();
+
+            const titleEl = document.getElementById('trackTitle');
+            const statusEl = document.getElementById('trackStatus');
+            const playBtn = document.getElementById('playBtn');
+            const playBtnContainer = document.getElementById('playBtnContainer');
+            const progressFill = document.getElementById('progressFill');
+            const currentTimeEl = document.getElementById('currentTime');
+            const totalTimeEl = document.getElementById('totalTime');
+            const volumeSlider = document.getElementById('volumeSlider');
+            const volumeValue = document.getElementById('volumeValue');
+
+            if (data.filename) {
+                titleEl.textContent = data.filename;
+                statusEl.textContent = data.is_playing ? 'Çalıyor... (Stop ile durdurun)' : 'Durduruldu';
+                currentMediaId = data.current_media_id;
+                isPlaying = data.is_playing;
+
+                // Hide Play button while playing
+                if (isPlaying) {
+                    playBtnContainer.style.display = 'none';
+                } else {
+                    playBtnContainer.style.display = 'block';
+                }
+
+                // Update timer data from API
+                if (data.is_playing && data.started_at && data.duration_seconds) {
+                    playStartedAt = data.started_at;  // Unix ms from server
+                    totalDuration = data.duration_seconds;
+                    updateProgressDisplay();
+                    startProgressTimer();
+                } else {
+                    stopProgressTimer();
+                    if (!data.is_playing) {
+                        progressFill.style.width = '0%';
+                        currentTimeEl.textContent = '0:00';
+                        totalTimeEl.textContent = data.duration_seconds ? formatTime(data.duration_seconds) : '0:00';
+                    }
+                }
+            } else {
+                titleEl.textContent = 'Çalan parça yok';
+                statusEl.textContent = 'Bir dosya seçerek başlayın';
+                playBtnContainer.style.display = 'none';
+                isPlaying = false;
+                stopProgressTimer();
+                progressFill.style.width = '0%';
+                currentTimeEl.textContent = '0:00';
+                totalTimeEl.textContent = '0:00';
+            }
+
+            volumeSlider.value = data.volume || 80;
+            volumeValue.textContent = `${data.volume || 80}%`;
+
+        } catch (error) {
+            console.error('Error fetching player state:', error);
+        }
+    }
+
+    async function startPlayback() {
+        // Logic handled by quickPlay or recurring schedule mainly. 
+        // This is just a fallback valid only if we have a "current file" that is stopped?
+        // Actually, for mpg123, "Resume" is impossible. "Start" means start over?
+        // For simplicity, Play button on Now Playing is only useful if we have a track loaded?
+        // Let's keep it simple: if track loaded but stopped, Play restarts it?
+
+        // Simpler approach: Play button here is redundant if we don't have "Resume".
+        // Use Quick Play section for starting new stuff.
+        // But let's keep it if user wants to re-play the last track.
+        if (currentMediaId) {
+            try {
+                await fetch('/api/play', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ media_id: parseInt(currentMediaId) })
+                });
+                updatePlayerState();
+            } catch (error) {
+                console.error('Error playing:', error);
+            }
+        }
+    }
+
+    async function stopPlayback() {
+        try {
+            await fetch('/api/stop', { method: 'POST' });
+            updatePlayerState();
+        } catch (error) {
+            console.error('Error stopping playback:', error);
+        }
+    }
+
+    async function setVolume(value) {
+        document.getElementById('volumeValue').textContent = `${value}%`;
+        try {
+            await fetch('/api/volume', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ volume: parseInt(value) })
+            });
+        } catch (error) {
+            console.error('Error setting volume:', error);
+        }
+    }
+
+    async function quickPlay() {
+        const select = document.getElementById('quickPlaySelect');
+        const mediaId = select.value;
+
+        if (!mediaId) {
+            alert('Lütfen bir dosya seçin');
+            return;
+        }
+
+        try {
+            await fetch('/api/play', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ media_id: parseInt(mediaId) })
+            });
+            updatePlayerState();
+        } catch (error) {
+            console.error('Error playing:', error);
+        }
+    }
+
+    // Update state every 2 seconds
+    setInterval(updatePlayerState, 2000);
+    updatePlayerState();
+</script>
+{% endblock %}

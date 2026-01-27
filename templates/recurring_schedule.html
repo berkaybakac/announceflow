@@ -1,0 +1,210 @@
+{% extends "base.html" %}
+{% block title %}Tekrarlı Planlama - AnnounceFlow{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1 class="page-title">🔄 Tekrarlı Planlama</h1>
+    <p class="page-subtitle">Haftanın belirli günlerinde otomatik çalacak planlar</p>
+</div>
+
+<!-- Add New Recurring Schedule -->
+<div class="card animate-in">
+    <div class="card-header">
+        <h3 class="card-title">➕ Yeni Tekrarlı Plan</h3>
+    </div>
+
+    <form action="/api/schedules/recurring" method="POST" id="recurringForm">
+        <div class="form-group">
+            <label class="form-label">Dosya</label>
+            <select class="form-select" name="media_id" required>
+                <option value="">-- Dosya Seçin --</option>
+                {% for file in media_files %}
+                <option value="{{ file.id }}">{{ file.filename }} ({{ file.media_type }})</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label class="form-label">Günler</label>
+            <div class="day-selector">
+                <button type="button" class="day-btn" data-day="0">Pzt</button>
+                <button type="button" class="day-btn" data-day="1">Sal</button>
+                <button type="button" class="day-btn" data-day="2">Çar</button>
+                <button type="button" class="day-btn" data-day="3">Per</button>
+                <button type="button" class="day-btn" data-day="4">Cum</button>
+                <button type="button" class="day-btn" data-day="5">Cmt</button>
+                <button type="button" class="day-btn" data-day="6">Paz</button>
+            </div>
+            <input type="hidden" name="days_of_week" id="selectedDays">
+        </div>
+
+        <div class="form-group">
+            <label class="form-label">Planlama Tipi</label>
+            <div style="display: flex; gap: 16px;">
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                    <input type="radio" name="schedule_type" value="specific" checked onchange="toggleScheduleType()">
+                    <span>Belirli Saatler</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                    <input type="radio" name="schedule_type" value="interval" onchange="toggleScheduleType()">
+                    <span>Aralıklı (Her X dakikada)</span>
+                </label>
+            </div>
+        </div>
+
+        <!-- Specific Times -->
+        <div id="specificTimesSection">
+            <div class="form-group">
+                <label class="form-label">Çalma Saatleri (virgülle ayırın)</label>
+                <input type="text" class="form-input" name="specific_times" placeholder="09:00, 12:00, 15:00, 18:00">
+                <small style="color: var(--text-muted); margin-top: 4px; display: block;">
+                    Örnek: 09:00, 12:00, 15:00, 18:00
+                </small>
+            </div>
+        </div>
+
+        <!-- Interval Based -->
+        <div id="intervalSection" style="display: none;">
+            <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px;">
+                <div class="form-group" style="margin: 0;">
+                    <label class="form-label">Başlangıç Saati</label>
+                    <input type="time" class="form-input" name="start_time" value="09:00">
+                </div>
+                <div class="form-group" style="margin: 0;">
+                    <label class="form-label">Bitiş Saati</label>
+                    <input type="time" class="form-input" name="end_time" value="18:00">
+                </div>
+                <div class="form-group" style="margin: 0;">
+                    <label class="form-label">Aralık (dakika)</label>
+                    <input type="number" class="form-input" name="interval_minutes" value="60" min="5" max="480">
+                </div>
+            </div>
+        </div>
+
+        <button type="submit" class="btn btn-primary btn-lg" style="margin-top: 16px;">
+            ➕ Tekrarlı Plan Oluştur
+        </button>
+    </form>
+</div>
+
+<!-- Existing Recurring Schedules -->
+<div class="card animate-in">
+    <div class="card-header">
+        <h3 class="card-title">📋 Aktif Tekrarlı Planlar</h3>
+        <span class="badge badge-primary">{{ schedules|length }} plan</span>
+    </div>
+
+    {% if schedules %}
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Dosya</th>
+                <th>Günler</th>
+                <th>Zamanlama</th>
+                <th>Durum</th>
+                <th>İşlem</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for schedule in schedules %}
+            <tr>
+                <td><strong>{{ schedule.filename }}</strong></td>
+                <td>
+                    {% set day_names = ['Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt', 'Paz'] %}
+                    {% for day in schedule.days_of_week %}
+                    <span class="badge badge-primary" style="margin: 2px;">{{ day_names[day] }}</span>
+                    {% endfor %}
+                </td>
+                <td>
+                    {% if schedule.specific_times %}
+                    {{ schedule.specific_times | join(', ') }}
+                    {% else %}
+                    {{ schedule.start_time }} - {{ schedule.end_time or '23:59' }} (her {{ schedule.interval_minutes }}
+                    dk)
+                    {% endif %}
+                </td>
+                <td>
+                    {% if schedule.is_active %}
+                    <span class="badge badge-success">✅ Aktif</span>
+                    {% else %}
+                    <span class="badge badge-danger">⏸️ Pasif</span>
+                    {% endif %}
+                </td>
+                <td>
+                    <form action="/api/schedules/recurring/{{ schedule.id }}/toggle" method="POST"
+                        style="display: inline;">
+                        <button type="submit" class="btn btn-outline btn-sm">
+                            {% if schedule.is_active %}Devre Dışı{% else %}Etkinleştir{% endif %}
+                        </button>
+                    </form>
+                    <form action="/api/schedules/recurring/{{ schedule.id }}/delete" method="POST"
+                        style="display: inline;">
+                        <button type="submit" class="btn btn-danger btn-sm"
+                            onclick="return confirm('Bu planı silmek istediğinize emin misiniz?')">
+                            🗑️
+                        </button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div style="text-align: center; padding: 40px; color: var(--text-muted);">
+        <div style="font-size: 48px; margin-bottom: 16px;">🔄</div>
+        <p>Henüz tekrarlı plan yok.</p>
+        <p>Yukarıdaki formu kullanarak yeni bir plan oluşturun.</p>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+    // Day selector
+    const dayButtons = document.querySelectorAll('.day-btn');
+    const selectedDaysInput = document.getElementById('selectedDays');
+    let selectedDays = [];
+
+    dayButtons.forEach(btn => {
+        btn.addEventListener('click', () => {
+            const day = parseInt(btn.dataset.day);
+
+            if (btn.classList.contains('active')) {
+                btn.classList.remove('active');
+                selectedDays = selectedDays.filter(d => d !== day);
+            } else {
+                btn.classList.add('active');
+                selectedDays.push(day);
+            }
+
+            selectedDays.sort();
+            selectedDaysInput.value = JSON.stringify(selectedDays);
+        });
+    });
+
+    // Schedule type toggle
+    function toggleScheduleType() {
+        const scheduleType = document.querySelector('input[name="schedule_type"]:checked').value;
+        const specificSection = document.getElementById('specificTimesSection');
+        const intervalSection = document.getElementById('intervalSection');
+
+        if (scheduleType === 'specific') {
+            specificSection.style.display = 'block';
+            intervalSection.style.display = 'none';
+        } else {
+            specificSection.style.display = 'none';
+            intervalSection.style.display = 'block';
+        }
+    }
+
+    // Form validation
+    document.getElementById('recurringForm').addEventListener('submit', (e) => {
+        if (selectedDays.length === 0) {
+            e.preventDefault();
+            alert('Lütfen en az bir gün seçin');
+            return;
+        }
+    });
+</script>
+{% endblock %}
