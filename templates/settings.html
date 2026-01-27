@@ -94,7 +94,8 @@
         <h3 class="card-title">🔐 Yönetici Bilgileri</h3>
     </div>
 
-    <form action="/api/settings/credentials" method="POST">
+    <form action="/api/settings/credentials" method="POST"
+        onsubmit="return confirm('⚠️ Şifrenizi değiştirmek üzeresiniz!\n\nYeni şifrenizi unutursanız sisteme ve panele erişemezsiniz.\nPosta ile kurtarma seçeneği YOKTUR.\n\nDevam etmek istediğinize emin misiniz?');">
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
             <div class="form-group" style="margin: 0;">
                 <label class="form-label">Kullanıcı Adı</label>
@@ -123,7 +124,7 @@
         <div style="font-size: 48px; margin-bottom: 16px;">🎵</div>
         <h4 style="font-size: 1.25rem; margin-bottom: 8px; color: var(--text-primary);">AnnounceFlow</h4>
         <p>Planlı Müzik & Anons Sistemi</p>
-        <p style="font-size: 0.85rem; margin-top: 16px;">Versiyon 1.0.0</p>
+        <p style="font-size: 0.85rem; margin-top: 16px;">Versiyon v2.2.4</p>
     </div>
 </div>
 {% endblock %}

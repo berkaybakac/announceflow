@@ -535,10 +535,14 @@ def api_update_credentials():
     username = request.form.get('username')
     password = request.form.get('password')
     
-    if username:
+    import logging
+    
+    if username and username != config.get('admin_username'):
+        logging.info(f"Admin username changed from {config.get('admin_username')} to {username}")
         config['admin_username'] = username
     
     if password:
+        logging.info("Admin password changed")
         config['admin_password'] = password
     
     save_config(config)
