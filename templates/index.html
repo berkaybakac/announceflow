@@ -88,7 +88,7 @@
             {% for schedule in upcoming_schedules[:5] %}
             <tr>
                 <td>{{ schedule.filename }}</td>
-                <td>{{ schedule.scheduled_datetime }}</td>
+                <td>{{ schedule.display_datetime }}</td>
                 <td><span class="badge badge-warning">Bekliyor</span></td>
             </tr>
             {% endfor %}

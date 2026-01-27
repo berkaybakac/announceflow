@@ -117,6 +117,28 @@ def logout():
     return redirect(url_for('login'))
 
 
+
+def _format_schedules(schedules):
+    """Format schedule datetime for display (DD.MM.YYYY HH:MM)."""
+    formatted = []
+    for s in schedules:
+        s_dict = dict(s)
+        try:
+            dt_str = s_dict['scheduled_datetime']
+            # Handle T separator if present
+            dt_str = dt_str.replace('T', ' ')
+            # Parse (try with constraints)
+            try:
+                dt = datetime.strptime(dt_str, '%Y-%m-%d %H:%M:%S')
+            except ValueError:
+                dt = datetime.strptime(dt_str, '%Y-%m-%d %H:%M')
+            
+            s_dict['display_datetime'] = dt.strftime('%d.%m.%Y %H:%M')
+        except Exception:
+            s_dict['display_datetime'] = s_dict['scheduled_datetime']
+        formatted.append(s_dict)
+    return formatted
+
 # ============ PAGE ROUTES ============
 
 @app.route('/')
@@ -125,10 +147,11 @@ def index():
     """Now Playing page."""
     media_files = db.get_all_media_files()
     upcoming = db.get_pending_one_time_schedules()
+    upcoming_formatted = _format_schedules(upcoming)
     return render_template('index.html', 
                          active_page='now-playing',
                          media_files=media_files,
-                         upcoming_schedules=upcoming)
+                         upcoming_schedules=upcoming_formatted)
 
 @app.route('/schedules/one-time')
 @login_required
@@ -136,10 +159,11 @@ def one_time_schedules():
     """One-time schedules page."""
     media_files = db.get_all_media_files()
     schedules = db.get_all_one_time_schedules()
+    schedules_formatted = _format_schedules(schedules)
     return render_template('one_time_schedule.html',
                          active_page='one-time',
                          media_files=media_files,
-                         schedules=schedules)
+                         schedules=schedules_formatted)
 
 @app.route('/schedules/recurring')
 @login_required
