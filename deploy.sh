@@ -8,12 +8,22 @@ set -e  # Exit on error
 
 # Configuration
 PI_USER="admin"
-PI_HOST="aflow.local"
+# Use 1st argument as host if provided, else default
+if [ -n "$1" ] && [ "$1" != "local" ]; then
+    PI_HOST="$1"
+else
+    PI_HOST="aflow.local"
+fi
+
 DEST_DIR="/home/${PI_USER}/announceflow"
 SERVICE_NAME="announceflow.service"
 
-# SSH options: Force IPv4 to avoid mDNS IPv6 timeout issues
-SSH_OPTS="-4 -o StrictHostKeyChecking=accept-new"
+# SSH Multiplexing to ask for password only once
+SOCKET="/tmp/aflow_ssh_socket_$$"
+SSH_OPTS="-4 -o StrictHostKeyChecking=accept-new -o ControlPath=$SOCKET -o ControlMaster=auto -o ControlPersist=600"
+
+# Cleanup socket on exit
+trap "rm -f $SOCKET" EXIT
 
 echo "========================================"
 echo " AnnounceFlow - Deployment Script"
@@ -82,20 +92,17 @@ EOF
 scp ${SSH_OPTS} announceflow.service ${PI_USER}@${PI_HOST}:${DEST_DIR}/
 
 echo ""
-echo "[5/5] Setting up systemd service..."
-ssh ${SSH_OPTS} ${PI_USER}@${PI_HOST} "sudo cp ${DEST_DIR}/announceflow.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable announceflow"
+
+echo ""
+echo "[6/5] Restarting announceflow service..."
+ssh ${SSH_OPTS} ${PI_USER}@${PI_HOST} "sudo systemctl restart announceflow && sudo systemctl status announceflow --no-pager | head -n 10"
 
 echo ""
 echo "========================================"
-echo " Deployment Complete!"
+echo " Deployment & Restart Complete!"
 echo "========================================"
 echo ""
-echo "To start the service:"
-echo "  ssh ${PI_USER}@${PI_HOST}"
-echo "  sudo systemctl start announceflow"
+echo "Web panel: http://${PI_HOST}:5001"
 echo ""
-echo "Web panel will be available at:"
-echo "  http://${PI_HOST}:5001"
-echo ""
-echo "To check status: sudo systemctl status announceflow"
-echo "To view logs:    tail -f ~/announceflow/announceflow.log"
+echo "To view logs: tail -f ~/announceflow/announceflow.log"
+

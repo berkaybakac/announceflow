@@ -1,136 +1,98 @@
 # AnnounceFlow
 
-**Enterprise Scheduled Audio and Announcement System for Workplaces**
+**Enterprise Automated Broadcast System v1.5.0**
 
 [![Python](https://img.shields.io/badge/Python-3.9+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
 [![Raspberry Pi](https://img.shields.io/badge/Raspberry_Pi-4-A22846?style=for-the-badge&logo=raspberrypi&logoColor=white)](https://raspberrypi.org)
 [![mpg123](https://img.shields.io/badge/mpg123-Audio_Engine-00AA00?style=for-the-badge)](https://mpg123.de)
+[![Release](https://img.shields.io/badge/release-v1.5.0-blue?style=for-the-badge)](https://github.com/berkaybakac/announceflow/releases/tag/v1.5.0)
 
-## About
+## Overview
 
-AnnounceFlow is an IoT solution for automated music and announcement broadcasting in workplaces. It runs on Raspberry Pi 4 and is managed through a modern web interface.
+AnnounceFlow is a robust, "set-and-forget" IoT audio automation solution designed for commercial environments (retail, manufacturing, corporate). It provides precision scheduling, dynamic background suppression based on external geolocation events, and a secure, user-friendly web management interface.
 
-**Target Industries:** Manufacturing plants, corporate offices, schools, shopping malls
+Designed for stability on Raspberry Pi 4, it survives power outages and maintains strict operational schedules without human intervention.
 
-## Features
+## Key Features (v1.5.0)
 
 | Feature | Description |
 |---------|-------------|
-| **Web Dashboard** | Dark theme, responsive, Turkish UI, mobile-friendly |
-| **Scheduling** | One-time, recurring (weekly), interval modes |
-| **Media Library** | Upload (MP3, WAV, AIFF, M4A, etc.), categorized, auto-convert to MP3 for Pi |
-| **Live Volume** | Logarithmic curve for natural audio control (ALSA) |
-| **Desktop Agent** | Quick access via Tkinter GUI (PyInstaller EXE) |
-| **IoT Ready** | Headless mode, systemd service, auto-start on boot |
+| **Dynamic System Stats** | Real-time disk/RAM monitoring with `get_system_stats()`. Shows actual capacity, not fake "unlimited". |
+| **24-Hour Time Format** | Flatpickr integration enforces strict HH:MM format across all time inputs. Turkish locale. |
+| **Modern Desktop Agent** | Custom `ModernButton` and `ModernSlider` Canvas widgets for cross-platform UI consistency. |
+| **Dynamic Geolocation** | Automatically fetches city/district data via external API for location-based event handling. |
+| **Operational Hours** | Configurable start/stop times with Flatpickr time picker. |
+| **Advanced Scheduling** | Recurring weekly plans with 24h format and minimum 1-minute intervals. |
+| **Enterprise Security** | Double-verification password changes and secure session management. |
+| **Priority Audio** | Announcements interrupt background music automatically and resume playback seamlessly. |
+| **Media Library** | Support for MP3, WAV, AIFF, M4A with auto-conversion and duration analysis. |
 
 ## Technical Architecture
 
-```
-Browser ──HTTP/REST──▶ Flask (Waitress) ──▶ Scheduler ──▶ mpg123 ──▶ ALSA ──▶ 🔊
-                              │
-                           SQLite
-```
-
-| Layer | Technology |
-|-------|------------|
-| Backend | Python 3.9+, Flask 3.x, Waitress (16 threads) |
-| Frontend | HTML5, CSS3 (Dark Theme), Vanilla JS |
-| Database | SQLite3 |
-| Audio | mpg123 → ALSA (card 2, PCM) with logarithmic volume |
-| Deploy | systemd service, rsync over SSH |
-| Hardware | Raspberry Pi 4 Model B (ARM64), USB/3.5mm audio |
-
-## Project Structure
-
-```
-announceflow/
-├── main.py              # Application entry point
-├── web_panel.py         # Flask routes and API
-├── player.py            # mpg123 + ALSA volume control
-├── scheduler.py         # Background scheduling (30s interval)
-├── database.py          # SQLite ORM
-├── deploy.sh            # Pi deployment script
-├── config.json          # Runtime config
-├── requirements.txt     # Dependencies
-├── templates/           # Jinja2 HTML (dark theme)
-├── media/               # Audio storage (music/, announcements/)
-└── agent/               # Desktop agent (Tkinter)
+```mermaid
+graph LR
+    User[Web Dashboard] --HTTP/AJAX--> Flask[Flask Server]
+    Flask --Read/Write--> DB[(SQLite)]
+    Flask --Query--> API[External Geo API]
+    Scheduler[Background Service] --Check--> DB
+    Scheduler --Control--> Player[Audio Engine]
+    Player --Stream--> ALSA[ALSA / Hardware]
 ```
 
-## Installation
+- **Backend:** Python Flask + Waitress (Production Server)
+- **Frontend:** HTML5/JS with AJAX for asynchronous data loading
+- **Database:** SQLite with automatic schema migration
+- **External Data:** Dynamic JSON fetching for 81 provinces & 900+ districts
+- **Audio Engine:** `mpg123` driven by `pystray` process management
+- **Hardware Integration:** Systemd service on Raspberry Pi OS (Debian Bookworm)
+
+## Installation & Deployment
+
+### Automated Deployment (Raspberry Pi)
+The system includes a single-command deployment script that handles all dependencies, service configuration, and file synchronization.
+
+```bash
+# On your local machine
+./deploy.sh
+```
+*This script uses `rsync` to push code and `ssh` to configure systemd services, pip requirements, and permissions.*
 
 ### Local Development
 ```bash
 git clone <repository_url>
-cd announceflow
 pip install -r requirements.txt
 python main.py
-# → http://localhost:5001 (admin / admin123)
-```
-
-### Production (Raspberry Pi)
-```bash
-./deploy.sh
-# Auto: rsync files, install deps, configure systemd, start service
-```
-
-## Desktop Agent
-
-Windows/macOS desktop app for quick access without browser.
-
-**Features:** Login, file upload, volume control, stop playback, open web panel
-
-**Build:**
-```bash
-cd agent
-pip install pyinstaller
-python build_agent.py
-# Output: dist/AnnounceFlowAgent.exe (Win) or .app (macOS)
+# Access at http://localhost:5001
 ```
 
 ## API Reference
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/now-playing` | GET | Current playback state |
-| `/api/play` | POST | Start playing (body: `{media_id}`) |
-| `/api/stop` | POST | Stop playback |
-| `/api/volume` | POST | Set volume 0-100 (body: `{volume}`) |
-| `/api/media/upload` | POST | Upload audio file |
-| `/api/media/<id>` | DELETE | Delete media |
-| `/api/schedules/one-time` | GET/POST | One-time schedules |
-| `/api/schedules/recurring` | GET/POST | Recurring schedules |
+The system exposes a RESTful API for integration:
 
-> **Note:** `/api/pause` and `/api/resume` are **deprecated** (mpg123 limitation)
+- `GET /api/prayer-times/districts?city=Name` - Fetch districts dynamically
+- `POST /api/settings/working-hours` - Configure operational windows
+- `GET /api/now-playing` - Live playback status
+- `POST /api/play` - Trigger immediate playback
 
 ## Configuration
 
-**config.json:**
-```json
+Located in `config.json` (auto-created):
 ```json
 {
     "admin_username": "admin",
-    "admin_password": "admin123",
-    "secret_key": "gizli-anahtar"
+    "working_hours_enabled": true,
+    "working_hours_start": "09:00",
+    "working_hours_end": "22:00",
+    "prayer_times_city": "Gaziantep",
+    "prayer_times_district": "Sehitkamil"
 }
 ```
-```
 
-**deploy.sh:** Edit `PI_USER` and `PI_HOST` for your Pi connection.
+## Reliability
 
-## Troubleshooting
-
-| Issue | Solution |
-|-------|----------|
-| No audio | `alsamixer -c 2` → unmute PCM, check USB audio |
-| Service down | `sudo systemctl restart announceflow` |
-| Web not loading | Check `journalctl -u announceflow -n 50` |
-| SSH fails | `ssh -4 admin@aflow.local`, clear known_hosts |
-| Low volume feels "dead" | Volume uses logarithmic curve, 50% ≈ 70% hardware |
-
-## Version
-
-**v2.2.3** · UI/Date fixes · Logarithmic volume control · mpg123 audio engine · Multi-format support (MP3, WAV, AIFF, M4A, etc.)
+- **Power Loss Recovery:** Service auto-starts on boot.
+- **Network Resilience:** Caches geolocation data locally; operates offline once configured.
+- **Audio Watchdog:** Monitoring ensures audio queue never stalls.
 
 ---
-Proprietary. All rights reserved.
+© 2026 AnnounceFlow Enterprise Solutions.

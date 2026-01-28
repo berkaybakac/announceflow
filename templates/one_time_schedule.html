@@ -24,9 +24,18 @@
                 <label class="form-label">Dosya</label>
                 <select class="form-select" name="media_id" required>
                     <option value="">-- Dosya Seçin --</option>
-                    {% for file in media_files %}
-                    <option value="{{ file.id }}">{{ file.filename }}</option>
-                    {% endfor %}
+
+                    <optgroup label="📢 Anonslar">
+                        {% for file in media_files if file.media_type == 'announcement' %}
+                        <option value="{{ file.id }}">{{ file.filename }}</option>
+                        {% endfor %}
+                    </optgroup>
+
+                    <optgroup label="🎵 Müzikler">
+                        {% for file in media_files if file.media_type == 'music' %}
+                        <option value="{{ file.id }}">{{ file.filename }}</option>
+                        {% endfor %}
+                    </optgroup>
                 </select>
             </div>
 
@@ -52,14 +61,20 @@
     </form>
 </div>
 
-<!-- Scheduled Items -->
+<!-- Scheduled Music -->
 <div class="card animate-in">
     <div class="card-header">
-        <h3 class="card-title">📋 Planlanan Çalmalar</h3>
-        <span class="badge badge-primary">{{ schedules|length }} plan</span>
+        <h3 class="card-title">🎵 Planlanan Müzikler</h3>
     </div>
 
-    {% if schedules %}
+    {% set music_schedules = [] %}
+    {% for s in schedules %}
+    {% if s.media_type == 'music' or '/music/' in s.filepath %}
+    {% set _ = music_schedules.append(s) %}
+    {% endif %}
+    {% endfor %}
+
+    {% if music_schedules %}
     <table class="table">
         <thead>
             <tr>
@@ -71,9 +86,10 @@
             </tr>
         </thead>
         <tbody>
-            {% for schedule in schedules %}
+            {% for schedule in music_schedules %}
             <tr>
                 <td>
+                    <span title="Müzik">🎵</span>
                     <strong>{{ schedule.filename }}</strong>
                 </td>
                 <td>{{ schedule.display_datetime }}</td>
@@ -110,10 +126,79 @@
         </tbody>
     </table>
     {% else %}
-    <div style="text-align: center; padding: 40px; color: var(--text-muted);">
-        <div style="font-size: 48px; margin-bottom: 16px;">📅</div>
-        <p>Henüz planlanmış bir çalma yok.</p>
-        <p>Yukarıdaki formu kullanarak yeni bir plan ekleyin.</p>
+    <div style="text-align: center; padding: 20px; color: var(--text-muted);">
+        <p>Planlanmış müzik yok.</p>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Scheduled Announcements -->
+<div class="card animate-in" style="margin-top: 24px;">
+    <div class="card-header">
+        <h3 class="card-title">📢 Planlanan Anonslar</h3>
+    </div>
+
+    {% set announcement_schedules = [] %}
+    {% for s in schedules %}
+    {% if s.media_type != 'music' and '/music/' not in s.filepath %}
+    {% set _ = announcement_schedules.append(s) %}
+    {% endif %}
+    {% endfor %}
+
+    {% if announcement_schedules %}
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Dosya</th>
+                <th>Planlanan Zaman</th>
+                <th>Neden</th>
+                <th>Durum</th>
+                <th>İşlem</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for schedule in announcement_schedules %}
+            <tr>
+                <td>
+                    <span title="Anons">📢</span>
+                    <strong>{{ schedule.filename }}</strong>
+                </td>
+                <td>{{ schedule.display_datetime }}</td>
+                <td style="color: var(--text-muted);">{{ schedule.reason or '-' }}</td>
+                <td>
+                    {% if schedule.status == 'pending' %}
+                    <span class="badge badge-warning">⏳ Bekliyor</span>
+                    {% elif schedule.status == 'played' %}
+                    <span class="badge badge-success">✅ Çalındı</span>
+                    {% else %}
+                    <span class="badge badge-danger">❌ İptal</span>
+                    {% endif %}
+                </td>
+                <td>
+                    {% if schedule.status == 'pending' %}
+                    <form action="/api/schedules/one-time/{{ schedule.id }}/cancel" method="POST"
+                        style="display: inline;">
+                        <button type="submit" class="btn btn-outline btn-sm"
+                            onclick="return confirm('Bu planı iptal etmek istediğinize emin misiniz?')">
+                            İptal
+                        </button>
+                    </form>
+                    {% endif %}
+                    <form action="/api/schedules/one-time/{{ schedule.id }}/delete" method="POST"
+                        style="display: inline;">
+                        <button type="submit" class="btn btn-danger btn-sm"
+                            onclick="return confirm('Bu planı silmek istediğinize emin misiniz?')">
+                            🗑️
+                        </button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div style="text-align: center; padding: 20px; color: var(--text-muted);">
+        <p>Planlanmış anons yok.</p>
     </div>
     {% endif %}
 </div>

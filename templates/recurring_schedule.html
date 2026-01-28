@@ -3,6 +3,11 @@
 
 {% block content %}
 <div class="page-header">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+    <link rel="stylesheet" href="https://npmcdn.com/flatpickr/dist/themes/dark.css">
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+    <script src="https://npmcdn.com/flatpickr/dist/l10n/tr.js"></script>
+
     <h1 class="page-title">🔄 Tekrarlı Planlama</h1>
     <p class="page-subtitle">Haftanın belirli günlerinde otomatik çalacak planlar</p>
 </div>
@@ -18,9 +23,18 @@
             <label class="form-label">Dosya</label>
             <select class="form-select" name="media_id" required>
                 <option value="">-- Dosya Seçin --</option>
-                {% for file in media_files %}
-                <option value="{{ file.id }}">{{ file.filename }} ({{ file.media_type }})</option>
-                {% endfor %}
+
+                <optgroup label="📢 Anonslar">
+                    {% for file in media_files if file.media_type == 'announcement' %}
+                    <option value="{{ file.id }}">{{ file.filename }}</option>
+                    {% endfor %}
+                </optgroup>
+
+                <optgroup label="🎵 Müzikler">
+                    {% for file in media_files if file.media_type == 'music' %}
+                    <option value="{{ file.id }}">{{ file.filename }}</option>
+                    {% endfor %}
+                </optgroup>
             </select>
         </div>
 
@@ -68,11 +82,11 @@
             <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px;">
                 <div class="form-group" style="margin: 0;">
                     <label class="form-label">Başlangıç Saati</label>
-                    <input type="time" class="form-input" name="start_time" value="09:00">
+                    <input type="text" class="form-input time-picker" name="start_time" value="09:00">
                 </div>
                 <div class="form-group" style="margin: 0;">
                     <label class="form-label">Bitiş Saati</label>
-                    <input type="time" class="form-input" name="end_time" value="18:00">
+                    <input type="text" class="form-input time-picker" name="end_time" value="18:00">
                 </div>
                 <div class="form-group" style="margin: 0;">
                     <label class="form-label">Aralık (dakika)</label>
@@ -85,16 +99,35 @@
             ➕ Tekrarlı Plan Oluştur
         </button>
     </form>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            flatpickr(".time-picker", {
+                enableTime: true,
+                noCalendar: true,
+                dateFormat: "H:i",
+                time_24hr: true,
+                locale: "tr",
+                disableMobile: "true"
+            });
+        });
+    </script>
 </div>
 
-<!-- Existing Recurring Schedules -->
+<!-- Active Recurring Music -->
 <div class="card animate-in">
     <div class="card-header">
-        <h3 class="card-title">📋 Aktif Tekrarlı Planlar</h3>
-        <span class="badge badge-primary">{{ schedules|length }} plan</span>
+        <h3 class="card-title">🎵 Aktif Tekrarlı Müzikler</h3>
     </div>
 
-    {% if schedules %}
+    {% set music_schedules = [] %}
+    {% for s in schedules %}
+    {% if s.media_type == 'music' or '/music/' in s.filepath %}
+    {% set _ = music_schedules.append(s) %}
+    {% endif %}
+    {% endfor %}
+
+    {% if music_schedules %}
     <table class="table">
         <thead>
             <tr>
@@ -106,9 +139,12 @@
             </tr>
         </thead>
         <tbody>
-            {% for schedule in schedules %}
+            {% for schedule in music_schedules %}
             <tr>
-                <td><strong>{{ schedule.filename }}</strong></td>
+                <td>
+                    <span title="Müzik">🎵</span>
+                    <strong>{{ schedule.filename }}</strong>
+                </td>
                 <td>
                     {% set day_names = ['Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt', 'Paz'] %}
                     {% for day in schedule.days_of_week %}
@@ -150,10 +186,86 @@
         </tbody>
     </table>
     {% else %}
-    <div style="text-align: center; padding: 40px; color: var(--text-muted);">
-        <div style="font-size: 48px; margin-bottom: 16px;">🔄</div>
-        <p>Henüz tekrarlı plan yok.</p>
-        <p>Yukarıdaki formu kullanarak yeni bir plan oluşturun.</p>
+    <div style="text-align: center; padding: 20px; color: var(--text-muted);">
+        <p>Tekrarlı müzik planı yok.</p>
+    </div>
+    {% endif %}
+</div>
+
+<!-- Active Recurring Announcements -->
+<div class="card animate-in" style="margin-top: 24px;">
+    <div class="card-header">
+        <h3 class="card-title">📢 Aktif Tekrarlı Anonslar</h3>
+    </div>
+
+    {% set announcement_schedules = [] %}
+    {% for s in schedules %}
+    {% if s.media_type != 'music' and '/music/' not in s.filepath %}
+    {% set _ = announcement_schedules.append(s) %}
+    {% endif %}
+    {% endfor %}
+
+    {% if announcement_schedules %}
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Dosya</th>
+                <th>Günler</th>
+                <th>Zamanlama</th>
+                <th>Durum</th>
+                <th>İşlem</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for schedule in announcement_schedules %}
+            <tr>
+                <td>
+                    <span title="Anons">📢</span>
+                    <strong>{{ schedule.filename }}</strong>
+                </td>
+                <td>
+                    {% set day_names = ['Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt', 'Paz'] %}
+                    {% for day in schedule.days_of_week %}
+                    <span class="badge badge-primary" style="margin: 2px;">{{ day_names[day] }}</span>
+                    {% endfor %}
+                </td>
+                <td>
+                    {% if schedule.specific_times %}
+                    {{ schedule.specific_times | join(', ') }}
+                    {% else %}
+                    {{ schedule.start_time }} - {{ schedule.end_time or '23:59' }} (her {{ schedule.interval_minutes }}
+                    dk)
+                    {% endif %}
+                </td>
+                <td>
+                    {% if schedule.is_active %}
+                    <span class="badge badge-success">✅ Aktif</span>
+                    {% else %}
+                    <span class="badge badge-danger">⏸️ Pasif</span>
+                    {% endif %}
+                </td>
+                <td>
+                    <form action="/api/schedules/recurring/{{ schedule.id }}/toggle" method="POST"
+                        style="display: inline;">
+                        <button type="submit" class="btn btn-outline btn-sm">
+                            {% if schedule.is_active %}Devre Dışı{% else %}Etkinleştir{% endif %}
+                        </button>
+                    </form>
+                    <form action="/api/schedules/recurring/{{ schedule.id }}/delete" method="POST"
+                        style="display: inline;">
+                        <button type="submit" class="btn btn-danger btn-sm"
+                            onclick="return confirm('Bu planı silmek istediğinize emin misiniz?')">
+                            🗑️
+                        </button>
+                    </form>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div style="text-align: center; padding: 20px; color: var(--text-muted);">
+        <p>Tekrarlı anons planı yok.</p>
     </div>
     {% endif %}
 </div>

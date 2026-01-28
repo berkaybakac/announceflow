@@ -71,7 +71,8 @@
 <!-- Playlist Section -->
 <div class="card animate-in" style="margin-top: 24px;">
     <div class="card-header">
-        <h3 class="card-title">🎵 Müzik Listesi (Playlist)</h3>
+        <h3 class="card-title">🎵 Müzik Listesi (Playlist) <span
+                style="font-size: 0.85rem; font-weight: normal; color: var(--text-muted);">(Sınırsız parça)</span></h3>
         <span class="badge" id="playlistBadge">Pasif</span>
     </div>
 
@@ -88,11 +89,11 @@
     </div>
 
     <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+        <a href="/library" class="btn btn-outline">
+            ➕ Müzik Ekle
+        </a>
         <button class="btn btn-success" onclick="startPlaylist()">
             ▶️ Listeyi Başlat
-        </button>
-        <button class="btn btn-primary" onclick="skipToNext()">
-            ⏭️ Sonraki Parça
         </button>
         <button class="btn btn-danger" onclick="stopPlaylist()">
             ⏹️ Listeyi Durdur

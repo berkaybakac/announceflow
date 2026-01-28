@@ -4,6 +4,7 @@ Flask web server with API endpoints for management.
 """
 import os
 import json
+import shutil
 import functools
 import subprocess
 import tempfile
@@ -245,13 +246,63 @@ def library():
                          disk_free_mb=disk_free_mb,
                          disk_total_mb=disk_total_mb)
 
+
+def get_system_stats():
+    """Get system stats (disk and memory) using standard libraries."""
+    stats = {
+        'disk_total_gb': 0,
+        'disk_free_gb': 0,
+        'disk_percent': 0,
+        'ram_total_mb': 0,
+        'ram_free_mb': 0,
+        'estimated_songs': 0
+    }
+    
+    try:
+        # Disk Usage
+        total, used, free = shutil.disk_usage("/")
+        stats['disk_total_gb'] = round(total / (1024**3), 1)
+        stats['disk_free_gb'] = round(free / (1024**3), 1)
+        stats['disk_percent'] = round((used / total) * 100, 1)
+        
+        # Estimate song capacity (avg 5MB per song)
+        # Leave 1GB buffer for system
+        available_for_media = max(0, free - (1024**3))
+        stats['estimated_songs'] = int(available_for_media / (5 * 1024 * 1024))
+        
+        # RAM Usage (Linux specific)
+        if os.path.exists('/proc/meminfo'):
+            with open('/proc/meminfo', 'r') as f:
+                meminfo = {}
+                for line in f:
+                    parts = line.split(':')
+                    if len(parts) == 2:
+                        meminfo[parts[0].strip()] = int(parts[1].strip().split()[0])
+            
+            # Total RAM
+            if 'MemTotal' in meminfo:
+                stats['ram_total_mb'] = round(meminfo['MemTotal'] / 1024, 0)
+            
+            # Available RAM
+            if 'MemAvailable' in meminfo:
+                stats['ram_free_mb'] = round(meminfo['MemAvailable'] / 1024, 0)
+    except Exception as e:
+        print(f"Error getting system stats: {e}")
+        
+    return stats
+
+
 @app.route('/settings')
 @login_required
 def settings():
     """Settings page."""
     import prayer_times as pt
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info("Settings page requested")
     
     config = load_config()
+    system_stats = get_system_stats()
     state = db.get_playback_state()
     
     music_count = len(db.get_all_media_files('music'))
@@ -272,7 +323,7 @@ def settings():
     
     return render_template('settings.html',
                          active_page='settings',
-                         volume=state.get('volume', 80),
+                         volume=get_player().get_volume(),
                          total_music=music_count,
                          total_announcements=announcement_count,
                          total_schedules=pending_count + active_recurring,
@@ -280,11 +331,12 @@ def settings():
                          # Working hours settings
                          working_hours_enabled=config.get('working_hours_enabled', False),
                          working_hours_start=config.get('working_hours_start', '09:00'),
-                         working_hours_end=config.get('working_hours_end', '22:00'),
+                         working_hours_end=config.get('working_hours_end', '18:00'),
                          # Prayer times settings
                          prayer_times_enabled=config.get('prayer_times_enabled', False),
                          prayer_times_city=config.get('prayer_times_city', ''),
                          prayer_times_district=config.get('prayer_times_district', ''),
+                         system_stats=system_stats,
                          cities=cities,
                          districts_json='{}',  # Now loaded via AJAX
                          next_prayer=next_prayer)
@@ -715,9 +767,17 @@ def api_update_prayer_times():
     """Update prayer times settings."""
     config = load_config()
     
+    city = request.form.get('prayer_times_city', '')
+    district = request.form.get('prayer_times_district', '')
+    
+    # Validate: if city is selected, district is required
+    if city and not district:
+        flash('İl seçiliyken ilçe zorunludur!', 'error')
+        return redirect(url_for('settings'))
+    
     config['prayer_times_enabled'] = 'prayer_times_enabled' in request.form
-    config['prayer_times_city'] = request.form.get('prayer_times_city', '')
-    config['prayer_times_district'] = request.form.get('prayer_times_district', '')
+    config['prayer_times_city'] = city
+    config['prayer_times_district'] = district
     
     save_config(config)
     flash('Ezan vakitleri ayarları güncellendi', 'success')

@@ -215,7 +215,7 @@ def get_pending_one_time_schedules() -> List[Dict[str, Any]]:
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute('''
-        SELECT s.*, m.filename, m.filepath 
+        SELECT s.*, m.filename, m.filepath, m.media_type 
         FROM one_time_schedules s
         JOIN media_files m ON s.media_id = m.id
         WHERE s.status = 'pending'
@@ -230,7 +230,7 @@ def get_all_one_time_schedules() -> List[Dict[str, Any]]:
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute('''
-        SELECT s.*, m.filename, m.filepath 
+        SELECT s.*, m.filename, m.filepath, m.media_type 
         FROM one_time_schedules s
         JOIN media_files m ON s.media_id = m.id
         ORDER BY s.scheduled_datetime DESC
@@ -300,7 +300,7 @@ def get_active_recurring_schedules() -> List[Dict[str, Any]]:
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute('''
-        SELECT s.*, m.filename, m.filepath 
+        SELECT s.*, m.filename, m.filepath, m.media_type 
         FROM recurring_schedules s
         JOIN media_files m ON s.media_id = m.id
         WHERE s.is_active = 1
@@ -323,7 +323,7 @@ def get_all_recurring_schedules() -> List[Dict[str, Any]]:
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute('''
-        SELECT s.*, m.filename, m.filepath 
+        SELECT s.*, m.filename, m.filepath, m.media_type 
         FROM recurring_schedules s
         JOIN media_files m ON s.media_id = m.id
         ORDER BY s.created_at DESC

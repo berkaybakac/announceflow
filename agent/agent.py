@@ -30,6 +30,90 @@ def save_agent_config(config):
         json.dump(config, f, indent=2)
 
 
+class ModernButton(tk.Frame):
+    """Custom button for cross-platform consistency (especially Mac)."""
+    def __init__(self, parent, text, command, bg_color, hover_color, **kwargs):
+        super().__init__(parent, bg=bg_color, cursor="hand2", **kwargs)
+        self.command = command
+        self.bg_color = bg_color
+        self.hover_color = hover_color
+        
+        self.label = tk.Label(self, text=text, bg=bg_color, fg="white", 
+                            font=('Segoe UI', 11, 'bold'))
+        self.label.pack(expand=True, fill='both', padx=20, pady=15)
+        
+        # Bind events
+        for widget in (self, self.label):
+            widget.bind("<Enter>", self.on_enter)
+            widget.bind("<Leave>", self.on_leave)
+            widget.bind("<Button-1>", self.on_click)
+            
+    def on_enter(self, event):
+        self.config(bg=self.hover_color)
+        self.label.config(bg=self.hover_color)
+        
+    def on_leave(self, event):
+        self.config(bg=self.bg_color)
+        self.label.config(bg=self.bg_color)
+        
+    def on_click(self, event):
+        if self.command:
+            self.command()
+
+
+class ModernSlider(tk.Frame):
+    """Modern volume slider with Canvas."""
+    def __init__(self, parent, from_=0, to=100, value=80, command=None, **kwargs):
+        super().__init__(parent, bg="#1a1a1a")
+        self.from_ = from_
+        self.to = to
+        self.value = value
+        self.command = command
+        
+        # Canvas
+        self.canvas = tk.Canvas(self, width=300, height=50, bg="#1a1a1a", 
+                               highlightthickness=0, cursor="hand2")
+        self.canvas.pack(fill='x', expand=True, pady=5)
+        
+        self.canvas.bind("<Button-1>", self._on_click)
+        self.canvas.bind("<B1-Motion>", self._on_click)
+        self.bind("<Map>", lambda e: self.after(50, self._draw))
+        
+    def _draw(self):
+        self.canvas.delete("all")
+        w = max(self.canvas.winfo_width(), 280)
+        h = 50
+        
+        # Track
+        pad = 20
+        track_y = h // 2
+        self.canvas.create_rectangle(pad, track_y-4, w-pad-50, track_y+4, 
+                                    fill="#404040", outline="")
+        
+        # Fill
+        ratio = (self.value - self.from_) / max(1, self.to - self.from_)
+        fill_x = pad + ratio * (w - pad - 50 - pad)
+        self.canvas.create_rectangle(pad, track_y-4, fill_x, track_y+4,
+                                    fill="#22c55e", outline="")
+        
+        # Handle
+        self.canvas.create_oval(fill_x-8, track_y-8, fill_x+8, track_y+8,
+                               fill="white", outline="#22c55e", width=2)
+        
+        # Text
+        self.canvas.create_text(w-40, track_y, text=f"{int(self.value)}%",
+                               fill="#22c55e", font=('Segoe UI', 12, 'bold'))
+    
+    def _on_click(self, event):
+        w = max(self.canvas.winfo_width(), 280)
+        pad = 20
+        ratio = (event.x - pad) / max(1, w - pad - 50 - pad)
+        ratio = max(0, min(1, ratio))
+        self.value = self.from_ + ratio * (self.to - self.from_)
+        self._draw()
+        if self.command:
+            self.command(self.value)
+
 class AnnounceFlowAgent:
     """Main agent application."""
     
@@ -192,11 +276,10 @@ class AgentGUI:
         self.password_entry.pack(fill='x', pady=5)
         
         # Login button
-        login_btn = tk.Button(frame, text="Giriş Yap", font=('Segoe UI', 11, 'bold'),
-                             bg="#6366f1", fg="white", padx=30, pady=10,
-                             command=self.do_login, cursor="hand2",
-                             relief='flat', activebackground="#818cf8")
-        login_btn.pack(pady=20)
+        # Login button
+        login_btn = ModernButton(frame, text="Giriş Yap", command=self.do_login,
+                               bg_color="#6366f1", hover_color="#818cf8")
+        login_btn.pack(pady=20, fill='x', padx=40)
         
         self.status_label = tk.Label(frame, text="", bg="#1a1a1a", fg="#ef4444")
         self.status_label.pack()
@@ -220,6 +303,7 @@ class AgentGUI:
         else:
             self.status_label.config(text="Giriş başarısız! Bilgileri kontrol edin.", fg="#ef4444")
     
+
     def show_main_frame(self):
         """Show main control panel."""
         self.clear_frame()
@@ -246,16 +330,15 @@ class AgentGUI:
         
         # Colored buttons for better visibility
         btn_configs = [
+            ("🎵 Müzik Çal", self.play_music_dialog, "#22c55e", "#4ade80"),
             ("📤 Anons Yükle", self.upload_announcement, "#6366f1", "#818cf8"),
             ("🌐 Web Panel", self.open_web_panel, "#3b82f6", "#60a5fa"),
             ("⏹️ Durdur", self.stop_playback, "#ef4444", "#f87171"),
         ]
         
         for text, command, bg_color, hover_color in btn_configs:
-            btn = tk.Button(btn_frame, text=text, font=('Segoe UI', 11, 'bold'),
-                           bg=bg_color, fg="white", padx=20, pady=15,
-                           command=command, relief='flat', cursor="hand2",
-                           activebackground=hover_color, activeforeground="white")
+            btn = ModernButton(btn_frame, text=text, command=command, 
+                             bg_color=bg_color, hover_color=hover_color)
             btn.pack(fill='x', pady=5)
         
         # Volume Control
@@ -272,15 +355,30 @@ class AgentGUI:
         
         self.volume_scale = tk.Scale(vol_frame, from_=0, to=100, orient='horizontal',
                                      variable=self.volume_var, command=self.on_volume_change,
-                                     bg="#1a1a1a", fg="white", troughcolor="#374151",
+                                     bg="#1a1a1a", fg="#22c55e", troughcolor="#525252",
                                      highlightthickness=0, sliderrelief='flat',
+                                     width=20, sliderlength=20,
                                      activebackground="#22c55e", length=250)
         self.volume_scale.pack(fill='x', side='left', expand=True)
         
         # Logout
-        tk.Button(content, text="🚪 Çıkış", font=('Segoe UI', 10),
-                 bg="#ef4444", fg="white", command=self.logout,
-                 relief='flat', cursor="hand2", pady=8).pack(fill='x', pady=(30,0))
+        # Logout (Modern)
+        ModernButton(content, text="Çıkış Yap", command=self.logout,
+                    bg_color="#ef4444", hover_color="#f87171").pack(fill='x', pady=(30,0))
+    
+    def play_music_dialog(self):
+        """Open a dialog to select and play a music file."""
+        filepath = filedialog.askopenfilename(
+            title="Müzik Dosyası Seç",
+            filetypes=[("Audio Files", "*.mp3 *.wav *.ogg"), ("All Files", "*.*")]
+        )
+        
+        if filepath:
+            # Upload and play
+            if self.agent.upload_file(filepath, "music"):
+                messagebox.showinfo("Başarılı", "Müzik dosyası yüklendi ve çalınacak!")
+            else:
+                messagebox.showerror("Hata", "Dosya yüklenemedi.")
     
     def upload_announcement(self):
         """Upload an announcement file."""
@@ -309,7 +407,6 @@ class AgentGUI:
     def on_volume_change(self, value):
         """Handle volume change."""
         vol = int(float(value))
-        self.volume_label.config(text=f"{vol}%")
         self.agent.set_volume(vol)
     
     def logout(self):

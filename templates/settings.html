@@ -2,6 +2,11 @@
 {% block title %}Ayarlar - AnnounceFlow{% endblock %}
 
 {% block content %}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+<link rel="stylesheet" href="https://npmcdn.com/flatpickr/dist/themes/dark.css">
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+<script src="https://npmcdn.com/flatpickr/dist/l10n/tr.js"></script>
+
 <div class="page-header">
     <h1 class="page-title">⚙️ Ayarlar</h1>
     <p class="page-subtitle">Sistem ayarlarını yapılandırın</p>
@@ -73,12 +78,12 @@
     </div>
 
     <div style="color: var(--text-secondary);">
-        <p>Zamanlayıcı her 30 saniyede bir planları kontrol eder ve zamanı gelen dosyaları otomatik çalar.</p>
+        <p>Zamanlayıcı her 10 saniyede bir planları kontrol eder ve zamanı gelen dosyaları otomatik çalar.</p>
 
         <div style="margin-top: 16px; padding: 16px; background: var(--bg-input); border-radius: 10px;">
             <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
                 <span>Kontrol Aralığı:</span>
-                <strong>30 saniye</strong>
+                <strong>10 saniye</strong>
             </div>
             <div style="display: flex; justify-content: space-between;">
                 <span>Gecikme Toleransı:</span>
@@ -96,27 +101,30 @@
 
     <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px;">
         <div style="text-align: center; padding: 16px; background: var(--bg-input); border-radius: 10px;">
-            <div style="font-size: 24px; margin-bottom: 4px;">📋</div>
-            <div style="font-size: 1.25rem; font-weight: 700; color: var(--primary);">∞</div>
-            <div style="color: var(--text-muted); font-size: 0.85rem;">Tek Seferlik Plan</div>
+            <div style="font-size: 24px; margin-bottom: 4px;">�</div>
+            <div style="font-size: 1rem; font-weight: 700; color: var(--primary);">{{ system_stats.disk_free_gb }} GB
+            </div>
+            <div style="color: var(--text-muted); font-size: 0.85rem;">Boş Disk Alanı</div>
         </div>
 
         <div style="text-align: center; padding: 16px; background: var(--bg-input); border-radius: 10px;">
-            <div style="font-size: 24px; margin-bottom: 4px;">🔄</div>
-            <div style="font-size: 1.25rem; font-weight: 700; color: var(--success);">∞</div>
-            <div style="color: var(--text-muted); font-size: 0.85rem;">Tekrarlı Plan</div>
+            <div style="font-size: 24px; margin-bottom: 4px;">🧠</div>
+            <div style="font-size: 1rem; font-weight: 700; color: var(--success);">{{ system_stats.ram_free_mb }} MB
+            </div>
+            <div style="color: var(--text-muted); font-size: 0.85rem;">Boş Bellek (RAM)</div>
         </div>
 
         <div style="text-align: center; padding: 16px; background: var(--bg-input); border-radius: 10px;">
             <div style="font-size: 24px; margin-bottom: 4px;">🎵</div>
-            <div style="font-size: 1.25rem; font-weight: 700; color: var(--warning);">50+</div>
-            <div style="color: var(--text-muted); font-size: 0.85rem;">Playlist Parçası</div>
+            <div style="font-size: 1rem; font-weight: 700; color: var(--warning);">~{{ system_stats.estimated_songs }}
+            </div>
+            <div style="color: var(--text-muted); font-size: 0.85rem;">Tahmini Parça Kapasitesi</div>
         </div>
     </div>
 
-    <div style="margin-top: 16px; color: var(--text-muted); font-size: 0.85rem;">
-        <p>💡 Sistem limitleri pratik olarak sınırsızdır. SQLite veritabanı binlerce plan destekler. Playlist 50+ parça
-            sorunsuz çalışır.</p>
+    <div style="margin-top: 16px; color: var(--text-muted); font-size: 0.9rem;">
+        <p>💡 <strong>Teknik Bilgi:</strong> Sistem kapasitesi cihazınızın anlık durumuna göre hesaplanmıştır. (1 Parça
+            ≈ 5MB olarak varsayılmıştır)</p>
     </div>
 </div>
 
@@ -142,13 +150,13 @@
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
             <div class="form-group" style="margin: 0;">
                 <label class="form-label">Mesai Başlangıcı</label>
-                <input type="time" class="form-input" name="working_hours_start"
+                <input type="text" class="form-input time-picker" name="working_hours_start"
                     value="{{ working_hours_start or '09:00' }}">
             </div>
 
             <div class="form-group" style="margin: 0;">
                 <label class="form-label">Mesai Bitişi</label>
-                <input type="time" class="form-input" name="working_hours_end"
+                <input type="text" class="form-input time-picker" name="working_hours_end"
                     value="{{ working_hours_end or '22:00' }}">
             </div>
         </div>
@@ -157,6 +165,19 @@
             💾 Kaydet
         </button>
     </form>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            flatpickr(".time-picker", {
+                enableTime: true,
+                noCalendar: true,
+                dateFormat: "H:i",
+                time_24hr: true,
+                locale: "tr",
+                disableMobile: "true" // Force native picker on mobile to be avoided if we want strict 24h, but usually flatpickr mobile is better? Actually native mobile might show AM/PM. Let's force flatpickr.
+            });
+        });
+    </script>
 </div>
 
 <!-- Prayer Times Settings -->
@@ -204,7 +225,7 @@
         </div>
         {% endif %}
 
-        <button type="submit" class="btn btn-primary" style="margin-top: 16px;">
+        <button type="submit" class="btn btn-primary" style="margin-top: 16px;" onclick="return validatePrayerForm()">
             💾 Kaydet
         </button>
     </form>
@@ -281,6 +302,21 @@
     function setQuickVolume(value) {
         document.getElementById('mainVolumeSlider').value = value;
         updateVolume(value);
+    }
+
+    // Prayer times form validation - require district if city is selected
+    function validatePrayerForm() {
+        const citySelect = document.getElementById('prayerCity');
+        const districtSelect = document.getElementById('prayerDistrict');
+        const city = citySelect.value;
+        const district = districtSelect.value;
+
+        if (city && !district) {
+            alert('⚠️ Lütfen bir ilçe seçin. İl seçiliyken ilçe zorunludur.');
+            districtSelect.focus();
+            return false;
+        }
+        return true;
     }
 
     // Password validation

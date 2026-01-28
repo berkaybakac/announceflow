@@ -71,7 +71,7 @@ def is_prayer_time_active(config: dict) -> bool:
 class Scheduler:
     """Schedule manager for one-time and recurring playback."""
     
-    def __init__(self, check_interval_seconds: int = 30):
+    def __init__(self, check_interval_seconds: int = 10):
         self.check_interval = check_interval_seconds
         self._running = False
         self._thread: Optional[threading.Thread] = None
