@@ -70,6 +70,7 @@ def init_database():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             media_id INTEGER NOT NULL,
             scheduled_datetime TIMESTAMP NOT NULL,
+            reason TEXT,
             status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'played', 'cancelled')),
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (media_id) REFERENCES media_files (id) ON DELETE CASCADE
@@ -115,6 +116,25 @@ def init_database():
     
     # Backfill missing duration values
     _backfill_durations()
+    
+    # Run migrations
+    _run_migrations()
+
+
+def _run_migrations():
+    """Run database migrations for schema updates."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # Migration: Add 'reason' column to one_time_schedules if it doesn't exist
+    try:
+        cursor.execute("SELECT reason FROM one_time_schedules LIMIT 1")
+    except sqlite3.OperationalError:
+        # Column doesn't exist, add it
+        cursor.execute("ALTER TABLE one_time_schedules ADD COLUMN reason TEXT")
+        conn.commit()
+    
+    conn.close()
 
 
 # ============ MEDIA FILES ============
@@ -177,14 +197,14 @@ def delete_media_file(media_id: int) -> bool:
 
 # ============ ONE-TIME SCHEDULES ============
 
-def add_one_time_schedule(media_id: int, scheduled_datetime: datetime) -> int:
+def add_one_time_schedule(media_id: int, scheduled_datetime: datetime, reason: str = None) -> int:
     """Add a one-time schedule."""
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute('''
-        INSERT INTO one_time_schedules (media_id, scheduled_datetime)
-        VALUES (?, ?)
-    ''', (media_id, scheduled_datetime.isoformat()))
+        INSERT INTO one_time_schedules (media_id, scheduled_datetime, reason)
+        VALUES (?, ?, ?)
+    ''', (media_id, scheduled_datetime.isoformat(), reason))
     schedule_id = cursor.lastrowid
     conn.commit()
     conn.close()

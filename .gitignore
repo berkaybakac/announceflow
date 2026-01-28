@@ -28,3 +28,6 @@ agent/build/
 agent/dist/
 *.spec
 *.exe
+
+# Cache
+*_cache.json

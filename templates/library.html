@@ -36,6 +36,40 @@
     </form>
 </div>
 
+<!-- Storage Statistics -->
+<div class="card animate-in">
+    <div class="card-header">
+        <h3 class="card-title">📊 Depolama Durumu</h3>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px;">
+        <div style="text-align: center; padding: 16px; background: var(--bg-input); border-radius: 10px;">
+            <div style="font-size: 28px; margin-bottom: 4px;">📁</div>
+            <div style="font-size: 1.5rem; font-weight: 700; color: var(--primary);">{{ total_files }}</div>
+            <div style="color: var(--text-muted); font-size: 0.85rem;">Toplam Dosya</div>
+        </div>
+
+        <div style="text-align: center; padding: 16px; background: var(--bg-input); border-radius: 10px;">
+            <div style="font-size: 28px; margin-bottom: 4px;">💾</div>
+            <div style="font-size: 1.5rem; font-weight: 700; color: var(--warning);">{{ total_size_mb }} MB</div>
+            <div style="color: var(--text-muted); font-size: 0.85rem;">Kullanılan Alan</div>
+        </div>
+
+        <div style="text-align: center; padding: 16px; background: var(--bg-input); border-radius: 10px;">
+            <div style="font-size: 28px; margin-bottom: 4px;">⏱️</div>
+            <div style="font-size: 1.5rem; font-weight: 700; color: var(--success);">{{ total_duration_minutes }} dk
+            </div>
+            <div style="color: var(--text-muted); font-size: 0.85rem;">Toplam Süre</div>
+        </div>
+
+        <div style="text-align: center; padding: 16px; background: var(--bg-input); border-radius: 10px;">
+            <div style="font-size: 28px; margin-bottom: 4px;">💿</div>
+            <div style="font-size: 1.5rem; font-weight: 700; color: var(--info);">{{ disk_free_mb }} MB</div>
+            <div style="color: var(--text-muted); font-size: 0.85rem;">Boş Alan</div>
+        </div>
+    </div>
+</div>
+
 <!-- Music Files -->
 <div class="card animate-in">
     <div class="card-header">

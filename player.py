@@ -52,12 +52,82 @@ class AudioPlayer:
         self._process: Optional[subprocess.Popen] = None
         self._monitor_thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
-        self.on_track_end = on_track_end
+        self._user_on_track_end = on_track_end
+        
+        # Playlist support
+        self._playlist: list = []  # List of file paths
+        self._playlist_index: int = -1  # Current track index
+        self._playlist_loop: bool = True  # Loop playlist when reaching end
+        self._playlist_active: bool = False  # Whether playlist mode is on
         
         # Initialize pygame if that's our backend
         if AUDIO_BACKEND == 'pygame':
             import pygame
             pygame.mixer.music.set_volume(self._volume / 100.0)
+    
+    def on_track_end(self):
+        """Internal track end handler - advances playlist or calls user callback."""
+        if self._playlist_active and len(self._playlist) > 0:
+            self.play_next()
+        elif self._user_on_track_end:
+            self._user_on_track_end()
+    
+    def set_playlist(self, file_paths: list, loop: bool = True) -> bool:
+        """Set a playlist of files to play sequentially."""
+        if not file_paths:
+            return False
+        
+        self._playlist = file_paths
+        self._playlist_index = -1
+        self._playlist_loop = loop
+        self._playlist_active = True
+        logger.info(f"Playlist set with {len(file_paths)} tracks, loop={loop}")
+        return True
+    
+    def play_playlist(self) -> bool:
+        """Start playing the playlist from the beginning."""
+        if not self._playlist:
+            return False
+        
+        self._playlist_index = 0
+        self._playlist_active = True
+        return self.play(self._playlist[0])
+    
+    def play_next(self) -> bool:
+        """Play the next track in the playlist."""
+        if not self._playlist:
+            return False
+        
+        next_index = self._playlist_index + 1
+        
+        if next_index >= len(self._playlist):
+            if self._playlist_loop:
+                next_index = 0
+            else:
+                self._playlist_active = False
+                logger.info("Playlist ended (no loop)")
+                return False
+        
+        self._playlist_index = next_index
+        logger.info(f"Playing next track: {next_index + 1}/{len(self._playlist)}")
+        return self.play(self._playlist[next_index])
+    
+    def stop_playlist(self):
+        """Stop the playlist and clear it."""
+        self._playlist_active = False
+        self._playlist = []
+        self._playlist_index = -1
+        self.stop()
+    
+    def get_playlist_state(self) -> dict:
+        """Get current playlist state."""
+        return {
+            'active': self._playlist_active,
+            'tracks': len(self._playlist),
+            'current_index': self._playlist_index,
+            'loop': self._playlist_loop,
+            'current_file': self._playlist[self._playlist_index] if 0 <= self._playlist_index < len(self._playlist) else None
+        }
     
     def play(self, file_path: str, start_position: float = 0.0) -> bool:
         """
@@ -234,7 +304,7 @@ class AudioPlayer:
     
     def get_state(self) -> dict:
         """Get current player state."""
-        return {
+        state = {
             'current_file': self.current_file,
             'filename': os.path.basename(self.current_file) if self.current_file else None,
             'is_playing': self.is_playing,
@@ -245,6 +315,9 @@ class AudioPlayer:
             'volume': self._volume,
             'backend': AUDIO_BACKEND
         }
+        # Add playlist info
+        state['playlist'] = self.get_playlist_state()
+        return state
     
     def _start_monitor_mpg123(self):
         """Monitor mpg123 process for completion."""

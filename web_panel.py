@@ -209,15 +209,48 @@ def library():
     music_fmt = _format_media_files(music_files)
     announcements_fmt = _format_media_files(announcement_files)
     
+    # Calculate storage statistics
+    total_files = len(music_files) + len(announcement_files)
+    total_size_bytes = 0
+    total_duration_seconds = 0
+    
+    for f in list(music_files) + list(announcement_files):
+        # Get file size
+        if os.path.exists(f['filepath']):
+            total_size_bytes += os.path.getsize(f['filepath'])
+        # Get duration
+        total_duration_seconds += f.get('duration_seconds', 0)
+    
+    # Format for display
+    total_size_mb = round(total_size_bytes / (1024 * 1024), 1)
+    total_duration_minutes = round(total_duration_seconds / 60)
+    
+    # Get disk space (media folder)
+    try:
+        import shutil
+        disk_usage = shutil.disk_usage(MEDIA_FOLDER)
+        disk_free_mb = round(disk_usage.free / (1024 * 1024))
+        disk_total_mb = round(disk_usage.total / (1024 * 1024))
+    except:
+        disk_free_mb = 0
+        disk_total_mb = 0
+    
     return render_template('library.html',
                          active_page='library',
                          music_files=music_fmt,
-                         announcement_files=announcements_fmt)
+                         announcement_files=announcements_fmt,
+                         total_files=total_files,
+                         total_size_mb=total_size_mb,
+                         total_duration_minutes=total_duration_minutes,
+                         disk_free_mb=disk_free_mb,
+                         disk_total_mb=disk_total_mb)
 
 @app.route('/settings')
 @login_required
 def settings():
     """Settings page."""
+    import prayer_times as pt
+    
     config = load_config()
     state = db.get_playback_state()
     
@@ -226,13 +259,35 @@ def settings():
     pending_count = len(db.get_pending_one_time_schedules())
     active_recurring = len(db.get_active_recurring_schedules())
     
+    # Get cities (fast, cached)
+    cities = pt.get_cities()
+    
+    # Get next prayer time if enabled
+    next_prayer = None
+    if config.get('prayer_times_enabled') and config.get('prayer_times_city'):
+        next_prayer = pt.get_next_prayer_time(
+            config.get('prayer_times_city'),
+            config.get('prayer_times_district', '')
+        )
+    
     return render_template('settings.html',
                          active_page='settings',
                          volume=state.get('volume', 80),
                          total_music=music_count,
                          total_announcements=announcement_count,
                          total_schedules=pending_count + active_recurring,
-                         admin_username=config.get('admin_username', 'admin'))
+                         admin_username=config.get('admin_username', 'admin'),
+                         # Working hours settings
+                         working_hours_enabled=config.get('working_hours_enabled', False),
+                         working_hours_start=config.get('working_hours_start', '09:00'),
+                         working_hours_end=config.get('working_hours_end', '22:00'),
+                         # Prayer times settings
+                         prayer_times_enabled=config.get('prayer_times_enabled', False),
+                         prayer_times_city=config.get('prayer_times_city', ''),
+                         prayer_times_district=config.get('prayer_times_district', ''),
+                         cities=cities,
+                         districts_json='{}',  # Now loaded via AJAX
+                         next_prayer=next_prayer)
 
 
 # ============ PLAYER API ============
@@ -311,6 +366,67 @@ def api_volume():
     db.update_playback_state(volume=volume)
     
     return jsonify({'success': success, 'volume': volume})
+
+
+# ============ PLAYLIST API ============
+
+@app.route('/api/playlist/set', methods=['POST'])
+@login_required
+def api_playlist_set():
+    """Set a playlist of media files."""
+    data = request.get_json() or {}
+    media_ids = data.get('media_ids', [])
+    loop = data.get('loop', True)
+    
+    if not media_ids:
+        return jsonify({'success': False, 'error': 'media_ids required'}), 400
+    
+    # Get file paths for all media IDs
+    file_paths = []
+    for media_id in media_ids:
+        media = db.get_media_file(media_id)
+        if media:
+            file_paths.append(media['filepath'])
+    
+    if not file_paths:
+        return jsonify({'success': False, 'error': 'No valid media files'}), 404
+    
+    player = get_player()
+    success = player.set_playlist(file_paths, loop=loop)
+    
+    return jsonify({'success': success, 'tracks': len(file_paths)})
+
+
+@app.route('/api/playlist/play', methods=['POST'])
+@login_required
+def api_playlist_play():
+    """Start playing the playlist."""
+    player = get_player()
+    success = player.play_playlist()
+    
+    if success:
+        db.update_playback_state(is_playing=True)
+    
+    return jsonify({'success': success})
+
+
+@app.route('/api/playlist/next', methods=['POST'])
+@login_required
+def api_playlist_next():
+    """Skip to next track in playlist."""
+    player = get_player()
+    success = player.play_next()
+    return jsonify({'success': success})
+
+
+@app.route('/api/playlist/stop', methods=['POST'])
+@login_required
+def api_playlist_stop():
+    """Stop playlist and clear it."""
+    player = get_player()
+    player.stop_playlist()
+    db.update_playback_state(current_media_id=0, is_playing=False)
+    return jsonify({'success': True})
 
 
 # ============ MEDIA API ============
@@ -422,6 +538,7 @@ def api_add_one_time():
     media_id = request.form.get('media_id')
     date = request.form.get('date')
     time = request.form.get('time')
+    reason = request.form.get('reason', '').strip() or None
     
     if not all([media_id, date, time]):
         flash('Tüm alanları doldurun', 'error')
@@ -433,7 +550,7 @@ def api_add_one_time():
         flash('Geçmiş bir tarih seçemezsiniz', 'error')
         return redirect(url_for('one_time_schedules'))
     
-    db.add_one_time_schedule(int(media_id), scheduled_dt)
+    db.add_one_time_schedule(int(media_id), scheduled_dt, reason)
     flash('Plan başarıyla eklendi!', 'success')
     
     return redirect(url_for('one_time_schedules'))
@@ -490,6 +607,11 @@ def api_add_recurring():
         end_time = request.form.get('end_time', '18:00')
         interval = int(request.form.get('interval_minutes', 60))
         
+        # Backend validation: minimum interval is 1 minute
+        if interval < 1:
+            flash('Zaman aralığı en az 1 dakika olmalıdır', 'error')
+            return redirect(url_for('recurring_schedules'))
+        
         db.add_recurring_schedule(
             int(media_id),
             days,
@@ -534,6 +656,7 @@ def api_update_credentials():
     
     username = request.form.get('username')
     password = request.form.get('password')
+    password_confirm = request.form.get('password_confirm')
     
     import logging
     
@@ -542,11 +665,62 @@ def api_update_credentials():
         config['admin_username'] = username
     
     if password:
+        # Validate password confirmation
+        if password != password_confirm:
+            flash('Şifreler eşleşmiyor!', 'error')
+            return redirect(url_for('settings'))
+        
         logging.info("Admin password changed")
         config['admin_password'] = password
     
     save_config(config)
     flash('Yönetici bilgileri güncellendi', 'success')
+    
+    return redirect(url_for('settings'))
+
+
+@app.route('/api/prayer-times/districts')
+@login_required
+def api_get_districts():
+    """Get districts for a city."""
+    city = request.args.get('city')
+    if not city:
+        return jsonify([])
+    
+    import prayer_times as pt
+    districts = pt.get_districts(city)
+    return jsonify(districts)
+
+
+@app.route('/api/settings/working-hours', methods=['POST'])
+@login_required
+def api_update_working_hours():
+    """Update working hours settings."""
+    config = load_config()
+    
+    # Checkbox sends '1' when checked, missing when unchecked
+    config['working_hours_enabled'] = 'working_hours_enabled' in request.form
+    config['working_hours_start'] = request.form.get('working_hours_start', '09:00')
+    config['working_hours_end'] = request.form.get('working_hours_end', '22:00')
+    
+    save_config(config)
+    flash('Çalışma saatleri ayarları güncellendi', 'success')
+    
+    return redirect(url_for('settings'))
+
+
+@app.route('/api/settings/prayer-times', methods=['POST'])
+@login_required
+def api_update_prayer_times():
+    """Update prayer times settings."""
+    config = load_config()
+    
+    config['prayer_times_enabled'] = 'prayer_times_enabled' in request.form
+    config['prayer_times_city'] = request.form.get('prayer_times_city', '')
+    config['prayer_times_district'] = request.form.get('prayer_times_district', '')
+    
+    save_config(config)
+    flash('Ezan vakitleri ayarları güncellendi', 'success')
     
     return redirect(url_for('settings'))
 

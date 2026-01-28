@@ -88,15 +88,137 @@
     </div>
 </div>
 
+<!-- System Limits -->
+<div class="card animate-in">
+    <div class="card-header">
+        <h3 class="card-title">📊 Sistem Limitleri</h3>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px;">
+        <div style="text-align: center; padding: 16px; background: var(--bg-input); border-radius: 10px;">
+            <div style="font-size: 24px; margin-bottom: 4px;">📋</div>
+            <div style="font-size: 1.25rem; font-weight: 700; color: var(--primary);">∞</div>
+            <div style="color: var(--text-muted); font-size: 0.85rem;">Tek Seferlik Plan</div>
+        </div>
+
+        <div style="text-align: center; padding: 16px; background: var(--bg-input); border-radius: 10px;">
+            <div style="font-size: 24px; margin-bottom: 4px;">🔄</div>
+            <div style="font-size: 1.25rem; font-weight: 700; color: var(--success);">∞</div>
+            <div style="color: var(--text-muted); font-size: 0.85rem;">Tekrarlı Plan</div>
+        </div>
+
+        <div style="text-align: center; padding: 16px; background: var(--bg-input); border-radius: 10px;">
+            <div style="font-size: 24px; margin-bottom: 4px;">🎵</div>
+            <div style="font-size: 1.25rem; font-weight: 700; color: var(--warning);">50+</div>
+            <div style="color: var(--text-muted); font-size: 0.85rem;">Playlist Parçası</div>
+        </div>
+    </div>
+
+    <div style="margin-top: 16px; color: var(--text-muted); font-size: 0.85rem;">
+        <p>💡 Sistem limitleri pratik olarak sınırsızdır. SQLite veritabanı binlerce plan destekler. Playlist 50+ parça
+            sorunsuz çalışır.</p>
+    </div>
+</div>
+
+<!-- Working Hours Settings -->
+<div class="card animate-in">
+    <div class="card-header">
+        <h3 class="card-title">🕐 Çalışma Saatleri (Mesai)</h3>
+        <span class="badge" id="workingHoursBadge">{{ 'Aktif' if working_hours_enabled else 'Pasif' }}</span>
+    </div>
+
+    <form action="/api/settings/working-hours" method="POST">
+        <div style="margin-bottom: 16px;">
+            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                <input type="checkbox" name="working_hours_enabled" value="1" {{ 'checked' if working_hours_enabled
+                    else '' }} style="width: 20px; height: 20px;">
+                <span>Çalışma saatleri dışında sistemi sessizleştir</span>
+            </label>
+            <small style="color: var(--text-muted); display: block; margin-top: 8px;">
+                Aktif olduğunda, belirlenen saatler dışında müzik ve anons çalmaz.
+            </small>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+            <div class="form-group" style="margin: 0;">
+                <label class="form-label">Mesai Başlangıcı</label>
+                <input type="time" class="form-input" name="working_hours_start"
+                    value="{{ working_hours_start or '09:00' }}">
+            </div>
+
+            <div class="form-group" style="margin: 0;">
+                <label class="form-label">Mesai Bitişi</label>
+                <input type="time" class="form-input" name="working_hours_end"
+                    value="{{ working_hours_end or '22:00' }}">
+            </div>
+        </div>
+
+        <button type="submit" class="btn btn-primary" style="margin-top: 16px;">
+            💾 Kaydet
+        </button>
+    </form>
+</div>
+
+<!-- Prayer Times Settings -->
+<div class="card animate-in">
+    <div class="card-header">
+        <h3 class="card-title">🕌 Ezan Vakitleri</h3>
+        <span class="badge" id="prayerBadge">{{ 'Aktif' if prayer_times_enabled else 'Pasif' }}</span>
+    </div>
+
+    <form action="/api/settings/prayer-times" method="POST">
+        <div style="margin-bottom: 16px;">
+            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                <input type="checkbox" name="prayer_times_enabled" value="1" {{ 'checked' if prayer_times_enabled
+                    else '' }} style="width: 20px; height: 20px;">
+                <span>Ezan vakitlerinde sistemi sessizleştir</span>
+            </label>
+            <small style="color: var(--text-muted); display: block; margin-top: 8px;">
+                Aktif olduğunda, ezan vaktinden 1 dakika önce sistem durur ve ezan bittikten 1 dakika sonra devam eder.
+            </small>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+            <div class="form-group" style="margin: 0;">
+                <label class="form-label">İl</label>
+                <select class="form-select" name="prayer_times_city" id="prayerCity" onchange="updateDistricts()">
+                    <option value="">-- İl Seçin --</option>
+                    {% for city in cities %}
+                    <option value="{{ city }}" {{ 'selected' if prayer_times_city==city else '' }}>{{ city }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="form-group" style="margin: 0;">
+                <label class="form-label">İlçe</label>
+                <select class="form-select" name="prayer_times_district" id="prayerDistrict">
+                    <option value="">-- Önce İl Seçin --</option>
+                </select>
+            </div>
+        </div>
+
+        {% if next_prayer %}
+        <div style="margin-top: 16px; padding: 12px; background: var(--bg-input); border-radius: 8px;">
+            <span style="color: var(--text-muted);">Sonraki Ezan:</span>
+            <strong style="margin-left: 8px;">{{ next_prayer.name }} - {{ next_prayer.time }}</strong>
+        </div>
+        {% endif %}
+
+        <button type="submit" class="btn btn-primary" style="margin-top: 16px;">
+            💾 Kaydet
+        </button>
+    </form>
+</div>
+
 <!-- Admin Credentials -->
 <div class="card animate-in">
     <div class="card-header">
         <h3 class="card-title">🔐 Yönetici Bilgileri</h3>
     </div>
 
-    <form action="/api/settings/credentials" method="POST"
-        onsubmit="return confirm('⚠️ Şifrenizi değiştirmek üzeresiniz!\n\nYeni şifrenizi unutursanız sisteme ve panele erişemezsiniz.\nPosta ile kurtarma seçeneği YOKTUR.\n\nDevam etmek istediğinize emin misiniz?');">
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+    <form action="/api/settings/credentials" method="POST" id="credentialsForm"
+        onsubmit="return validatePasswordForm();">
+        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px;">
             <div class="form-group" style="margin: 0;">
                 <label class="form-label">Kullanıcı Adı</label>
                 <input type="text" class="form-input" name="username" value="{{ admin_username }}" required>
@@ -104,8 +226,19 @@
 
             <div class="form-group" style="margin: 0;">
                 <label class="form-label">Yeni Şifre</label>
-                <input type="password" class="form-input" name="password" placeholder="Değiştirmek için doldurun">
+                <input type="password" class="form-input" name="password" id="newPassword"
+                    placeholder="Değiştirmek için doldurun">
             </div>
+
+            <div class="form-group" style="margin: 0;">
+                <label class="form-label">Şifre Tekrar</label>
+                <input type="password" class="form-input" name="password_confirm" id="confirmPassword"
+                    placeholder="Şifreyi tekrar girin">
+            </div>
+        </div>
+
+        <div id="passwordError" style="color: var(--danger); margin-top: 8px; display: none;">
+            ⚠️ Şifreler eşleşmiyor!
         </div>
 
         <button type="submit" class="btn btn-primary" style="margin-top: 16px;">
@@ -149,5 +282,94 @@
         document.getElementById('mainVolumeSlider').value = value;
         updateVolume(value);
     }
+
+    // Password validation
+    function validatePasswordForm() {
+        const password = document.getElementById('newPassword').value;
+        const confirm = document.getElementById('confirmPassword').value;
+        const errorDiv = document.getElementById('passwordError');
+
+        if (password && password !== confirm) {
+            errorDiv.style.display = 'block';
+            document.getElementById('confirmPassword').focus();
+            return false;
+        }
+
+        errorDiv.style.display = 'none';
+
+        // Confirmation if password is being changed
+        if (password) {
+            return confirm('⚠️ Şifrenizi değiştirmek üzeresiniz!\n\nYeni şifrenizi unutursanız sisteme ve panele erişemezsiniz.\n\nDevam etmek istediğinize emin misiniz?');
+        }
+
+        return true;
+    }
+
+    // Real-time password match check
+    document.getElementById('confirmPassword').addEventListener('input', function () {
+        const password = document.getElementById('newPassword').value;
+        const confirm = this.value;
+        const errorDiv = document.getElementById('passwordError');
+
+        if (confirm && password !== confirm) {
+            errorDiv.style.display = 'block';
+        } else {
+            errorDiv.style.display = 'none';
+        }
+    });
+
+    const savedDistrict = "{{ prayer_times_district | default('') }}";
+
+    function updateDistricts() {
+        const citySelect = document.getElementById('prayerCity');
+        const districtSelect = document.getElementById('prayerDistrict');
+        const city = citySelect.value;
+        const currentSavedDistrict = "{{ prayer_times_district | default('') }}";
+
+        districtSelect.innerHTML = '<option value="">-- Yükleniyor... --</option>';
+        districtSelect.disabled = true;
+
+        if (city) {
+            fetch(`/api/prayer-times/districts?city=${encodeURIComponent(city)}`)
+                .then(response => response.json())
+                .then(data => {
+                    districtSelect.innerHTML = '<option value="">-- İlçe Seçin --</option>';
+                    data.forEach(district => {
+                        const option = document.createElement('option');
+                        option.value = district;
+                        option.textContent = district;
+                        // Select saved district or if we are currently reloading page
+                        if (district === savedDistrict || district === currentSavedDistrict) {
+                            option.selected = true;
+                        }
+                        districtSelect.appendChild(option);
+                    });
+                    districtSelect.disabled = false;
+
+                    // If previously selected district is not in list (first load), try to select it
+                    if (districtSelect.value === "" && savedDistrict) {
+                        for (let i = 0; i < districtSelect.options.length; i++) {
+                            if (districtSelect.options[i].value === savedDistrict) {
+                                districtSelect.options[i].selected = true;
+                                break;
+                            }
+                        }
+                    }
+                })
+                .catch(error => {
+                    console.error('Error fetching districts:', error);
+                    districtSelect.innerHTML = '<option value="">Hata oluştu</option>';
+                    districtSelect.disabled = false;
+                });
+        } else {
+            districtSelect.innerHTML = '<option value="">-- Önce İl Seçin --</option>';
+            districtSelect.disabled = false;
+        }
+    }
+
+    // Initialize districts on page load
+    document.addEventListener('DOMContentLoaded', function () {
+        updateDistricts();
+    });
 </script>
 {% endblock %}

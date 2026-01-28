@@ -6,6 +6,7 @@ import logging
 import threading
 import time
 import json
+import os
 from datetime import datetime, timedelta
 from typing import Optional, Callable
 
@@ -13,6 +14,58 @@ import database as db
 from player import get_player
 
 logger = logging.getLogger(__name__)
+
+CONFIG_FILE = 'config.json'
+
+
+def load_config():
+    """Load configuration from file."""
+    if not os.path.exists(CONFIG_FILE):
+        return {}
+    with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+        return json.load(f)
+
+
+def is_within_working_hours(config: dict) -> bool:
+    """Check if current time is within working hours."""
+    if not config.get('working_hours_enabled', False):
+        return True  # Not enabled, always allow
+    
+    start_str = config.get('working_hours_start', '09:00')
+    end_str = config.get('working_hours_end', '22:00')
+    
+    try:
+        now = datetime.now()
+        current_time = now.strftime('%H:%M')
+        
+        # Parse times
+        curr = datetime.strptime(current_time, '%H:%M').time()
+        start = datetime.strptime(start_str, '%H:%M').time()
+        end = datetime.strptime(end_str, '%H:%M').time()
+        
+        return start <= curr <= end
+    except Exception as e:
+        logger.error(f"Working hours check error: {e}")
+        return True  # On error, allow playback
+
+
+def is_prayer_time_active(config: dict) -> bool:
+    """Check if current time is within a prayer time window."""
+    if not config.get('prayer_times_enabled', False):
+        return False  # Not enabled, no silence
+    
+    city = config.get('prayer_times_city', '')
+    district = config.get('prayer_times_district', '')
+    
+    if not city:
+        return False
+    
+    try:
+        import prayer_times as pt
+        return pt.is_prayer_time(city, district, buffer_minutes=1)
+    except Exception as e:
+        logger.error(f"Prayer times check error: {e}")
+        return False  # On error, don't silence
 
 
 class Scheduler:
@@ -46,6 +99,23 @@ class Scheduler:
         """Main scheduler loop."""
         while self._running:
             try:
+                config = load_config()
+                
+                # Check if we should be silent
+                if not is_within_working_hours(config):
+                    logger.debug("Outside working hours - skipping schedule check")
+                    time.sleep(self.check_interval)
+                    continue
+                
+                if is_prayer_time_active(config):
+                    logger.info("Prayer time active - pausing playback")
+                    # Stop any current playback during prayer time
+                    player = get_player()
+                    if player.is_playing:
+                        player.stop()
+                    time.sleep(self.check_interval)
+                    continue
+                
                 self._check_one_time_schedules()
                 self._check_recurring_schedules()
             except Exception as e:
@@ -127,16 +197,56 @@ class Scheduler:
                 self._last_recurring_triggers[schedule_id] = now
     
     def _play_media(self, filepath: str, schedule_id: int, is_one_time: bool):
-        """Trigger media playback."""
+        """Trigger media playback with announcement priority."""
         player = get_player()
         
-        # If something is already playing, we might want to queue or interrupt
-        # For now, we'll interrupt
-        if player.is_playing:
-            logger.info("Interrupting current playback for scheduled item")
-            player.stop()
+        # Check if this is an announcement (based on file path or schedule type)
+        is_announcement = '/announcements/' in filepath or '/announcement/' in filepath
         
-        success = player.play(filepath)
+        # If something is already playing
+        if player.is_playing:
+            if is_announcement:
+                # For announcements: save current playlist state, stop current, play announcement
+                playlist_was_active = player._playlist_active
+                playlist_files = list(player._playlist) if player._playlist_active else []
+                playlist_index = player._playlist_index
+                playlist_loop = player._playlist_loop
+                
+                logger.info(f"Announcement interrupting - saving playlist state (active={playlist_was_active}, index={playlist_index})")
+                
+                # Stop but don't clear playlist
+                player.stop()
+                
+                # Play announcement
+                success = player.play(filepath)
+                
+                if success:
+                    # Wait for announcement to finish, then restore playlist
+                    def restore_playlist():
+                        # Wait for current playback to finish
+                        while player.is_playing:
+                            time.sleep(0.5)
+                        
+                        # Restore playlist if it was active
+                        if playlist_was_active and playlist_files:
+                            logger.info(f"Announcement finished - resuming playlist from index {playlist_index + 1}")
+                            player._playlist = playlist_files
+                            player._playlist_loop = playlist_loop
+                            # Resume from NEXT track (user requested this behavior)
+                            next_idx = (playlist_index + 1) % len(playlist_files)
+                            player._playlist_index = next_idx - 1  # Will be incremented by play_next
+                            player._playlist_active = True
+                            player.play_next()
+                    
+                    # Run restore in background thread
+                    threading.Thread(target=restore_playlist, daemon=True).start()
+            else:
+                # For music: just interrupt
+                logger.info("Interrupting current playback for scheduled music")
+                player.stop()
+                success = player.play(filepath)
+        else:
+            success = player.play(filepath)
         
         if success and is_one_time:
             db.update_one_time_schedule_status(schedule_id, 'played')

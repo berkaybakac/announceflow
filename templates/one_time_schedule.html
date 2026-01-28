@@ -19,7 +19,7 @@
     </div>
 
     <form action="/api/schedules/one-time" method="POST">
-        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr auto; gap: 16px; align-items: end;">
+        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 16px; align-items: end;">
             <div class="form-group" style="margin: 0;">
                 <label class="form-label">Dosya</label>
                 <select class="form-select" name="media_id" required>
@@ -40,10 +40,15 @@
                 <input type="text" class="form-input" id="timeInput" name="time" placeholder="Saat seçin" required>
             </div>
 
-            <button type="submit" class="btn btn-primary">
-                ➕ Planla
-            </button>
+            <div class="form-group" style="margin: 0;">
+                <label class="form-label">Neden/Açıklama</label>
+                <input type="text" class="form-input" name="reason" placeholder="Örn: Cumhuriyet bayramı anonsu">
+            </div>
         </div>
+
+        <button type="submit" class="btn btn-primary" style="margin-top: 16px;">
+            ➕ Planla
+        </button>
     </form>
 </div>
 
@@ -60,6 +65,7 @@
             <tr>
                 <th>Dosya</th>
                 <th>Planlanan Zaman</th>
+                <th>Neden</th>
                 <th>Durum</th>
                 <th>İşlem</th>
             </tr>
@@ -71,6 +77,7 @@
                     <strong>{{ schedule.filename }}</strong>
                 </td>
                 <td>{{ schedule.display_datetime }}</td>
+                <td style="color: var(--text-muted);">{{ schedule.reason or '-' }}</td>
                 <td>
                     {% if schedule.status == 'pending' %}
                     <span class="badge badge-warning">⏳ Bekliyor</span>
