@@ -6,7 +6,6 @@ import os
 import sys
 import logging
 import signal
-import time
 from logging.handlers import RotatingFileHandler
 
 # Add current directory to path

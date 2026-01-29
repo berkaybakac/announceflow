@@ -3,12 +3,11 @@ AnnounceFlow - Windows Agent
 System tray application for quick access and management.
 """
 import os
-import sys
 import json
 import webbrowser
-import threading
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
+from typing import Optional
 import requests
 
 # Configuration
@@ -126,7 +125,7 @@ class AnnounceFlowAgent:
         """Login to the API."""
         try:
             session = requests.Session()
-            response = session.post(
+            session.post(
                 f"{self.api_base}/login",
                 data={"username": username, "password": password},
                 allow_redirects=True,
@@ -156,9 +155,9 @@ class AnnounceFlowAgent:
             # For now, parse from library page or create a simple endpoint
             response = self.session.get(f"{self.api_base}/api/now-playing")
             return response.json() if response.ok else []
-        except:
+        except requests.exceptions.RequestException:
             return []
-    
+
     def play_file(self, media_id):
         """Play a media file."""
         if not self.session:
@@ -169,9 +168,9 @@ class AnnounceFlowAgent:
                 json={"media_id": media_id}
             )
             return response.ok
-        except:
+        except requests.exceptions.RequestException:
             return False
-    
+
     def stop_playback(self):
         """Stop playback."""
         if not self.session:
@@ -179,9 +178,9 @@ class AnnounceFlowAgent:
         try:
             response = self.session.post(f"{self.api_base}/api/stop")
             return response.ok
-        except:
+        except requests.exceptions.RequestException:
             return False
-    
+
     def set_volume(self, volume):
         """Set volume level."""
         if not self.session:
@@ -192,7 +191,7 @@ class AnnounceFlowAgent:
                 json={"volume": volume}
             )
             return response.ok
-        except:
+        except requests.exceptions.RequestException:
             return False
     
     def upload_file(self, filepath, media_type="announcement"):
@@ -219,7 +218,7 @@ class AgentGUI:
     
     def __init__(self, agent):
         self.agent = agent
-        self.root = None
+        self.root: Optional[tk.Tk] = None
         self.logged_in = False
         
     def run(self):
@@ -295,7 +294,8 @@ class AgentGUI:
         save_agent_config(self.agent.config)
         
         self.status_label.config(text="Bağlanılıyor...", fg="#f59e0b")
-        self.root.update()
+        if self.root:
+            self.root.update()
         
         if self.agent.login(username, password):
             self.logged_in = True
@@ -417,8 +417,9 @@ class AgentGUI:
     
     def clear_frame(self):
         """Clear all widgets from root."""
-        for widget in self.root.winfo_children():
-            widget.destroy()
+        if self.root:
+            for widget in self.root.winfo_children():
+                widget.destroy()
 
 
 def main():
