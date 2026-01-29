@@ -7,8 +7,8 @@ import threading
 import time
 import json
 import os
-from datetime import datetime, timedelta
-from typing import Optional, Callable
+from datetime import datetime
+from typing import Optional
 
 import database as db
 from player import get_player
@@ -262,9 +262,9 @@ class Scheduler:
             st = datetime.strptime(start, '%H:%M').time()
             en = datetime.strptime(end, '%H:%M').time()
             return st <= curr <= en
-        except:
+        except ValueError:
             return False
-    
+
     def _is_interval_point(self, current: str, start: str, interval: int) -> bool:
         """Check if current time is at a valid interval point from start."""
         try:
@@ -272,7 +272,7 @@ class Scheduler:
             st = datetime.strptime(start, '%H:%M')
             diff_minutes = (curr - st).total_seconds() / 60
             return diff_minutes >= 0 and diff_minutes % interval < 1
-        except:
+        except ValueError:
             return False
 
 

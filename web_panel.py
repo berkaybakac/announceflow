@@ -232,7 +232,7 @@ def library():
         disk_usage = shutil.disk_usage(MEDIA_FOLDER)
         disk_free_mb = round(disk_usage.free / (1024 * 1024))
         disk_total_mb = round(disk_usage.total / (1024 * 1024))
-    except:
+    except OSError:
         disk_free_mb = 0
         disk_total_mb = 0
     
@@ -250,9 +250,9 @@ def library():
 def get_system_stats():
     """Get system stats (disk and memory) using standard libraries."""
     stats = {
-        'disk_total_gb': 0,
-        'disk_free_gb': 0,
-        'disk_percent': 0,
+        'disk_total_gb': 0.0,
+        'disk_free_gb': 0.0,
+        'disk_percent': 0.0,
         'ram_total_mb': 0,
         'ram_free_mb': 0,
         'estimated_songs': 0
@@ -303,8 +303,7 @@ def settings():
     
     config = load_config()
     system_stats = get_system_stats()
-    state = db.get_playback_state()
-    
+
     music_count = len(db.get_all_media_files('music'))
     announcement_count = len(db.get_all_media_files('announcement'))
     pending_count = len(db.get_pending_one_time_schedules())
@@ -315,11 +314,10 @@ def settings():
     
     # Get next prayer time if enabled
     next_prayer = None
-    if config.get('prayer_times_enabled') and config.get('prayer_times_city'):
-        next_prayer = pt.get_next_prayer_time(
-            config.get('prayer_times_city'),
-            config.get('prayer_times_district', '')
-        )
+    prayer_city = config.get('prayer_times_city', '')
+    prayer_district = config.get('prayer_times_district', '')
+    if config.get('prayer_times_enabled') and prayer_city:
+        next_prayer = pt.get_next_prayer_time(prayer_city, prayer_district)
     
     return render_template('settings.html',
                          active_page='settings',
@@ -481,6 +479,30 @@ def api_playlist_stop():
     return jsonify({'success': True})
 
 
+@app.route('/api/playlist/start-all', methods=['POST'])
+@login_required
+def api_playlist_start_all():
+    """Start playlist with ALL music files in library (loop mode)."""
+    # Get all music files from library
+    music_files = db.get_all_media_files('music')
+
+    if not music_files:
+        return jsonify({'success': False, 'error': 'Kütüphanede müzik yok'}), 404
+
+    # Get file paths
+    file_paths = [f['filepath'] for f in music_files]
+
+    # Set playlist and start playing (loop=True)
+    player = get_player()
+    player.set_playlist(file_paths, loop=True)
+    success = player.play_playlist()
+
+    if success:
+        db.update_playback_state(is_playing=True)
+
+    return jsonify({'success': success, 'tracks': len(file_paths)})
+
+
 # ============ MEDIA API ============
 
 @app.route('/api/media/upload', methods=['POST'])
@@ -498,7 +520,7 @@ def api_media_upload():
         flash('Dosya seçilmedi', 'error')
         return redirect(url_for('library'))
     
-    if file and allowed_file(file.filename):
+    if file and file.filename and allowed_file(file.filename):
         original_filename = secure_filename(file.filename)
         subfolder = 'music' if media_type == 'music' else 'announcements'
         
@@ -587,21 +609,21 @@ def api_media_delete(media_id):
 @login_required
 def api_add_one_time():
     """Add a one-time schedule."""
-    media_id = request.form.get('media_id')
-    date = request.form.get('date')
-    time = request.form.get('time')
+    media_id = request.form.get('media_id', '')
+    date = request.form.get('date', '')
+    time = request.form.get('time', '')
     reason = request.form.get('reason', '').strip() or None
-    
+
     if not all([media_id, date, time]):
         flash('Tüm alanları doldurun', 'error')
         return redirect(url_for('one_time_schedules'))
-    
+
     scheduled_dt = datetime.strptime(f"{date} {time}", "%Y-%m-%d %H:%M")
-    
+
     if scheduled_dt <= datetime.now():
         flash('Geçmiş bir tarih seçemezsiniz', 'error')
         return redirect(url_for('one_time_schedules'))
-    
+
     db.add_one_time_schedule(int(media_id), scheduled_dt, reason)
     flash('Plan başarıyla eklendi!', 'success')
     
@@ -633,7 +655,7 @@ def api_add_recurring():
     
     try:
         days = json.loads(days_json)
-    except:
+    except (json.JSONDecodeError, ValueError):
         days = []
     
     if not media_id or not days:
@@ -790,7 +812,14 @@ def api_update_prayer_times():
 if __name__ == '__main__':
     # Initialize database
     db.init_database()
-    
+
+    # Initialize volume from config
+    config = load_config()
+    initial_volume = config.get('volume', 80)
+    player = get_player()
+    player.set_volume(initial_volume)
+    db.update_playback_state(volume=initial_volume)
+
     # Start scheduler
     scheduler = get_scheduler()
     scheduler.start()

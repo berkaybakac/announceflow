@@ -147,7 +147,7 @@ def add_media_file(filename: str, filepath: str, media_type: str, duration_secon
         INSERT INTO media_files (filename, filepath, media_type, duration_seconds)
         VALUES (?, ?, ?, ?)
     ''', (filename, filepath, media_type, duration_seconds))
-    media_id = cursor.lastrowid
+    media_id = cursor.lastrowid or 0
     conn.commit()
     conn.close()
     return media_id
@@ -197,7 +197,7 @@ def delete_media_file(media_id: int) -> bool:
 
 # ============ ONE-TIME SCHEDULES ============
 
-def add_one_time_schedule(media_id: int, scheduled_datetime: datetime, reason: str = None) -> int:
+def add_one_time_schedule(media_id: int, scheduled_datetime: datetime, reason: Optional[str] = None) -> int:
     """Add a one-time schedule."""
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -205,7 +205,7 @@ def add_one_time_schedule(media_id: int, scheduled_datetime: datetime, reason: s
         INSERT INTO one_time_schedules (media_id, scheduled_datetime, reason)
         VALUES (?, ?, ?)
     ''', (media_id, scheduled_datetime.isoformat(), reason))
-    schedule_id = cursor.lastrowid
+    schedule_id = cursor.lastrowid or 0
     conn.commit()
     conn.close()
     return schedule_id
@@ -290,7 +290,7 @@ def add_recurring_schedule(
         interval_minutes,
         json.dumps(specific_times) if specific_times else None
     ))
-    schedule_id = cursor.lastrowid
+    schedule_id = cursor.lastrowid or 0
     conn.commit()
     conn.close()
     return schedule_id

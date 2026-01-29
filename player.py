@@ -20,15 +20,15 @@ def _detect_backend():
         result = subprocess.run(['which', 'mpg123'], capture_output=True, text=True)
         if result.returncode == 0:
             return 'mpg123'
-    except:
+    except (subprocess.SubprocessError, OSError):
         pass
-    
+
     # Fall back to pygame
     try:
         import pygame
         pygame.mixer.init()
         return 'pygame'
-    except:
+    except (ImportError, Exception):
         pass
     
     return None
@@ -211,7 +211,7 @@ class AudioPlayer:
         try:
             sound = pygame.mixer.Sound(file_path)
             self._duration = sound.get_length()
-        except:
+        except (pygame.error, FileNotFoundError):
             self._duration = 0.0
         
         self._started_at = time.time()  # Record start time

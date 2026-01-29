@@ -5,7 +5,7 @@ Fetches prayer times from Diyanet API for Turkey cities/districts.
 import logging
 import json
 import os
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Optional, Dict, List
 import urllib.request
 import urllib.error
@@ -25,7 +25,7 @@ def _load_geo_cache() -> Dict:
         try:
             with open(CITIES_CACHE_FILE, 'r', encoding='utf-8') as f:
                 return json.load(f)
-        except:
+        except (json.JSONDecodeError, IOError):
             pass
     return {"cities": {}, "districts": {}}  # cities: {name: id}, districts: {city_name: [districts]}
 
@@ -56,31 +56,13 @@ def get_cities() -> List[str]:
             cities = {}
             for item in data:
                 # Store as {Name: ID}
-                # API returns "ADANA", normalize title case for display but keep mapping
-                name_upper = item['SehirAdi']
-                # Turkish title case handling could be complex, simple title() is okay for now
-                # Or keep as API returns (UPPERCASE)
-                name = name_upper.title().replace('İ', 'i').replace('I', 'ı').title() # Simple conversion
-                # Better: Use the name from API directly but handle casing in UI or keep standard
-                # Let's keep simpler: Use keys from API but Title Case keys
-                
-                # Manual fix for Turkish chars in Title Case
-                tr_map = {
-                    'İ': 'i', 'I': 'ı', 'Ş': 'ş', 'Ğ': 'ğ', 'Ü': 'ü', 'Ö': 'ö', 'Ç': 'ç'
-                }
-                def tr_title(text):
-                    text = text.replace('İ', 'i').replace('I', 'ı')
-                    return text.title()
-                
-                # API returns proper names usually in SehirAdi
-                # Let's just use what API gives but title cased nicely?
-                # Actually API returns uppercase "ADANA", "İSTANBUL"
-                
-                # Let's simple format
+                # API returns "ADANA", normalize title case for display
                 final_name = item['SehirAdi'].title()
                 # Fix problematic I/İ in title
-                if final_name.startswith('I'): final_name = 'I' + final_name[1:]
-                if 'İ' in item['SehirAdi']: final_name = item['SehirAdi'].replace('İ','i').title()
+                if final_name.startswith('I'):
+                    final_name = 'I' + final_name[1:]
+                if 'İ' in item['SehirAdi']:
+                    final_name = item['SehirAdi'].replace('İ', 'i').title()
                 
                 # Just use the raw name from mapping for ID lookup, return sorted keys
                 cities[final_name] = item['SehirID']
@@ -144,14 +126,11 @@ def get_districts(city: str) -> List[str]:
 
 def _load_cache() -> Dict:
     """Load cached prayer times."""
-
-def _load_cache() -> Dict:
-    """Load cached prayer times."""
     if os.path.exists(CACHE_FILE):
         try:
             with open(CACHE_FILE, 'r', encoding='utf-8') as f:
                 return json.load(f)
-        except:
+        except (json.JSONDecodeError, IOError):
             pass
     return {}
 
@@ -335,7 +314,7 @@ def get_next_prayer_time(city: str, district: str) -> Optional[Dict]:
                     'name': prayer_names.get(prayer_key, prayer_key),
                     'time': prayer_time_str
                 }
-        except:
+        except ValueError:
             continue
     
     # All prayers passed for today, return tomorrow's imsak

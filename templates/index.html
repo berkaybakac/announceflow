@@ -24,6 +24,7 @@
             <button class="control-btn control-btn-play" onclick="startPlayback()" id="playBtn"
                 title="Oynat">▶️</button>
         </div>
+        <button class="control-btn" onclick="skipToNext()" title="Sonraki Şarkı">⏭️</button>
     </div>
 
     <!-- Progress Bar -->
@@ -46,58 +47,27 @@
     </div>
 </div>
 
-<!-- Quick Play Section -->
+<!-- Arka Plan Müzik Bölümü -->
 <div class="card animate-in" style="margin-top: 24px;">
     <div class="card-header">
-        <h3 class="card-title">🚀 Hızlı Çal</h3>
-    </div>
-
-    <div style="display: grid; grid-template-columns: 1fr auto; gap: 16px; align-items: end;">
-        <div class="form-group" style="margin: 0;">
-            <label class="form-label">Dosya Seç</label>
-            <select class="form-select" id="quickPlaySelect">
-                <option value="">-- Dosya Seçin --</option>
-                {% for file in media_files %}
-                <option value="{{ file.id }}">{{ file.filename }} ({{ file.media_type }})</option>
-                {% endfor %}
-            </select>
-        </div>
-        <button class="btn btn-success" onclick="quickPlay()">
-            ▶️ Şimdi Çal
-        </button>
-    </div>
-</div>
-
-<!-- Playlist Section -->
-<div class="card animate-in" style="margin-top: 24px;">
-    <div class="card-header">
-        <h3 class="card-title">🎵 Müzik Listesi (Playlist) <span
-                style="font-size: 0.85rem; font-weight: normal; color: var(--text-muted);">(Sınırsız parça)</span></h3>
+        <h3 class="card-title">🎵 Arka Plan Müzik</h3>
         <span class="badge" id="playlistBadge">Pasif</span>
     </div>
 
-    <div style="margin-bottom: 16px;">
-        <label class="form-label">Müzik dosyalarını seçin (birden fazla seçim yapabilirsiniz)</label>
-        <select class="form-select" id="playlistSelect" multiple size="6" style="height: auto;">
-            {% for file in media_files if file.media_type == 'music' %}
-            <option value="{{ file.id }}">{{ file.filename }}</option>
-            {% endfor %}
-        </select>
-        <small style="color: var(--text-muted); display: block; margin-top: 8px;">
-            Ctrl/Cmd tuşunu basılı tutarak birden fazla parça seçebilirsiniz. Seçilen parçalar sırayla çalınacak.
-        </small>
-    </div>
+    <p style="color: var(--text-muted); margin-bottom: 16px;">
+        Kütüphanedeki tüm müzikler sırayla ve loop olarak çalınır. Anons geldiğinde müzik otomatik durur, anons bitince devam eder.
+    </p>
 
     <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+        <button class="btn btn-success" onclick="startPlayback()">
+            ▶️ Müzikleri Başlat
+        </button>
+        <button class="btn btn-danger" onclick="stopPlaylist()">
+            ⏹️ Durdur
+        </button>
         <a href="/library" class="btn btn-outline">
             ➕ Müzik Ekle
         </a>
-        <button class="btn btn-success" onclick="startPlaylist()">
-            ▶️ Listeyi Başlat
-        </button>
-        <button class="btn btn-danger" onclick="stopPlaylist()">
-            ⏹️ Listeyi Durdur
-        </button>
     </div>
 
     <div id="playlistStatus"
@@ -249,26 +219,17 @@
     }
 
     async function startPlayback() {
-        // Logic handled by quickPlay or recurring schedule mainly. 
-        // This is just a fallback valid only if we have a "current file" that is stopped?
-        // Actually, for mpg123, "Resume" is impossible. "Start" means start over?
-        // For simplicity, Play button on Now Playing is only useful if we have a track loaded?
-        // Let's keep it simple: if track loaded but stopped, Play restarts it?
-
-        // Simpler approach: Play button here is redundant if we don't have "Resume".
-        // Use Quick Play section for starting new stuff.
-        // But let's keep it if user wants to re-play the last track.
-        if (currentMediaId) {
-            try {
-                await fetch('/api/play', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ media_id: parseInt(currentMediaId) })
-                });
+        // Start ALL music files in library as playlist (loop mode)
+        try {
+            const response = await fetch('/api/playlist/start-all', { method: 'POST' });
+            if (response.ok) {
                 updatePlayerState();
-            } catch (error) {
-                console.error('Error playing:', error);
+            } else {
+                const data = await response.json();
+                alert(data.error || 'Müzik başlatılamadı');
             }
+        } catch (error) {
+            console.error('Error starting playlist:', error);
         }
     }
 
