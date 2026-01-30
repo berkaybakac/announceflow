@@ -3,14 +3,14 @@
 
 {% block content %}
 <div class="page-header">
-    <h1 class="page-title">📁 Medya Kütüphanesi</h1>
+    <h1 class="page-title">Medya Kütüphanesi</h1>
     <p class="page-subtitle">Müzik ve anons dosyalarınızı yönetin</p>
 </div>
 
 <!-- Upload Section -->
 <div class="card animate-in">
     <div class="card-header">
-        <h3 class="card-title">📤 Dosya Yükle</h3>
+        <h3 class="card-title">Dosya Yükle</h3>
     </div>
 
     <form action="/api/media/upload" method="POST" enctype="multipart/form-data">
@@ -24,13 +24,13 @@
             <div class="form-group" style="margin: 0;">
                 <label class="form-label">Tür</label>
                 <select class="form-select" name="media_type" required>
-                    <option value="music">🎵 Müzik</option>
-                    <option value="announcement">📢 Anons</option>
+                    <option value="music">Müzik</option>
+                    <option value="announcement">Anons</option>
                 </select>
             </div>
 
             <button type="submit" class="btn btn-success">
-                📤 Yükle
+                Yükle
             </button>
         </div>
     </form>
@@ -39,138 +39,266 @@
 <!-- Storage Statistics -->
 <div class="card animate-in">
     <div class="card-header">
-        <h3 class="card-title">📊 Depolama Durumu</h3>
+        <h3 class="card-title">Depolama Durumu</h3>
     </div>
 
     <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px;">
         <div style="text-align: center; padding: 16px; background: var(--bg-input); border-radius: 10px;">
-            <div style="font-size: 28px; margin-bottom: 4px;">📁</div>
             <div style="font-size: 1.5rem; font-weight: 700; color: var(--primary);">{{ total_files }}</div>
             <div style="color: var(--text-muted); font-size: 0.85rem;">Toplam Dosya</div>
         </div>
 
         <div style="text-align: center; padding: 16px; background: var(--bg-input); border-radius: 10px;">
-            <div style="font-size: 28px; margin-bottom: 4px;">💾</div>
             <div style="font-size: 1.5rem; font-weight: 700; color: var(--warning);">{{ total_size_mb }} MB</div>
             <div style="color: var(--text-muted); font-size: 0.85rem;">Kullanılan Alan</div>
         </div>
 
         <div style="text-align: center; padding: 16px; background: var(--bg-input); border-radius: 10px;">
-            <div style="font-size: 28px; margin-bottom: 4px;">⏱️</div>
             <div style="font-size: 1.5rem; font-weight: 700; color: var(--success);">{{ total_duration_minutes }} dk
             </div>
             <div style="color: var(--text-muted); font-size: 0.85rem;">Toplam Süre</div>
         </div>
 
         <div style="text-align: center; padding: 16px; background: var(--bg-input); border-radius: 10px;">
-            <div style="font-size: 28px; margin-bottom: 4px;">💿</div>
             <div style="font-size: 1.5rem; font-weight: 700; color: var(--info);">{{ disk_free_mb }} MB</div>
             <div style="color: var(--text-muted); font-size: 0.85rem;">Boş Alan</div>
         </div>
     </div>
 </div>
 
+<!-- Search Box -->
+<div class="card animate-in">
+    <div style="display: flex; gap: 16px; align-items: center;">
+        <input type="text" class="form-input" id="searchInput" placeholder="Dosya ara..."
+               onkeyup="filterFiles()" style="flex: 1;">
+        <span id="searchResult" style="color: var(--text-muted); font-size: 0.9rem;"></span>
+    </div>
+</div>
+
 <!-- Music Files -->
 <div class="card animate-in">
-    <div class="card-header">
-        <h3 class="card-title">🎵 Müzik Dosyaları</h3>
-        <span class="badge badge-primary">{{ music_files|length }} dosya</span>
+    <div class="card-header" onclick="toggleSection('music')" style="cursor: pointer; user-select: none;">
+        <h3 class="card-title">Müzik Dosyaları</h3>
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <span class="badge badge-primary">{{ music_files|length }} dosya</span>
+            <span id="musicToggle" style="font-size: 1.2rem;">▼</span>
+        </div>
     </div>
 
-    {% if music_files %}
-    <table class="table">
-        <thead>
-            <tr>
-                <th>Dosya Adı</th>
-                <th>Eklenme Tarihi</th>
-                <th>İşlem</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for file in music_files %}
-            <tr>
-                <td>
-                    <div style="display: flex; align-items: center; gap: 12px;">
-                        <span style="font-size: 24px;">🎵</span>
+    <div id="musicSection">
+        {% if music_files %}
+        <div style="margin-bottom: 12px; display: flex; gap: 12px; align-items: center;">
+            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                <input type="checkbox" id="selectAllMusic" onchange="toggleSelectAll('music')">
+                <span style="color: var(--text-muted);">Tümünü Seç</span>
+            </label>
+            <button class="btn btn-danger btn-sm" onclick="deleteSelected('music')" id="deleteSelectedMusic" style="display: none;">
+                Seçilenleri Sil (<span id="musicSelectedCount">0</span>)
+            </button>
+        </div>
+        <table class="table" id="musicTable">
+            <thead>
+                <tr>
+                    <th style="width: 40px;"></th>
+                    <th>Dosya Adı</th>
+                    <th>Eklenme Tarihi</th>
+                    <th>İşlem</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for file in music_files %}
+                <tr data-filename="{{ file.filename|lower }}">
+                    <td>
+                        <input type="checkbox" class="file-checkbox music-checkbox" value="{{ file.id }}" onchange="updateDeleteButton('music')">
+                    </td>
+                    <td>
                         <strong>{{ file.filename }}</strong>
-                    </div>
-                </td>
-                <td style="color: var(--text-muted);">{{ file.created_at_formatted }}</td>
-                <td>
-                    <button class="btn btn-outline btn-sm" onclick="playFile('{{ file.id }}')">
-                        ▶️ Çal
-                    </button>
-                    <form action="/api/media/{{ file.id }}/delete" method="POST" style="display: inline;">
-                        <button type="submit" class="btn btn-danger btn-sm"
-                            onclick="return confirm('Bu dosyayı silmek istediğinize emin misiniz?')">
-                            🗑️
+                    </td>
+                    <td style="color: var(--text-muted);">{{ file.created_at_formatted }}</td>
+                    <td>
+                        <button class="btn btn-outline btn-sm" onclick="playFile('{{ file.id }}')">
+                            Çal
                         </button>
-                    </form>
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-    {% else %}
-    <div style="text-align: center; padding: 40px; color: var(--text-muted);">
-        <div style="font-size: 48px; margin-bottom: 16px;">🎵</div>
-        <p>Henüz müzik dosyası yok.</p>
+                        <form action="/api/media/{{ file.id }}/delete" method="POST" style="display: inline;">
+                            <button type="submit" class="btn btn-danger btn-sm"
+                                onclick="return confirm('Bu dosyayı silmek istediğinize emin misiniz?')">
+                                Sil
+                            </button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div style="text-align: center; padding: 40px; color: var(--text-muted);">
+            <p>Henüz müzik dosyası yok.</p>
+        </div>
+        {% endif %}
     </div>
-    {% endif %}
 </div>
 
 <!-- Announcement Files -->
 <div class="card animate-in">
-    <div class="card-header">
-        <h3 class="card-title">📢 Anons Dosyaları</h3>
-        <span class="badge badge-warning">{{ announcement_files|length }} dosya</span>
+    <div class="card-header" onclick="toggleSection('announcement')" style="cursor: pointer; user-select: none;">
+        <h3 class="card-title">Anons Dosyaları</h3>
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <span class="badge badge-warning">{{ announcement_files|length }} dosya</span>
+            <span id="announcementToggle" style="font-size: 1.2rem;">▼</span>
+        </div>
     </div>
 
-    {% if announcement_files %}
-    <table class="table">
-        <thead>
-            <tr>
-                <th>Dosya Adı</th>
-                <th>Eklenme Tarihi</th>
-                <th>İşlem</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for file in announcement_files %}
-            <tr>
-                <td>
-                    <div style="display: flex; align-items: center; gap: 12px;">
-                        <span style="font-size: 24px;">📢</span>
+    <div id="announcementSection">
+        {% if announcement_files %}
+        <div style="margin-bottom: 12px; display: flex; gap: 12px; align-items: center;">
+            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                <input type="checkbox" id="selectAllAnnouncement" onchange="toggleSelectAll('announcement')">
+                <span style="color: var(--text-muted);">Tümünü Seç</span>
+            </label>
+            <button class="btn btn-danger btn-sm" onclick="deleteSelected('announcement')" id="deleteSelectedAnnouncement" style="display: none;">
+                Seçilenleri Sil (<span id="announcementSelectedCount">0</span>)
+            </button>
+        </div>
+        <table class="table" id="announcementTable">
+            <thead>
+                <tr>
+                    <th style="width: 40px;"></th>
+                    <th>Dosya Adı</th>
+                    <th>Eklenme Tarihi</th>
+                    <th>İşlem</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for file in announcement_files %}
+                <tr data-filename="{{ file.filename|lower }}">
+                    <td>
+                        <input type="checkbox" class="file-checkbox announcement-checkbox" value="{{ file.id }}" onchange="updateDeleteButton('announcement')">
+                    </td>
+                    <td>
                         <strong>{{ file.filename }}</strong>
-                    </div>
-                </td>
-                <td style="color: var(--text-muted);">{{ file.created_at_formatted }}</td>
-                <td>
-                    <button class="btn btn-outline btn-sm" onclick="playFile('{{ file.id }}')">
-                        ▶️ Çal
-                    </button>
-                    <form action="/api/media/{{ file.id }}/delete" method="POST" style="display: inline;">
-                        <button type="submit" class="btn btn-danger btn-sm"
-                            onclick="return confirm('Bu dosyayı silmek istediğinize emin misiniz?')">
-                            🗑️
+                    </td>
+                    <td style="color: var(--text-muted);">{{ file.created_at_formatted }}</td>
+                    <td>
+                        <button class="btn btn-outline btn-sm" onclick="playFile('{{ file.id }}')">
+                            Çal
                         </button>
-                    </form>
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-    {% else %}
-    <div style="text-align: center; padding: 40px; color: var(--text-muted);">
-        <div style="font-size: 48px; margin-bottom: 16px;">📢</div>
-        <p>Henüz anons dosyası yok.</p>
+                        <form action="/api/media/{{ file.id }}/delete" method="POST" style="display: inline;">
+                            <button type="submit" class="btn btn-danger btn-sm"
+                                onclick="return confirm('Bu dosyayı silmek istediğinize emin misiniz?')">
+                                Sil
+                            </button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div style="text-align: center; padding: 40px; color: var(--text-muted);">
+            <p>Henüz anons dosyası yok.</p>
+        </div>
+        {% endif %}
     </div>
-    {% endif %}
 </div>
 {% endblock %}
 
 {% block extra_js %}
 <script>
+    // Section Toggle
+    function toggleSection(type) {
+        const section = document.getElementById(type + 'Section');
+        const toggle = document.getElementById(type + 'Toggle');
+        if (section.style.display === 'none') {
+            section.style.display = 'block';
+            toggle.textContent = '▼';
+        } else {
+            section.style.display = 'none';
+            toggle.textContent = '►';
+        }
+    }
+
+    // Search/Filter
+    function filterFiles() {
+        const query = document.getElementById('searchInput').value.toLowerCase().trim();
+        let visibleCount = 0;
+        let totalCount = 0;
+
+        document.querySelectorAll('table tbody tr').forEach(row => {
+            totalCount++;
+            const filename = row.getAttribute('data-filename') || '';
+            if (filename.includes(query)) {
+                row.style.display = '';
+                visibleCount++;
+            } else {
+                row.style.display = 'none';
+            }
+        });
+
+        const resultSpan = document.getElementById('searchResult');
+        if (query) {
+            resultSpan.textContent = `${visibleCount} / ${totalCount} dosya gösteriliyor`;
+        } else {
+            resultSpan.textContent = '';
+        }
+    }
+
+    // Select All Toggle
+    function toggleSelectAll(type) {
+        const selectAll = document.getElementById('selectAll' + type.charAt(0).toUpperCase() + type.slice(1));
+        const checkboxes = document.querySelectorAll('.' + type + '-checkbox');
+
+        checkboxes.forEach(cb => {
+            // Only select visible rows
+            const row = cb.closest('tr');
+            if (row && row.style.display !== 'none') {
+                cb.checked = selectAll.checked;
+            }
+        });
+
+        updateDeleteButton(type);
+    }
+
+    // Update Delete Button
+    function updateDeleteButton(type) {
+        const checkboxes = document.querySelectorAll('.' + type + '-checkbox:checked');
+        const count = checkboxes.length;
+
+        const btn = document.getElementById('deleteSelected' + type.charAt(0).toUpperCase() + type.slice(1));
+        const countSpan = document.getElementById(type + 'SelectedCount');
+
+        if (count > 0) {
+            btn.style.display = 'inline-block';
+            countSpan.textContent = count;
+        } else {
+            btn.style.display = 'none';
+        }
+    }
+
+    // Bulk Delete
+    async function deleteSelected(type) {
+        const checkboxes = document.querySelectorAll('.' + type + '-checkbox:checked');
+        const ids = Array.from(checkboxes).map(cb => cb.value);
+
+        if (ids.length === 0) return;
+
+        if (!confirm(`${ids.length} dosyayı silmek istediğinize emin misiniz?`)) return;
+
+        let deletedCount = 0;
+        for (const id of ids) {
+            try {
+                const response = await fetch(`/api/media/${id}/delete`, { method: 'POST' });
+                if (response.ok) deletedCount++;
+            } catch (e) {
+                console.error('Delete error:', e);
+            }
+        }
+
+        if (deletedCount > 0) {
+            location.reload();
+        }
+    }
+
+    // Play File
     async function playFile(mediaId) {
         try {
             await fetch('/api/play', {
@@ -178,7 +306,6 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ media_id: mediaId })
             });
-            // Show feedback
             alert('Çalınıyor!');
         } catch (error) {
             console.error('Error playing file:', error);

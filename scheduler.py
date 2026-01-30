@@ -76,6 +76,8 @@ class Scheduler:
         self._running = False
         self._thread: Optional[threading.Thread] = None
         self._last_recurring_triggers: dict = {}  # {schedule_id: last_trigger_time}
+        self._prayer_pause_state: Optional[dict] = None  # Playlist state saved during prayer time
+        self._working_hours_pause_state: Optional[dict] = None  # Playlist state saved outside working hours
         
     def start(self):
         """Start the scheduler background thread."""
@@ -105,19 +107,60 @@ class Scheduler:
                 # 1. Prayer time check - highest priority, stops EVERYTHING
                 if is_prayer_time_active(config):
                     if player.is_playing or player._playlist_active:
-                        logger.info("Prayer time active - stopping all playback")
-                        player.stop_playlist()  # Also calls stop()
+                        # Save playlist state BEFORE stopping (only once)
+                        if self._prayer_pause_state is None:
+                            self._prayer_pause_state = {
+                                'playlist': list(player._playlist),
+                                'index': player._playlist_index,
+                                'loop': player._playlist_loop,
+                                'active': player._playlist_active
+                            }
+                            logger.info(f"Prayer time - saving playlist state (index={player._playlist_index}, tracks={len(player._playlist)})")
+                        player.stop_playlist()
                     time.sleep(self.check_interval)
                     continue
+
+                # Prayer time ended - restore playlist if we saved state
+                if self._prayer_pause_state is not None:
+                    state = self._prayer_pause_state
+                    self._prayer_pause_state = None
+
+                    if state['active'] and state['playlist']:
+                        logger.info(f"Prayer ended - restoring playlist (index={state['index']})")
+                        player._playlist = state['playlist']
+                        player._playlist_loop = state['loop']
+                        player._playlist_index = state['index']
+                        player._playlist_active = True
+                        player.play_next()
 
                 # 2. Working hours check
                 outside_working_hours = not is_within_working_hours(config)
 
                 if outside_working_hours:
-                    # CRITICAL FIX: Stop background music when outside working hours
+                    # Save playlist state BEFORE stopping (only once)
                     if player._playlist_active or player.is_playing:
-                        logger.info("Outside working hours - stopping background music")
+                        if self._working_hours_pause_state is None:
+                            self._working_hours_pause_state = {
+                                'playlist': list(player._playlist),
+                                'index': player._playlist_index,
+                                'loop': player._playlist_loop,
+                                'active': player._playlist_active
+                            }
+                            logger.info(f"Outside working hours - saving playlist state (index={player._playlist_index}, tracks={len(player._playlist)})")
                         player.stop_playlist()
+                else:
+                    # Working hours started - restore playlist if we saved state
+                    if self._working_hours_pause_state is not None:
+                        state = self._working_hours_pause_state
+                        self._working_hours_pause_state = None
+
+                        if state['active'] and state['playlist']:
+                            logger.info(f"Working hours started - restoring playlist (index={state['index']})")
+                            player._playlist = state['playlist']
+                            player._playlist_loop = state['loop']
+                            player._playlist_index = state['index']
+                            player._playlist_active = True
+                            player.play_next()
 
                 # 3. Always check one-time schedules (announcements play even outside hours)
                 self._check_one_time_schedules()
@@ -133,10 +176,16 @@ class Scheduler:
     
     def _check_one_time_schedules(self):
         """Check and trigger pending one-time schedules."""
+        config = load_config()
+        outside_working_hours = not is_within_working_hours(config)
+
         now = datetime.now()
         pending = db.get_pending_one_time_schedules()
 
         for schedule in pending:
+            # Outside working hours: only play announcements, not music
+            if outside_working_hours and schedule.get('media_type') != 'announcement':
+                continue
             try:
                 dt_str = schedule['scheduled_datetime']
                 # Handle multiple datetime formats
@@ -155,7 +204,12 @@ class Scheduler:
             if 0 <= time_diff <= 120:
                 # Time to play!
                 logger.info(f"Triggering one-time schedule: {schedule['filename']} (diff: {time_diff:.0f}s)")
-                self._play_media(schedule['filepath'], schedule['id'], is_one_time=True)
+                self._play_media(
+                    schedule['filepath'],
+                    schedule['id'],
+                    is_one_time=True,
+                    is_announcement=(schedule.get('media_type') == 'announcement')
+                )
             elif time_diff > 300:
                 # Missed by more than 5 minutes, mark as cancelled
                 logger.warning(f"Schedule missed, cancelling: {schedule['filename']} (was scheduled for {scheduled_dt})")
@@ -211,15 +265,19 @@ class Scheduler:
                     continue
                 
                 logger.info(f"Triggering recurring schedule: {schedule['filename']}")
-                self._play_media(schedule['filepath'], schedule_id, is_one_time=False)
+                self._play_media(
+                    schedule['filepath'],
+                    schedule_id,
+                    is_one_time=False,
+                    is_announcement=(schedule.get('media_type') == 'announcement')
+                )
                 self._last_recurring_triggers[schedule_id] = now
     
-    def _play_media(self, filepath: str, schedule_id: int, is_one_time: bool):
+    def _play_media(self, filepath: str, schedule_id: int, is_one_time: bool, is_announcement: bool = False):
         """Trigger media playback with announcement priority."""
         player = get_player()
-        
-        # Check if this is an announcement (based on file path or schedule type)
-        is_announcement = '/announcements/' in filepath or '/announcement/' in filepath
+
+        # is_announcement is now passed from caller based on media_type from database
         
         # If something is already playing
         if player.is_playing:
