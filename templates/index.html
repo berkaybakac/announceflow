@@ -76,6 +76,20 @@
         <strong id="playlistCurrentTrack" style="margin-left: 8px;">-</strong>
         <span id="playlistProgress" style="margin-left: 12px; color: var(--primary);">-</span>
     </div>
+
+    <!-- Şarkı Listesi Toggle -->
+    <div style="margin-top: 16px; border-top: 1px solid var(--border-color); padding-top: 16px;">
+        <button type="button" class="btn btn-outline" onclick="toggleSongList()" id="songListToggle">
+            📋 Şarkı Listesini Göster (<span id="songCount">0</span>)
+        </button>
+
+        <!-- Genişletilebilir Liste -->
+        <div id="songListContainer" style="display: none; margin-top: 12px;">
+            <div id="songList" style="max-height: 400px; overflow-y: auto; background: var(--bg-input); border-radius: 8px; padding: 8px;">
+                <!-- Şarkılar buraya yüklenecek -->
+            </div>
+        </div>
+    </div>
 </div>
 
 <!-- Recent Plays -->
@@ -401,5 +415,62 @@
     // Update state every 2 seconds
     setInterval(updatePlayerState, 2000);
     updatePlayerState();
+
+    // ============ ŞARKI LİSTESİ FONKSİYONLARI ============
+    let songListVisible = false;
+    let musicFiles = [];
+
+    function toggleSongList() {
+        const container = document.getElementById('songListContainer');
+        const btn = document.getElementById('songListToggle');
+        songListVisible = !songListVisible;
+
+        if (songListVisible) {
+            container.style.display = 'block';
+            btn.innerHTML = `📋 Şarkı Listesini Gizle (<span id="songCount">${musicFiles.length}</span>)`;
+            loadSongList();
+        } else {
+            container.style.display = 'none';
+            btn.innerHTML = `📋 Şarkı Listesini Göster (<span id="songCount">${musicFiles.length}</span>)`;
+        }
+    }
+
+    async function loadSongList() {
+        try {
+            const response = await fetch('/api/media/music');
+            const data = await response.json();
+            musicFiles = data.files || [];
+            renderSongList();
+        } catch (error) {
+            console.error('Error loading songs:', error);
+        }
+    }
+
+    function renderSongList() {
+        const container = document.getElementById('songList');
+        document.getElementById('songCount').textContent = musicFiles.length;
+
+        if (musicFiles.length === 0) {
+            container.innerHTML = '<p style="text-align:center;color:var(--text-muted);padding:20px;">Henüz müzik yok. Kütüphaneden ekleyin.</p>';
+            return;
+        }
+
+        const currentId = currentMediaId;
+        container.innerHTML = musicFiles.map(file => `
+            <div style="padding: 8px 12px; border-bottom: 1px solid var(--border-color); ${file.id === currentId && isPlaying ? 'background: rgba(46, 204, 113, 0.15); border-left: 3px solid var(--primary);' : ''}">
+                ${file.id === currentId && isPlaying ? '▶️' : '🎵'} ${file.filename}
+            </div>
+        `).join('');
+    }
+
+    // Sayfa yüklendiğinde şarkı sayısını al
+    (async function initSongCount() {
+        try {
+            const response = await fetch('/api/media/music');
+            const data = await response.json();
+            musicFiles = data.files || [];
+            document.getElementById('songCount').textContent = musicFiles.length;
+        } catch (e) {}
+    })();
 </script>
 {% endblock %}

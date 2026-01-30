@@ -22,19 +22,10 @@
         <div class="form-group">
             <label class="form-label">Dosya</label>
             <select class="form-select" name="media_id" required>
-                <option value="">-- Dosya Seçin --</option>
-
-                <optgroup label="📢 Anonslar">
-                    {% for file in media_files if file.media_type == 'announcement' %}
-                    <option value="{{ file.id }}">{{ file.filename }}</option>
-                    {% endfor %}
-                </optgroup>
-
-                <optgroup label="🎵 Müzikler">
-                    {% for file in media_files if file.media_type == 'music' %}
-                    <option value="{{ file.id }}">{{ file.filename }}</option>
-                    {% endfor %}
-                </optgroup>
+                <option value="">-- Anons Seçin --</option>
+                {% for file in media_files if file.media_type == 'announcement' %}
+                <option value="{{ file.id }}">📢 {{ file.filename }}</option>
+                {% endfor %}
             </select>
         </div>
 
@@ -70,9 +61,12 @@
         <div id="specificTimesSection">
             <div class="form-group">
                 <label class="form-label">Çalma Saatleri (virgülle ayırın)</label>
-                <input type="text" class="form-input" name="specific_times" placeholder="09:00, 12:00, 15:00, 18:00">
+                <input type="text" class="form-input" name="specific_times" id="specificTimesInput"
+                    placeholder="09:00, 12:00, 15:00, 18:00"
+                    pattern="^(\d{1,2}:\d{2})(\s*,\s*\d{1,2}:\d{2})*$"
+                    title="Saat:Dakika formatında virgülle ayırarak girin (örn: 09:00, 12:00)">
                 <small style="color: var(--text-muted); margin-top: 4px; display: block;">
-                    Örnek: 09:00, 12:00, 15:00, 18:00
+                    Örnek: 09:00, 12:00, 15:00 (Saat:Dakika formatında)
                 </small>
             </div>
         </div>
@@ -108,102 +102,30 @@
                 dateFormat: "H:i",
                 time_24hr: true,
                 locale: "tr",
+                minuteIncrement: 1,
+                allowInput: true,
                 disableMobile: "true"
             });
         });
     </script>
 </div>
 
-<!-- Active Recurring Music -->
-<div class="card animate-in">
-    <div class="card-header">
-        <h3 class="card-title">🎵 Aktif Tekrarlı Müzikler</h3>
-    </div>
-
-    {% set music_schedules = [] %}
-    {% for s in schedules %}
-    {% if s.media_type == 'music' or '/music/' in s.filepath %}
-    {% set _ = music_schedules.append(s) %}
-    {% endif %}
-    {% endfor %}
-
-    {% if music_schedules %}
-    <table class="table">
-        <thead>
-            <tr>
-                <th>Dosya</th>
-                <th>Günler</th>
-                <th>Zamanlama</th>
-                <th>Durum</th>
-                <th>İşlem</th>
-            </tr>
-        </thead>
-        <tbody>
-            {% for schedule in music_schedules %}
-            <tr>
-                <td>
-                    <span title="Müzik">🎵</span>
-                    <strong>{{ schedule.filename }}</strong>
-                </td>
-                <td>
-                    {% set day_names = ['Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt', 'Paz'] %}
-                    {% for day in schedule.days_of_week %}
-                    <span class="badge badge-primary" style="margin: 2px;">{{ day_names[day] }}</span>
-                    {% endfor %}
-                </td>
-                <td>
-                    {% if schedule.specific_times %}
-                    {{ schedule.specific_times | join(', ') }}
-                    {% else %}
-                    {{ schedule.start_time }} - {{ schedule.end_time or '23:59' }} (her {{ schedule.interval_minutes }}
-                    dk)
-                    {% endif %}
-                </td>
-                <td>
-                    {% if schedule.is_active %}
-                    <span class="badge badge-success">✅ Aktif</span>
-                    {% else %}
-                    <span class="badge badge-danger">⏸️ Pasif</span>
-                    {% endif %}
-                </td>
-                <td>
-                    <form action="/api/schedules/recurring/{{ schedule.id }}/toggle" method="POST"
-                        style="display: inline;">
-                        <button type="submit" class="btn btn-outline btn-sm">
-                            {% if schedule.is_active %}Devre Dışı{% else %}Etkinleştir{% endif %}
-                        </button>
-                    </form>
-                    <form action="/api/schedules/recurring/{{ schedule.id }}/delete" method="POST"
-                        style="display: inline;">
-                        <button type="submit" class="btn btn-danger btn-sm"
-                            onclick="return confirm('Bu planı silmek istediğinize emin misiniz?')">
-                            🗑️
-                        </button>
-                    </form>
-                </td>
-            </tr>
-            {% endfor %}
-        </tbody>
-    </table>
-    {% else %}
-    <div style="text-align: center; padding: 20px; color: var(--text-muted);">
-        <p>Tekrarlı müzik planı yok.</p>
-    </div>
-    {% endif %}
-</div>
-
 <!-- Active Recurring Announcements -->
 <div class="card animate-in" style="margin-top: 24px;">
     <div class="card-header">
         <h3 class="card-title">📢 Aktif Tekrarlı Anonslar</h3>
+        {% set announcement_schedules = [] %}
+        {% for s in schedules %}
+        {% if s.media_type != 'music' and '/music/' not in s.filepath %}
+        {% set _ = announcement_schedules.append(s) %}
+        {% endif %}
+        {% endfor %}
+        {% if announcement_schedules %}
+        <button type="button" class="btn btn-danger btn-sm" onclick="confirmDeleteAll()">
+            🗑️ Tümünü Sil
+        </button>
+        {% endif %}
     </div>
-
-    {% set announcement_schedules = [] %}
-    {% for s in schedules %}
-    {% if s.media_type != 'music' and '/music/' not in s.filepath %}
-    {% set _ = announcement_schedules.append(s) %}
-    {% endif %}
-    {% endfor %}
 
     {% if announcement_schedules %}
     <table class="table">
@@ -269,6 +191,10 @@
     </div>
     {% endif %}
 </div>
+
+<!-- Hidden form for bulk delete -->
+<form id="bulkDeleteForm" action="/api/schedules/recurring/delete-all-announcements" method="POST" style="display: none;">
+</form>
 {% endblock %}
 
 {% block extra_js %}
@@ -310,6 +236,12 @@
         }
     }
 
+    // Time format validation helper
+    function isValidTimeFormat(timeStr) {
+        const pattern = /^([01]?[0-9]|2[0-3]):([0-5][0-9])$/;
+        return pattern.test(timeStr.trim());
+    }
+
     // Form validation
     document.getElementById('recurringForm').addEventListener('submit', (e) => {
         if (selectedDays.length === 0) {
@@ -317,6 +249,37 @@
             alert('Lütfen en az bir gün seçin');
             return;
         }
+
+        // Validate specific times if that mode is selected
+        const scheduleType = document.querySelector('input[name="schedule_type"]:checked').value;
+        if (scheduleType === 'specific') {
+            const timesInput = document.getElementById('specificTimesInput');
+            const timesStr = timesInput.value.trim();
+
+            if (!timesStr) {
+                e.preventDefault();
+                alert('Lütfen en az bir saat girin');
+                return;
+            }
+
+            const times = timesStr.split(',').map(t => t.trim()).filter(t => t);
+            const invalidTimes = times.filter(t => !isValidTimeFormat(t));
+
+            if (invalidTimes.length > 0) {
+                e.preventDefault();
+                alert('Geçersiz saat formatı: ' + invalidTimes.join(', ') + '\n\nDoğru format: Saat:Dakika (örn: 09:00, 12:30)');
+                return;
+            }
+        }
     });
+
+    // Bulk delete confirmation
+    function confirmDeleteAll() {
+        if (confirm('⚠️ DİKKAT!\n\nTüm tekrarlı anons planlarını silmek istediğinize emin misiniz?\n\nBu işlem geri alınamaz!')) {
+            if (confirm('Son onay: Gerçekten TÜM anons planlarını silmek istiyor musunuz?')) {
+                document.getElementById('bulkDeleteForm').submit();
+            }
+        }
+    }
 </script>
 {% endblock %}

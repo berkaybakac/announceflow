@@ -277,13 +277,18 @@ class AudioPlayer:
                 hw_volume = 0
             else:
                 hw_volume = int(round(55 + (volume / 100.0) ** 1.6 * 45))
-            
-            subprocess.run(['amixer', '-c', '2', 'set', 'PCM', f'{hw_volume}%', 'unmute'], 
-                           stdout=subprocess.DEVNULL, 
-                           stderr=subprocess.DEVNULL)
-            logger.info(f"Volume set to: {volume}% (HW: {hw_volume}%)")
-        except Exception as e:
-            logger.debug(f"Failed to set hardware volume: {e}")
+
+            result = subprocess.run(
+                ['amixer', '-c', '2', 'set', 'PCM', f'{hw_volume}%', 'unmute'],
+                capture_output=True,
+                text=True
+            )
+            if result.returncode == 0:
+                logger.info(f"Volume set to: {volume}% (HW: {hw_volume}%)")
+            else:
+                logger.warning(f"amixer failed (code {result.returncode}): {result.stderr}")
+        except (subprocess.SubprocessError, OSError) as e:
+            logger.warning(f"Failed to set hardware volume: {e}")
             
         return True
     

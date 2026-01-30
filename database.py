@@ -362,6 +362,21 @@ def delete_recurring_schedule(schedule_id: int) -> bool:
     conn.close()
     return deleted
 
+def delete_all_recurring_announcements() -> int:
+    """Delete all recurring announcement schedules (not music)."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        DELETE FROM recurring_schedules
+        WHERE media_id IN (
+            SELECT id FROM media_files WHERE media_type = 'announcement'
+        )
+    ''')
+    deleted_count = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return deleted_count
+
 
 # ============ PLAYBACK STATE ============
 

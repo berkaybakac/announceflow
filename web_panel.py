@@ -3,6 +3,7 @@ AnnounceFlow - Web Panel
 Flask web server with API endpoints for management.
 """
 import os
+import re
 import json
 import shutil
 import functools
@@ -48,6 +49,11 @@ def save_config(config):
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+def validate_time_format(time_str: str) -> bool:
+    """Validate HH:MM time format."""
+    pattern = r'^([01]?[0-9]|2[0-3]):([0-5][0-9])$'
+    return bool(re.match(pattern, time_str))
 
 def convert_to_mp3(input_path: str, output_path: str) -> bool:
     """Convert any audio format to MP3 using ffmpeg."""
@@ -99,17 +105,17 @@ def login():
     if request.method == 'POST':
         username = request.form.get('username')
         password = request.form.get('password')
-        
+
         config = load_config()
         valid_user = config.get('admin_username', 'admin')
         valid_pass = config.get('admin_password', 'admin123')
-        
+
         if username == valid_user and password == valid_pass:
             session['logged_in'] = True
             return redirect(url_for('index'))
         else:
             flash('Hatalı kullanıcı adı veya şifre!', 'error')
-            
+
     return render_template('login.html')
 
 @app.route('/logout')
@@ -133,7 +139,7 @@ def _format_schedules(schedules):
                 dt = datetime.strptime(dt_str, '%Y-%m-%d %H:%M:%S')
             except ValueError:
                 dt = datetime.strptime(dt_str, '%Y-%m-%d %H:%M')
-            
+
             s_dict['display_datetime'] = dt.strftime('%d.%m.%Y %H:%M')
         except Exception:
             s_dict['display_datetime'] = s_dict['scheduled_datetime']
@@ -152,11 +158,11 @@ def _format_media_files(files):
                 dt = datetime.strptime(dt_str, '%Y-%m-%d %H:%M:%S')
             except ValueError:
                 dt = datetime.strptime(dt_str, '%Y-%m-%d %H:%M')
-            
+
             # Add 3 hours for Turkey Time (UTC+3) manual adjustment
             # since we know the server stores UTC
             dt_tr = dt + timedelta(hours=3)
-            
+
             f_dict['created_at_formatted'] = dt_tr.strftime('%d.%m.%Y %H:%M')
         except Exception:
             f_dict['created_at_formatted'] = f_dict['created_at']
@@ -172,7 +178,7 @@ def index():
     media_files = db.get_all_media_files()
     upcoming = db.get_pending_one_time_schedules()
     upcoming_formatted = _format_schedules(upcoming)
-    return render_template('index.html', 
+    return render_template('index.html',
                          active_page='now-playing',
                          media_files=media_files,
                          upcoming_schedules=upcoming_formatted)
@@ -206,26 +212,26 @@ def library():
     """Media library page."""
     music_files = db.get_all_media_files('music')
     announcement_files = db.get_all_media_files('announcement')
-    
+
     music_fmt = _format_media_files(music_files)
     announcements_fmt = _format_media_files(announcement_files)
-    
+
     # Calculate storage statistics
     total_files = len(music_files) + len(announcement_files)
     total_size_bytes = 0
     total_duration_seconds = 0
-    
+
     for f in list(music_files) + list(announcement_files):
         # Get file size
         if os.path.exists(f['filepath']):
             total_size_bytes += os.path.getsize(f['filepath'])
         # Get duration
         total_duration_seconds += f.get('duration_seconds', 0)
-    
+
     # Format for display
     total_size_mb = round(total_size_bytes / (1024 * 1024), 1)
     total_duration_minutes = round(total_duration_seconds / 60)
-    
+
     # Get disk space (media folder)
     try:
         import shutil
@@ -235,7 +241,7 @@ def library():
     except OSError:
         disk_free_mb = 0
         disk_total_mb = 0
-    
+
     return render_template('library.html',
                          active_page='library',
                          music_files=music_fmt,
@@ -257,19 +263,19 @@ def get_system_stats():
         'ram_free_mb': 0,
         'estimated_songs': 0
     }
-    
+
     try:
         # Disk Usage
         total, used, free = shutil.disk_usage("/")
         stats['disk_total_gb'] = round(total / (1024**3), 1)
         stats['disk_free_gb'] = round(free / (1024**3), 1)
         stats['disk_percent'] = round((used / total) * 100, 1)
-        
+
         # Estimate song capacity (avg 5MB per song)
         # Leave 1GB buffer for system
         available_for_media = max(0, free - (1024**3))
         stats['estimated_songs'] = int(available_for_media / (5 * 1024 * 1024))
-        
+
         # RAM Usage (Linux specific)
         if os.path.exists('/proc/meminfo'):
             with open('/proc/meminfo', 'r') as f:
@@ -278,17 +284,17 @@ def get_system_stats():
                     parts = line.split(':')
                     if len(parts) == 2:
                         meminfo[parts[0].strip()] = int(parts[1].strip().split()[0])
-            
+
             # Total RAM
             if 'MemTotal' in meminfo:
                 stats['ram_total_mb'] = round(meminfo['MemTotal'] / 1024, 0)
-            
+
             # Available RAM
             if 'MemAvailable' in meminfo:
                 stats['ram_free_mb'] = round(meminfo['MemAvailable'] / 1024, 0)
     except Exception as e:
         print(f"Error getting system stats: {e}")
-        
+
     return stats
 
 
@@ -300,7 +306,7 @@ def settings():
     import logging
     logger = logging.getLogger(__name__)
     logger.info("Settings page requested")
-    
+
     config = load_config()
     system_stats = get_system_stats()
 
@@ -308,17 +314,17 @@ def settings():
     announcement_count = len(db.get_all_media_files('announcement'))
     pending_count = len(db.get_pending_one_time_schedules())
     active_recurring = len(db.get_active_recurring_schedules())
-    
+
     # Get cities (fast, cached)
     cities = pt.get_cities()
-    
+
     # Get next prayer time if enabled
     next_prayer = None
     prayer_city = config.get('prayer_times_city', '')
     prayer_district = config.get('prayer_times_district', '')
     if config.get('prayer_times_enabled') and prayer_city:
         next_prayer = pt.get_next_prayer_time(prayer_city, prayer_district)
-    
+
     return render_template('settings.html',
                          active_page='settings',
                          volume=get_player().get_volume(),
@@ -350,14 +356,24 @@ def api_now_playing():
     state = player.get_state()
     db_state = db.get_playback_state()
     state['volume'] = db_state.get('volume', 80)
-    
+
     # Get duration from database if file is playing
     if state.get('filename'):
         media = db.get_media_by_filename(state['filename'])
         if media:
             state['duration_seconds'] = media.get('duration_seconds', 0)
-    
+
     return jsonify(state)
+
+@app.route('/api/media/music')
+@login_required
+def api_get_music_files():
+    """Get all music files for playlist display."""
+    files = db.get_all_media_files(media_type='music')
+    return jsonify({
+        'files': files,
+        'count': len(files)
+    })
 
 @app.route('/api/play', methods=['POST'])
 @login_required
@@ -365,20 +381,20 @@ def api_play():
     """Play a media file."""
     data = request.get_json() or {}
     media_id = data.get('media_id')
-    
+
     if not media_id:
         return jsonify({'error': 'media_id required'}), 400
-    
+
     media = db.get_media_file(media_id)
     if not media:
         return jsonify({'error': 'Media not found'}), 404
-    
+
     player = get_player()
     success = player.play(media['filepath'])
-    
+
     if success:
         db.update_playback_state(current_media_id=media_id, is_playing=True, position_seconds=0)
-    
+
     return jsonify({'success': success})
 
 
@@ -410,11 +426,11 @@ def api_volume():
     """Set volume level."""
     data = request.get_json() or {}
     volume = data.get('volume', 80)
-    
+
     player = get_player()
     success = player.set_volume(volume)
     db.update_playback_state(volume=volume)
-    
+
     return jsonify({'success': success, 'volume': volume})
 
 
@@ -427,23 +443,23 @@ def api_playlist_set():
     data = request.get_json() or {}
     media_ids = data.get('media_ids', [])
     loop = data.get('loop', True)
-    
+
     if not media_ids:
         return jsonify({'success': False, 'error': 'media_ids required'}), 400
-    
+
     # Get file paths for all media IDs
     file_paths = []
     for media_id in media_ids:
         media = db.get_media_file(media_id)
         if media:
             file_paths.append(media['filepath'])
-    
+
     if not file_paths:
         return jsonify({'success': False, 'error': 'No valid media files'}), 404
-    
+
     player = get_player()
     success = player.set_playlist(file_paths, loop=loop)
-    
+
     return jsonify({'success': success, 'tracks': len(file_paths)})
 
 
@@ -453,10 +469,10 @@ def api_playlist_play():
     """Start playing the playlist."""
     player = get_player()
     success = player.play_playlist()
-    
+
     if success:
         db.update_playback_state(is_playing=True)
-    
+
     return jsonify({'success': success})
 
 
@@ -512,43 +528,43 @@ def api_media_upload():
     if 'file' not in request.files:
         flash('Dosya seçilmedi', 'error')
         return redirect(url_for('library'))
-    
+
     file = request.files['file']
     media_type = request.form.get('media_type', 'music')
-    
+
     if file.filename == '':
         flash('Dosya seçilmedi', 'error')
         return redirect(url_for('library'))
-    
+
     if file and file.filename and allowed_file(file.filename):
         original_filename = secure_filename(file.filename)
         subfolder = 'music' if media_type == 'music' else 'announcements'
-        
+
         # Get file extension
         base, ext = os.path.splitext(original_filename)
         ext_lower = ext.lower().lstrip('.')
-        
+
         # Check if conversion is needed
         needs_convert = ext_lower in NEEDS_CONVERSION
-        
+
         if needs_convert:
             # Save to temp file with unique name (avoids collision)
             temp_suffix = ext  # Keep original extension
             with tempfile.NamedTemporaryFile(suffix=temp_suffix, delete=False) as tmp:
                 temp_path = tmp.name
                 file.save(temp_path)
-            
+
             # Create MP3 filename
             mp3_filename = f"{base}.mp3"
             mp3_filepath = os.path.join(MEDIA_FOLDER, subfolder, mp3_filename)
-            
+
             # Ensure unique filename
             counter = 1
             while os.path.exists(mp3_filepath):
                 mp3_filename = f"{base}_{counter}.mp3"
                 mp3_filepath = os.path.join(MEDIA_FOLDER, subfolder, mp3_filename)
                 counter += 1
-            
+
             # Convert to MP3
             try:
                 if convert_to_mp3(temp_path, mp3_filepath):
@@ -565,14 +581,14 @@ def api_media_upload():
         else:
             # MP3 - save directly
             filepath = os.path.join(MEDIA_FOLDER, subfolder, original_filename)
-            
+
             # Ensure unique filename
             counter = 1
             while os.path.exists(filepath):
                 original_filename = f"{base}_{counter}{ext}"
                 filepath = os.path.join(MEDIA_FOLDER, subfolder, original_filename)
                 counter += 1
-            
+
             file.save(filepath)
             # Get duration
             duration = get_audio_duration(filepath)
@@ -580,7 +596,7 @@ def api_media_upload():
             flash(f'{original_filename} başarıyla yüklendi!', 'success')
     else:
         flash('Geçersiz dosya türü. Kabul edilen: MP3, WAV, OGG, AIFF, FLAC, M4A, WMA, MP2', 'error')
-    
+
     return redirect(url_for('library'))
 
 @app.route('/api/media/<int:media_id>/delete', methods=['POST'])
@@ -588,18 +604,18 @@ def api_media_upload():
 def api_media_delete(media_id):
     """Delete a media file."""
     media = db.get_media_file(media_id)
-    
+
     if media:
         # Delete file from disk
         if os.path.exists(media['filepath']):
             os.remove(media['filepath'])
-        
+
         # Delete from database
         db.delete_media_file(media_id)
         flash('Dosya silindi', 'success')
     else:
         flash('Dosya bulunamadı', 'error')
-    
+
     return redirect(url_for('library'))
 
 
@@ -626,7 +642,7 @@ def api_add_one_time():
 
     db.add_one_time_schedule(int(media_id), scheduled_dt, reason)
     flash('Plan başarıyla eklendi!', 'success')
-    
+
     return redirect(url_for('one_time_schedules'))
 
 @app.route('/api/schedules/one-time/<int:schedule_id>/cancel', methods=['POST'])
@@ -652,24 +668,30 @@ def api_add_recurring():
     media_id = request.form.get('media_id')
     days_json = request.form.get('days_of_week', '[]')
     schedule_type = request.form.get('schedule_type', 'specific')
-    
+
     try:
         days = json.loads(days_json)
     except (json.JSONDecodeError, ValueError):
         days = []
-    
+
     if not media_id or not days:
         flash('Dosya ve günler gerekli', 'error')
         return redirect(url_for('recurring_schedules'))
-    
+
     if schedule_type == 'specific':
         times_str = request.form.get('specific_times', '')
         times = [t.strip() for t in times_str.split(',') if t.strip()]
-        
+
         if not times:
             flash('En az bir saat girin', 'error')
             return redirect(url_for('recurring_schedules'))
-        
+
+        # Validate time format (HH:MM)
+        invalid_times = [t for t in times if not validate_time_format(t)]
+        if invalid_times:
+            flash(f'Geçersiz saat formatı: {", ".join(invalid_times)} (Doğru format: Saat:Dakika, örn: 09:00)', 'error')
+            return redirect(url_for('recurring_schedules'))
+
         db.add_recurring_schedule(
             int(media_id),
             days,
@@ -680,12 +702,17 @@ def api_add_recurring():
         start_time = request.form.get('start_time', '09:00')
         end_time = request.form.get('end_time', '18:00')
         interval = int(request.form.get('interval_minutes', 60))
-        
+
+        # Validate time formats
+        if not validate_time_format(start_time) or not validate_time_format(end_time):
+            flash('Geçersiz saat formatı (Doğru format: Saat:Dakika, örn: 09:00)', 'error')
+            return redirect(url_for('recurring_schedules'))
+
         # Backend validation: minimum interval is 1 minute
         if interval < 1:
             flash('Zaman aralığı en az 1 dakika olmalıdır', 'error')
             return redirect(url_for('recurring_schedules'))
-        
+
         db.add_recurring_schedule(
             int(media_id),
             days,
@@ -693,7 +720,7 @@ def api_add_recurring():
             end_time,
             interval
         )
-    
+
     flash('Tekrarlı plan oluşturuldu!', 'success')
     return redirect(url_for('recurring_schedules'))
 
@@ -703,12 +730,12 @@ def api_toggle_recurring(schedule_id):
     """Toggle a recurring schedule active state."""
     schedules = db.get_all_recurring_schedules()
     current = next((s for s in schedules if s['id'] == schedule_id), None)
-    
+
     if current:
         new_state = not current['is_active']
         db.toggle_recurring_schedule(schedule_id, new_state)
         flash('Plan durumu güncellendi', 'success')
-    
+
     return redirect(url_for('recurring_schedules'))
 
 @app.route('/api/schedules/recurring/<int:schedule_id>/delete', methods=['POST'])
@@ -719,6 +746,14 @@ def api_delete_recurring(schedule_id):
     flash('Plan silindi', 'success')
     return redirect(url_for('recurring_schedules'))
 
+@app.route('/api/schedules/recurring/delete-all-announcements', methods=['POST'])
+@login_required
+def api_delete_all_recurring_announcements():
+    """Delete all recurring announcement schedules."""
+    deleted_count = db.delete_all_recurring_announcements()
+    flash(f'{deleted_count} tekrarlı anons planı silindi', 'success')
+    return redirect(url_for('recurring_schedules'))
+
 
 # ============ SETTINGS API ============
 
@@ -727,29 +762,29 @@ def api_delete_recurring(schedule_id):
 def api_update_credentials():
     """Update admin credentials."""
     config = load_config()
-    
+
     username = request.form.get('username')
     password = request.form.get('password')
     password_confirm = request.form.get('password_confirm')
-    
+
     import logging
-    
+
     if username and username != config.get('admin_username'):
         logging.info(f"Admin username changed from {config.get('admin_username')} to {username}")
         config['admin_username'] = username
-    
+
     if password:
         # Validate password confirmation
         if password != password_confirm:
             flash('Şifreler eşleşmiyor!', 'error')
             return redirect(url_for('settings'))
-        
+
         logging.info("Admin password changed")
         config['admin_password'] = password
-    
+
     save_config(config)
     flash('Yönetici bilgileri güncellendi', 'success')
-    
+
     return redirect(url_for('settings'))
 
 
@@ -760,7 +795,7 @@ def api_get_districts():
     city = request.args.get('city')
     if not city:
         return jsonify([])
-    
+
     import prayer_times as pt
     districts = pt.get_districts(city)
     return jsonify(districts)
@@ -771,15 +806,15 @@ def api_get_districts():
 def api_update_working_hours():
     """Update working hours settings."""
     config = load_config()
-    
+
     # Checkbox sends '1' when checked, missing when unchecked
     config['working_hours_enabled'] = 'working_hours_enabled' in request.form
     config['working_hours_start'] = request.form.get('working_hours_start', '09:00')
     config['working_hours_end'] = request.form.get('working_hours_end', '22:00')
-    
+
     save_config(config)
     flash('Çalışma saatleri ayarları güncellendi', 'success')
-    
+
     return redirect(url_for('settings'))
 
 
@@ -788,22 +823,22 @@ def api_update_working_hours():
 def api_update_prayer_times():
     """Update prayer times settings."""
     config = load_config()
-    
+
     city = request.form.get('prayer_times_city', '')
     district = request.form.get('prayer_times_district', '')
-    
+
     # Validate: if city is selected, district is required
     if city and not district:
         flash('İl seçiliyken ilçe zorunludur!', 'error')
         return redirect(url_for('settings'))
-    
+
     config['prayer_times_enabled'] = 'prayer_times_enabled' in request.form
     config['prayer_times_city'] = city
     config['prayer_times_district'] = district
-    
+
     save_config(config)
     flash('Ezan vakitleri ayarları güncellendi', 'success')
-    
+
     return redirect(url_for('settings'))
 
 
@@ -823,7 +858,7 @@ if __name__ == '__main__':
     # Start scheduler
     scheduler = get_scheduler()
     scheduler.start()
-    
+
     # Run web server
     from waitress import serve
     print("AnnounceFlow Web Panel çalışıyor (Port 5000)...")
