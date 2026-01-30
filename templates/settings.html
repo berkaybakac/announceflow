@@ -322,10 +322,10 @@
     // Password validation
     function validatePasswordForm() {
         const password = document.getElementById('newPassword').value;
-        const confirm = document.getElementById('confirmPassword').value;
+        const confirmPwd = document.getElementById('confirmPassword').value;
         const errorDiv = document.getElementById('passwordError');
 
-        if (password && password !== confirm) {
+        if (password && password !== confirmPwd) {
             errorDiv.style.display = 'block';
             document.getElementById('confirmPassword').focus();
             return false;
@@ -335,7 +335,7 @@
 
         // Confirmation if password is being changed
         if (password) {
-            return confirm('⚠️ Şifrenizi değiştirmek üzeresiniz!\n\nYeni şifrenizi unutursanız sisteme ve panele erişemezsiniz.\n\nDevam etmek istediğinize emin misiniz?');
+            return window.confirm('⚠️ Şifrenizi değiştirmek üzeresiniz!\n\nYeni şifrenizi unutursanız sisteme ve panele erişemezsiniz.\n\nDevam etmek istediğinize emin misiniz?');
         }
 
         return true;
@@ -344,10 +344,10 @@
     // Real-time password match check
     document.getElementById('confirmPassword').addEventListener('input', function () {
         const password = document.getElementById('newPassword').value;
-        const confirm = this.value;
+        const confirmPwd = this.value;
         const errorDiv = document.getElementById('passwordError');
 
-        if (confirm && password !== confirm) {
+        if (confirmPwd && password !== confirmPwd) {
             errorDiv.style.display = 'block';
         } else {
             errorDiv.style.display = 'none';

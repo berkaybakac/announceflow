@@ -100,43 +100,61 @@ class Scheduler:
         while self._running:
             try:
                 config = load_config()
-                
-                # Check if we should be silent
-                if not is_within_working_hours(config):
-                    logger.debug("Outside working hours - skipping schedule check")
-                    time.sleep(self.check_interval)
-                    continue
-                
+                player = get_player()
+
+                # 1. Prayer time check - highest priority, stops EVERYTHING
                 if is_prayer_time_active(config):
-                    logger.info("Prayer time active - pausing playback")
-                    # Stop any current playback during prayer time
-                    player = get_player()
-                    if player.is_playing:
-                        player.stop()
+                    if player.is_playing or player._playlist_active:
+                        logger.info("Prayer time active - stopping all playback")
+                        player.stop_playlist()  # Also calls stop()
                     time.sleep(self.check_interval)
                     continue
-                
+
+                # 2. Working hours check
+                outside_working_hours = not is_within_working_hours(config)
+
+                if outside_working_hours:
+                    # CRITICAL FIX: Stop background music when outside working hours
+                    if player._playlist_active or player.is_playing:
+                        logger.info("Outside working hours - stopping background music")
+                        player.stop_playlist()
+
+                # 3. Always check one-time schedules (announcements play even outside hours)
                 self._check_one_time_schedules()
-                self._check_recurring_schedules()
+
+                # 4. Only check recurring schedules during working hours
+                if not outside_working_hours:
+                    self._check_recurring_schedules()
+
             except Exception as e:
                 logger.error(f"Scheduler error: {e}")
-            
+
             time.sleep(self.check_interval)
     
     def _check_one_time_schedules(self):
         """Check and trigger pending one-time schedules."""
         now = datetime.now()
         pending = db.get_pending_one_time_schedules()
-        
+
         for schedule in pending:
-            scheduled_dt = datetime.fromisoformat(schedule['scheduled_datetime'])
-            
-            # Check if it's time (within 1 minute tolerance)
+            try:
+                dt_str = schedule['scheduled_datetime']
+                # Handle multiple datetime formats
+                dt_str = dt_str.replace('T', ' ')
+                try:
+                    scheduled_dt = datetime.strptime(dt_str, '%Y-%m-%d %H:%M:%S')
+                except ValueError:
+                    scheduled_dt = datetime.strptime(dt_str, '%Y-%m-%d %H:%M')
+            except Exception as e:
+                logger.error(f"Failed to parse schedule datetime '{schedule['scheduled_datetime']}': {e}")
+                continue
+
+            # Check if it's time (within 2 minute tolerance for safety)
             time_diff = (now - scheduled_dt).total_seconds()
-            
-            if 0 <= time_diff <= 60:
+
+            if 0 <= time_diff <= 120:
                 # Time to play!
-                logger.info(f"Triggering one-time schedule: {schedule['filename']}")
+                logger.info(f"Triggering one-time schedule: {schedule['filename']} (diff: {time_diff:.0f}s)")
                 self._play_media(schedule['filepath'], schedule['id'], is_one_time=True)
             elif time_diff > 300:
                 # Missed by more than 5 minutes, mark as cancelled

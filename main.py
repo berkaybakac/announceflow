@@ -6,6 +6,7 @@ import os
 import sys
 import logging
 import signal
+import time
 from logging.handlers import RotatingFileHandler
 
 # Add current directory to path
@@ -60,9 +61,12 @@ def main():
     player = get_player()
     
     # Restore volume from database
+    # Wait for ALSA to fully initialize on Pi (prevents volume not being applied on boot)
+    time.sleep(2)
     state = db.get_playback_state()
-    if state.get('volume'):
-        player.set_volume(state['volume'])
+    volume = state.get('volume', 100)
+    player.set_volume(volume)
+    logger.info(f"Ses seviyesi ayarlandı: {volume}%")
     
     # Initialize scheduler
     logger.info("Zamanlayıcı başlatılıyor...")
