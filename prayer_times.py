@@ -107,19 +107,25 @@ def get_districts(city: str) -> List[str]:
     try:
         url = f"https://ezanvakti.emushaf.net/ilceler?sehir={city_id}"
         req = urllib.request.Request(url, headers={'User-Agent': 'AnnounceFlow/1.0'})
-        
+
         with urllib.request.urlopen(req, timeout=10) as response:
             data = json.loads(response.read().decode('utf-8'))
-            
+
             districts = []
+            district_ids = {}  # Store IDs too
             for item in data:
-                districts.append(item['IlceAdi'].title())
-            
-            # Update cache
+                name = item['IlceAdi'].title()
+                districts.append(name)
+                district_ids[name] = item['IlceID']
+
+            # Update cache - store both names and IDs
             cache["districts"][city] = sorted(districts)
+            if "district_ids" not in cache:
+                cache["district_ids"] = {}
+            cache["district_ids"][city] = district_ids
             _save_geo_cache(cache)
             return sorted(districts)
-            
+
     except Exception as e:
         logger.error(f"District fetch error for {city}: {e}")
         return []
@@ -144,74 +150,151 @@ def _save_cache(cache: Dict):
         logger.error(f"Cache save error: {e}")
 
 
+def _normalize_turkish(text: str) -> str:
+    """Normalize Turkish characters for comparison."""
+    replacements = {
+        'İ': 'I', 'ı': 'i', 'Ğ': 'G', 'ğ': 'g',
+        'Ü': 'U', 'ü': 'u', 'Ş': 'S', 'ş': 's',
+        'Ö': 'O', 'ö': 'o', 'Ç': 'C', 'ç': 'c',
+        'i̇': 'i', 'İ': 'I'  # Combining dot variants
+    }
+    for tr, en in replacements.items():
+        text = text.replace(tr, en)
+    return text.lower()
+
+
+def _get_district_id(city: str, district: str) -> Optional[str]:
+    """Get district ID for API calls."""
+    cache = _load_geo_cache()
+
+    # Ensure districts are loaded
+    if city not in cache.get("districts", {}):
+        get_districts(city)
+        cache = _load_geo_cache()
+
+    # Get district ID
+    district_ids = cache.get("district_ids", {}).get(city, {})
+    district_id = district_ids.get(district)
+
+    # Try normalized Turkish comparison
+    if not district_id:
+        district_norm = _normalize_turkish(district)
+        for name, did in district_ids.items():
+            if _normalize_turkish(name) == district_norm:
+                return did
+
+    return district_id
+
+
+def fetch_weekly_prayer_times(city: str, district: str) -> bool:
+    """
+    Fetch 7 days of prayer times and cache them.
+    This protects against internet outages during prayer times.
+
+    Returns True if successful, False otherwise.
+    """
+    cache = _load_cache()
+
+    # Get district ID for API
+    district_id = _get_district_id(city, district)
+    if not district_id:
+        logger.warning(f"Could not find district ID for {city}/{district}")
+        return False
+
+    try:
+        # Ezan Vakti API returns multiple days - use district ID
+        url = f"https://ezanvakti.emushaf.net/vakitler?ilce={district_id}"
+
+        req = urllib.request.Request(url, headers={
+            'User-Agent': 'AnnounceFlow/1.0'
+        })
+
+        with urllib.request.urlopen(req, timeout=15) as response:
+            data = json.loads(response.read().decode('utf-8'))
+
+            if data and len(data) > 0:
+                cached_count = 0
+                for day_data in data[:7]:  # Cache up to 7 days
+                    # Parse the date from API response
+                    date_str = day_data.get('MiladiTarihKisa', '')
+                    if not date_str:
+                        continue
+
+                    # Convert DD.MM.YYYY to YYYY-MM-DD
+                    try:
+                        parts = date_str.split('.')
+                        if len(parts) == 3:
+                            date_key = f"{parts[2]}-{parts[1]}-{parts[0]}"
+                        else:
+                            continue
+                    except Exception:
+                        continue
+
+                    cache_key = f"{city}_{district}_{date_key}"
+
+                    prayer_times = {
+                        'imsak': day_data.get('Imsak', ''),
+                        'gunes': day_data.get('Gunes', ''),
+                        'ogle': day_data.get('Ogle', ''),
+                        'ikindi': day_data.get('Ikindi', ''),
+                        'aksam': day_data.get('Aksam', ''),
+                        'yatsi': day_data.get('Yatsi', ''),
+                        'date': date_key
+                    }
+
+                    cache[cache_key] = prayer_times
+                    cached_count += 1
+
+                if cached_count > 0:
+                    _save_cache(cache)
+                    logger.info(f"Cached {cached_count} days of prayer times for {city}/{district}")
+                    return True
+
+    except urllib.error.URLError as e:
+        logger.error(f"Weekly prayer times API error: {e}")
+    except Exception as e:
+        logger.error(f"Weekly prayer times fetch error: {e}")
+
+    return False
+
+
 def fetch_prayer_times(city: str, district: str) -> Optional[Dict]:
     """
-    Fetch today's prayer times from API.
-    Uses Ezan Vakti API (emushaf.net) for Diyanet data.
-    
+    Fetch today's prayer times from cache or API.
+    Uses 7-day caching for resilience against internet outages.
+
     Returns dict with keys: imsak, gunes, ogle, ikindi, aksam, yatsi
     """
     today = datetime.now().strftime('%Y-%m-%d')
     cache_key = f"{city}_{district}_{today}"
-    
+
     # Check cache first
     cache = _load_cache()
     if cache_key in cache:
-        logger.debug(f"Using cached prayer times for {city}/{district}")
+        logger.debug(f"Using cached prayer times for {city}/{district} ({today})")
         return cache[cache_key]
-    
-    # Try to fetch from API
-    try:
-        # Using Ezan Vakti API
-        url = f"https://ezanvakti.emushaf.net/vakitler?il={city}&ilce={district}"
-        
-        req = urllib.request.Request(url, headers={
-            'User-Agent': 'AnnounceFlow/1.0'
-        })
-        
-        with urllib.request.urlopen(req, timeout=10) as response:
-            data = json.loads(response.read().decode('utf-8'))
-            
-            if data and len(data) > 0:
-                # Get today's times
-                today_data = data[0]
-                
-                prayer_times = {
-                    'imsak': today_data.get('Imsak', ''),
-                    'gunes': today_data.get('Gunes', ''),
-                    'ogle': today_data.get('Ogle', ''),
-                    'ikindi': today_data.get('Ikindi', ''),
-                    'aksam': today_data.get('Aksam', ''),
-                    'yatsi': today_data.get('Yatsi', ''),
-                    'date': today
-                }
-                
-                # Cache the result
-                cache[cache_key] = prayer_times
-                _save_cache(cache)
-                
-                logger.info(f"Fetched prayer times for {city}/{district}: {prayer_times}")
-                return prayer_times
-                
-    except urllib.error.URLError as e:
-        logger.error(f"Prayer times API error: {e}")
-    except Exception as e:
-        logger.error(f"Prayer times fetch error: {e}")
-    
-    # Fallback: Try alternative API
+
+    # Cache miss - try to fetch weekly data
+    if fetch_weekly_prayer_times(city, district):
+        # Reload cache and check again
+        cache = _load_cache()
+        if cache_key in cache:
+            return cache[cache_key]
+
+    # Fallback: Try single-day fetch from alternative API
     try:
         url = f"https://api.collectapi.com/pray/all?data.city={city}"
         req = urllib.request.Request(url, headers={
             'User-Agent': 'AnnounceFlow/1.0',
             'content-type': 'application/json'
         })
-        
+
         with urllib.request.urlopen(req, timeout=10) as response:
             data = json.loads(response.read().decode('utf-8'))
-            
+
             if data.get('success') and data.get('result'):
                 result = data['result'][0] if isinstance(data['result'], list) else data['result']
-                
+
                 prayer_times = {
                     'imsak': result.get('imsak', ''),
                     'gunes': result.get('gunes', ''),
@@ -221,16 +304,23 @@ def fetch_prayer_times(city: str, district: str) -> Optional[Dict]:
                     'yatsi': result.get('yatsi', ''),
                     'date': today
                 }
-                
+
                 cache[cache_key] = prayer_times
                 _save_cache(cache)
-                
+
                 logger.info(f"Fetched prayer times (alt API) for {city}: {prayer_times}")
                 return prayer_times
-                
+
     except Exception as e:
         logger.error(f"Alternative API error: {e}")
-    
+
+    # Last resort: Check if we have ANY cached data for this city/district
+    # (might be from a different day but better than nothing)
+    for key, value in cache.items():
+        if key.startswith(f"{city}_{district}_"):
+            logger.warning(f"Using stale cache for {city}/{district} - no fresh data available")
+            return value
+
     return None
 
 
