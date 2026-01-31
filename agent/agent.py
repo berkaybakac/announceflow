@@ -181,6 +181,26 @@ class AnnounceFlowAgent:
         except requests.exceptions.RequestException:
             return False
 
+    def start_playlist(self):
+        """Start background music playlist (loop)."""
+        if not self.session:
+            return False
+        try:
+            response = self.session.post(f"{self.api_base}/api/playlist/start-all")
+            return response.ok
+        except requests.exceptions.RequestException:
+            return False
+
+    def stop_playlist(self):
+        """Stop background music playlist."""
+        if not self.session:
+            return False
+        try:
+            response = self.session.post(f"{self.api_base}/api/playlist/stop")
+            return response.ok
+        except requests.exceptions.RequestException:
+            return False
+
     def set_volume(self, volume):
         """Set volume level."""
         if not self.session:
@@ -330,10 +350,10 @@ class AgentGUI:
         
         # Colored buttons for better visibility
         btn_configs = [
-            ("🎵 Müzik Çal", self.play_music_dialog, "#22c55e", "#4ade80"),
+            ("🎵 Müzikleri Başlat", self.start_music, "#22c55e", "#4ade80"),
+            ("⏹️ Durdur", self.stop_music, "#ef4444", "#f87171"),
             ("📤 Anons Yükle", self.upload_announcement, "#6366f1", "#818cf8"),
             ("🌐 Web Panel", self.open_web_panel, "#3b82f6", "#60a5fa"),
-            ("⏹️ Durdur", self.stop_playback, "#ef4444", "#f87171"),
         ]
         
         for text, command, bg_color, hover_color in btn_configs:
@@ -366,19 +386,19 @@ class AgentGUI:
         ModernButton(content, text="Çıkış Yap", command=self.logout,
                     bg_color="#ef4444", hover_color="#f87171").pack(fill='x', pady=(30,0))
     
-    def play_music_dialog(self):
-        """Open a dialog to select and play a music file."""
-        filepath = filedialog.askopenfilename(
-            title="Müzik Dosyası Seç",
-            filetypes=[("Audio Files", "*.mp3 *.wav *.ogg"), ("All Files", "*.*")]
-        )
-        
-        if filepath:
-            # Upload and play
-            if self.agent.upload_file(filepath, "music"):
-                messagebox.showinfo("Başarılı", "Müzik dosyası yüklendi ve çalınacak!")
-            else:
-                messagebox.showerror("Hata", "Dosya yüklenemedi.")
+    def start_music(self):
+        """Start background music playlist (loop)."""
+        if self.agent.start_playlist():
+            messagebox.showinfo("Başarılı", "Arka plan müzik başlatıldı!")
+        else:
+            messagebox.showerror("Hata", "Müzik başlatılamadı.")
+
+    def stop_music(self):
+        """Stop current playback."""
+        if self.agent.stop_playlist():
+            messagebox.showinfo("Başarılı", "Müzik durduruldu.")
+        else:
+            messagebox.showerror("Hata", "İşlem başarısız.")
     
     def upload_announcement(self):
         """Upload an announcement file."""
@@ -396,13 +416,6 @@ class AgentGUI:
     def open_web_panel(self):
         """Open web panel in browser."""
         webbrowser.open(self.agent.api_base)
-    
-    def stop_playback(self):
-        """Stop current playback."""
-        if self.agent.stop_playback():
-            messagebox.showinfo("Başarılı", "Oynatma durduruldu.")
-        else:
-            messagebox.showerror("Hata", "İşlem başarısız.")
     
     def on_volume_change(self, value):
         """Handle volume change."""
