@@ -17,7 +17,7 @@ venv/
 
 # Project Config & Docs
 config.json
-SUNUM_REHBERI.md
+docs/
 
 # Media (Ignore all except placeholder)
 media/*
