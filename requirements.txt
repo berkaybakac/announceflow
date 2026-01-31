@@ -1,13 +1,61 @@
-# Core Framework
-flask>=3.0.0
-waitress>=3.0.0
+# AnnounceFlow Full Dependencies
+# Generated for zero-error installation on new machines.
 
-# Dependencies
-requests>=2.31.0
-pygame>=2.5.0
-pystray>=0.19.0
-Pillow>=10.0.0
+# ---------------------------------------------------------
+# Core Web Framework (Flask Stack)
+# ---------------------------------------------------------
+Flask==3.0.0         # Web Application Framework
+Werkzeug==3.0.1      # WSGI Web Application Library
+Jinja2==3.1.2        # Templating Engine
+click==8.1.7         # Composable Command Line Interface
+itsdangerous==2.1.2  # Secure Data Helpers
+blinker==1.6.3       # Fast Broadcasting Signals
 
-# System Dependencies (Pre-installed on Pi, required for operation)
-# - ffmpeg (for audio conversion & duration)
-# - mpg123 (for audio playback)
+# ---------------------------------------------------------
+# Production Server
+# ---------------------------------------------------------
+waitress==3.0.0      # Production-quality pure-Python WSGI server
+
+# ---------------------------------------------------------
+# Network & API Clients
+# ---------------------------------------------------------
+requests==2.31.0     # HTTP Library for Python
+urllib3==2.0.7       # HTTP Library with thread-safe connection pooling
+certifi==2023.7.22   # Python package for providing Mozilla's CA Bundle
+charset-normalizer==3.3.0 # The Real First Class Charset/Encoding Detector
+idna==3.4            # Internationalized Domain Names in Applications
+
+# ---------------------------------------------------------
+# Audio & Multimedia
+# ---------------------------------------------------------
+pygame==2.5.2        # Cross-platform library for multimedia (Audio fallback)
+
+# ---------------------------------------------------------
+# Windows Agent Build Tools
+# ---------------------------------------------------------
+pyinstaller==6.3.0   # Bundle a Python application and all its dependencies
+pyinstaller-hooks-contrib==2023.10 # Community maintained hooks
+altgraph==0.17.4     # Python graph (network) package
+macholib==1.16.3     # Mach-O header analysis and editing (for Mac builds)
+pefile==2023.2.7     # Python portable executable watcher
+
+# ---------------------------------------------------------
+# Utilities
+# ---------------------------------------------------------
+typing-extensions==4.9.0 # Backported and Experimental Type Hints
+
+# ---------------------------------------------------------
+# System Requirements (Cannot be installed via pip)
+# ---------------------------------------------------------
+# These must be installed via your OS package manager:
+#
+# Ubuntu / Raspberry Pi OS:
+#   sudo apt update
+#   sudo apt install -y ffmpeg mpg123 python3-tk
+#
+# macOS (Homebrew):
+#   brew install ffmpeg mpg123 python-tk
+#
+# Windows:
+#   1. Download ffmpeg from ffmpeg.org and add to PATH
+#   2. Python installation usually includes tkinter
