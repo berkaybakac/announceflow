@@ -409,7 +409,11 @@ def update_playback_state(
     
     if current_media_id is not None:
         updates.append('current_media_id = ?')
-        values.append(current_media_id if current_media_id > 0 else None)
+        try:
+            mid = int(current_media_id)
+            values.append(mid if mid > 0 else None)
+        except (ValueError, TypeError):
+            values.append(None)
     if position_seconds is not None:
         updates.append('position_seconds = ?')
         values.append(position_seconds)
