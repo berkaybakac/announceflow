@@ -116,7 +116,10 @@ class Scheduler:
                                 'active': player._playlist_active
                             }
                             logger.info(f"Prayer time - saving playlist state (index={player._playlist_index}, tracks={len(player._playlist)})")
-                        player.stop_playlist()
+                        # Use stop() instead of stop_playlist() to preserve DB state
+                        # Playlist will auto-resume from DB on restart
+                        player.stop()
+                        player._playlist_active = False  # Temporarily disable without clearing
                     time.sleep(self.check_interval)
                     continue
 
@@ -131,6 +134,13 @@ class Scheduler:
                         player._playlist_loop = state['loop']
                         player._playlist_index = state['index']
                         player._playlist_active = True
+                        # Sync to DB and play next
+                        db.save_playlist_state(
+                            playlist=state['playlist'],
+                            index=state['index'],
+                            loop=state['loop'],
+                            active=True
+                        )
                         player.play_next()
 
                 # 2. Working hours check
@@ -147,7 +157,9 @@ class Scheduler:
                                 'active': player._playlist_active
                             }
                             logger.info(f"Outside working hours - saving playlist state (index={player._playlist_index}, tracks={len(player._playlist)})")
-                        player.stop_playlist()
+                        # Use stop() instead of stop_playlist() to preserve DB state
+                        player.stop()
+                        player._playlist_active = False  # Temporarily disable without clearing
                 else:
                     # Working hours started - restore playlist if we saved state
                     if self._working_hours_pause_state is not None:
@@ -160,6 +172,13 @@ class Scheduler:
                             player._playlist_loop = state['loop']
                             player._playlist_index = state['index']
                             player._playlist_active = True
+                            # Sync to DB and play next
+                            db.save_playlist_state(
+                                playlist=state['playlist'],
+                                index=state['index'],
+                                loop=state['loop'],
+                                active=True
+                            )
                             player.play_next()
 
                 # 3. Always check one-time schedules (announcements play even outside hours)
@@ -302,7 +321,7 @@ class Scheduler:
                         # Wait for current playback to finish
                         while player.is_playing:
                             time.sleep(0.5)
-                        
+
                         # Restore playlist if it was active
                         if playlist_was_active and playlist_files:
                             logger.info(f"Announcement finished - resuming playlist from index {playlist_index + 1}")
@@ -312,8 +331,15 @@ class Scheduler:
                             next_idx = (playlist_index + 1) % len(playlist_files)
                             player._playlist_index = next_idx - 1  # Will be incremented by play_next
                             player._playlist_active = True
+                            # Sync to DB before playing
+                            db.save_playlist_state(
+                                playlist=playlist_files,
+                                index=next_idx - 1,
+                                loop=playlist_loop,
+                                active=True
+                            )
                             player.play_next()
-                    
+
                     # Run restore in background thread
                     threading.Thread(target=restore_playlist, daemon=True).start()
             else:

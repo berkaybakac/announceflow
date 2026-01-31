@@ -10,6 +10,8 @@ import threading
 import time
 from typing import Optional, Callable
 
+import database as db
+
 logger = logging.getLogger(__name__)
 
 # Detect available audio backend
@@ -76,11 +78,20 @@ class AudioPlayer:
         """Set a playlist of files to play sequentially."""
         if not file_paths:
             return False
-        
+
         self._playlist = file_paths
         self._playlist_index = -1
         self._playlist_loop = loop
         self._playlist_active = True
+
+        # Persist to database for auto-resume on restart
+        db.save_playlist_state(
+            playlist=file_paths,
+            index=-1,
+            loop=loop,
+            active=True
+        )
+
         logger.info(f"Playlist set with {len(file_paths)} tracks, loop={loop}")
         return True
     
@@ -88,27 +99,36 @@ class AudioPlayer:
         """Start playing the playlist from the beginning."""
         if not self._playlist:
             return False
-        
+
         self._playlist_index = 0
         self._playlist_active = True
+
+        # Persist to database
+        db.save_playlist_state(index=0, active=True)
+
         return self.play(self._playlist[0])
     
     def play_next(self) -> bool:
         """Play the next track in the playlist."""
         if not self._playlist:
             return False
-        
+
         next_index = self._playlist_index + 1
-        
+
         if next_index >= len(self._playlist):
             if self._playlist_loop:
                 next_index = 0
             else:
                 self._playlist_active = False
+                db.save_playlist_state(active=False)
                 logger.info("Playlist ended (no loop)")
                 return False
-        
+
         self._playlist_index = next_index
+
+        # Persist current index to database
+        db.save_playlist_state(index=next_index, active=True)
+
         logger.info(f"Playing next track: {next_index + 1}/{len(self._playlist)}")
         return self.play(self._playlist[next_index])
     
@@ -118,6 +138,9 @@ class AudioPlayer:
         self._playlist = []
         self._playlist_index = -1
         self.stop()
+
+        # Persist stopped state to database (won't auto-resume on restart)
+        db.save_playlist_state(active=False, index=-1)
     
     def get_playlist_state(self) -> dict:
         """Get current playlist state."""
