@@ -125,7 +125,7 @@ def _run_migrations():
     """Run database migrations for schema updates."""
     conn = get_db_connection()
     cursor = conn.cursor()
-    
+
     # Migration: Add 'reason' column to one_time_schedules if it doesn't exist
     try:
         cursor.execute("SELECT reason FROM one_time_schedules LIMIT 1")
@@ -133,7 +133,17 @@ def _run_migrations():
         # Column doesn't exist, add it
         cursor.execute("ALTER TABLE one_time_schedules ADD COLUMN reason TEXT")
         conn.commit()
-    
+
+    # Migration: Add playlist state columns to playback_state
+    try:
+        cursor.execute("SELECT playlist_json FROM playback_state LIMIT 1")
+    except sqlite3.OperationalError:
+        cursor.execute("ALTER TABLE playback_state ADD COLUMN playlist_json TEXT")
+        cursor.execute("ALTER TABLE playback_state ADD COLUMN playlist_index INTEGER DEFAULT -1")
+        cursor.execute("ALTER TABLE playback_state ADD COLUMN playlist_loop INTEGER DEFAULT 1")
+        cursor.execute("ALTER TABLE playback_state ADD COLUMN playlist_active INTEGER DEFAULT 0")
+        conn.commit()
+
     conn.close()
 
 
@@ -432,6 +442,66 @@ def update_playback_state(
     
     conn.close()
     return True
+
+
+# ============ PLAYLIST STATE ============
+
+def save_playlist_state(
+    playlist: Optional[List[str]] = None,
+    index: Optional[int] = None,
+    loop: Optional[bool] = None,
+    active: Optional[bool] = None
+) -> bool:
+    """Save playlist state to database for persistence across restarts."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    updates = []
+    values = []
+
+    if playlist is not None:
+        updates.append('playlist_json = ?')
+        values.append(json.dumps(playlist) if playlist else None)
+    if index is not None:
+        updates.append('playlist_index = ?')
+        values.append(index)
+    if loop is not None:
+        updates.append('playlist_loop = ?')
+        values.append(1 if loop else 0)
+    if active is not None:
+        updates.append('playlist_active = ?')
+        values.append(1 if active else 0)
+
+    if updates:
+        updates.append('updated_at = CURRENT_TIMESTAMP')
+        query = f"UPDATE playback_state SET {', '.join(updates)} WHERE id = 1"
+        cursor.execute(query, values)
+        conn.commit()
+
+    conn.close()
+    return True
+
+
+def get_playlist_state() -> Dict[str, Any]:
+    """Get saved playlist state from database."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT playlist_json, playlist_index, playlist_loop, playlist_active
+        FROM playback_state WHERE id = 1
+    ''')
+    row = cursor.fetchone()
+    conn.close()
+
+    if row:
+        playlist_json = row['playlist_json']
+        return {
+            'playlist': json.loads(playlist_json) if playlist_json else [],
+            'index': row['playlist_index'] if row['playlist_index'] is not None else -1,
+            'loop': bool(row['playlist_loop']) if row['playlist_loop'] is not None else True,
+            'active': bool(row['playlist_active']) if row['playlist_active'] is not None else False
+        }
+    return {'playlist': [], 'index': -1, 'loop': True, 'active': False}
 
 
 # Initialize on import

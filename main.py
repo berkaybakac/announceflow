@@ -67,7 +67,34 @@ def main():
     volume = state.get('volume', 100)
     player.set_volume(volume)
     logger.info(f"Ses seviyesi ayarlandı: {volume}%")
-    
+
+    # Auto-restore playlist from database (resume from last state)
+    playlist_state = db.get_playlist_state()
+    if playlist_state.get('active') and playlist_state.get('playlist'):
+        playlist = playlist_state['playlist']
+        index = playlist_state.get('index', 0)
+        loop = playlist_state.get('loop', True)
+
+        # Filter out non-existent files
+        valid_playlist = [f for f in playlist if os.path.exists(f)]
+
+        if valid_playlist:
+            logger.info(f"Playlist restore ediliyor: {len(valid_playlist)} şarkı, index={index}")
+            player._playlist = valid_playlist
+            player._playlist_loop = loop
+            player._playlist_active = True
+
+            # Adjust index if files were removed
+            if index >= len(valid_playlist):
+                index = 0
+            player._playlist_index = index - 1  # Will be incremented by play_next
+
+            # Start playing from saved position
+            player.play_next()
+            logger.info("Playlist otomatik başlatıldı!")
+        else:
+            logger.warning("Kaydedilmiş playlist'teki dosyalar bulunamadı")
+
     # Initialize scheduler
     logger.info("Zamanlayıcı başlatılıyor...")
     scheduler = get_scheduler()
