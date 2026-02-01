@@ -3,6 +3,7 @@ AnnounceFlow - Audio Player
 Raspberry Pi optimized audio playback using mpg123.
 Falls back to pygame for development on Mac/Windows.
 """
+import platform
 import os
 import logging
 import subprocess
@@ -17,6 +18,15 @@ logger = logging.getLogger(__name__)
 # Detect available audio backend
 def _detect_backend():
     """Detect best available audio backend."""
+    # On macOS, force pygame for better development experience
+    if platform.system() == 'Darwin':
+        try:
+            import pygame
+            pygame.mixer.init()
+            return 'pygame'
+        except (ImportError, Exception):
+            pass
+
     # Check for mpg123 first (preferred for Pi)
     try:
         result = subprocess.run(['which', 'mpg123'], capture_output=True, text=True)
@@ -193,9 +203,16 @@ class AudioPlayer:
         try:
             # Start mpg123 process with FIXED max scale (32768)
             # Volume is controlled SOLELY by ALSA amixer to avoid double-volume curve
-            # Use -a plughw:2,0 to force output to headphone jack (Pi 4 specific)
+            args = ['mpg123', '-q', '--scale', '32768']
+            
+            # Only add hardware device arg on Linux/Pi for headphone jack forcing
+            if platform.system() == 'Linux':
+                args.extend(['-a', 'plughw:2,0'])
+            
+            args.append(file_path)
+
             self._process = subprocess.Popen(
-                ['mpg123', '-a', 'plughw:2,0', '-q', '--scale', '32768', file_path],
+                args,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL
             )
@@ -289,29 +306,37 @@ class AudioPlayer:
         
         if AUDIO_BACKEND == 'pygame':
             import pygame
-            pygame.mixer.music.set_volume(volume / 100.0)
+            # Ensure mixer is init
+            if not pygame.mixer.get_init():
+                try: 
+                    pygame.mixer.init()
+                except:
+                    pass
+            if pygame.mixer.get_init():
+                pygame.mixer.music.set_volume(volume / 100.0)
         
-        # Always try to set hardware volume on Pi (mpg123 or others)
-        try:
-            # Map UI volume (0-100) to Hardware volume (55-100)
-            # ALSA dB scale is not linear, so we clamp the bottom end
-            # Formula: 55 + (ui/100)^1.6 * 45
-            if volume <= 0:
-                hw_volume = 0
-            else:
-                hw_volume = int(round(55 + (volume / 100.0) ** 1.6 * 45))
+        # Always try to set hardware volume on Pi (mpg123 or others), but only on Linux
+        if platform.system() == 'Linux':
+            try:
+                # Map UI volume (0-100) to Hardware volume (55-100)
+                # ALSA dB scale is not linear, so we clamp the bottom end
+                # Formula: 55 + (ui/100)^1.6 * 45
+                if volume <= 0:
+                    hw_volume = 0
+                else:
+                    hw_volume = int(round(55 + (volume / 100.0) ** 1.6 * 45))
 
-            result = subprocess.run(
-                ['amixer', '-c', '2', 'set', 'PCM', f'{hw_volume}%', 'unmute'],
-                capture_output=True,
-                text=True
-            )
-            if result.returncode == 0:
-                logger.info(f"Volume set to: {volume}% (HW: {hw_volume}%)")
-            else:
-                logger.warning(f"amixer failed (code {result.returncode}): {result.stderr}")
-        except (subprocess.SubprocessError, OSError) as e:
-            logger.warning(f"Failed to set hardware volume: {e}")
+                result = subprocess.run(
+                    ['amixer', '-c', '2', 'set', 'PCM', f'{hw_volume}%', 'unmute'],
+                    capture_output=True,
+                    text=True
+                )
+                if result.returncode == 0:
+                    logger.info(f"Volume set to: {volume}% (HW: {hw_volume}%)")
+                else:
+                    logger.warning(f"amixer failed (code {result.returncode}): {result.stderr}")
+            except (subprocess.SubprocessError, OSError) as e:
+                logger.warning(f"Failed to set hardware volume: {e}")
             
         return True
     
