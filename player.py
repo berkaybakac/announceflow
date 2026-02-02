@@ -318,21 +318,24 @@ class AudioPlayer:
         # Always try to set hardware volume on Pi (mpg123 or others), but only on Linux
         if platform.system() == 'Linux':
             try:
-                # Map UI volume (0-100) to Hardware volume (55-100)
-                # ALSA dB scale is not linear, so we clamp the bottom end
-                # Formula: 55 + (ui/100)^1.6 * 45
+                # Direct 1:1 mapping (UI 0-100 -> HW 0-100)
+                # The hardware/driver already handles the logarithmic curve (dB scale).
                 if volume <= 0:
-                    hw_volume = 0
+                    # True mute - 0% unmute still produces faint audio
+                    result = subprocess.run(
+                        ['amixer', '-c', '2', 'set', 'PCM', 'mute'],
+                        capture_output=True,
+                        text=True
+                    )
                 else:
-                    hw_volume = int(round(55 + (volume / 100.0) ** 1.6 * 45))
-
-                result = subprocess.run(
-                    ['amixer', '-c', '2', 'set', 'PCM', f'{hw_volume}%', 'unmute'],
-                    capture_output=True,
-                    text=True
-                )
+                    result = subprocess.run(
+                        ['amixer', '-c', '2', 'set', 'PCM', f'{volume}%', 'unmute'],
+                        capture_output=True,
+                        text=True
+                    )
+                
                 if result.returncode == 0:
-                    logger.info(f"Volume set to: {volume}% (HW: {hw_volume}%)")
+                    logger.info(f"Volume set to: {volume}%")
                 else:
                     logger.warning(f"amixer failed (code {result.returncode}): {result.stderr}")
             except (subprocess.SubprocessError, OSError) as e:

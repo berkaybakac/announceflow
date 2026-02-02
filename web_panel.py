@@ -348,6 +348,27 @@ def settings():
 
 # ============ PLAYER API ============
 
+@app.route('/api/health')
+def api_health():
+    """System health check endpoint (no auth required)."""
+    import time as time_module
+    player = get_player()
+    scheduler = get_scheduler()
+
+    return jsonify({
+        'status': 'ok',
+        'player': {
+            'is_playing': player.is_playing,
+            'backend': player.get_state().get('backend'),
+            'volume': player.get_volume()
+        },
+        'scheduler': {
+            'running': scheduler._running
+        },
+        'timestamp': int(time_module.time())
+    })
+
+
 @app.route('/api/now-playing')
 @login_required
 def api_now_playing():

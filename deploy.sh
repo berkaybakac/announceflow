@@ -66,8 +66,14 @@ rsync -avz --progress \
     ./ ${PI_USER}@${PI_HOST}:${DEST_DIR}/
 
 echo ""
-echo "[3/5] Installing dependencies on Pi..."
-ssh ${SSH_OPTS} ${PI_USER}@${PI_HOST} "cd ${DEST_DIR} && pip3 install --break-system-packages -r requirements.txt"
+# 2.5 Install system dependencies (mpg123 needed for audio)
+echo "[2.5/5] Installing system dependencies (mpg123, ffmpeg)..."
+ssh ${SSH_OPTS} ${PI_USER}@${PI_HOST} "sudo apt-get update && sudo apt-get install -y mpg123 ffmpeg alsa-utils"
+
+echo ""
+echo "[3/5] Installing Python dependencies on Pi..."
+# Filter out pygame and desktop build tools (pyinstaller, etc) from requirements.txt
+ssh ${SSH_OPTS} ${PI_USER}@${PI_HOST} "cd ${DEST_DIR} && grep -vE 'pygame|pyinstaller|altgraph|macholib|pefile' requirements.txt > requirements_pi.txt && pip3 install --break-system-packages -r requirements_pi.txt"
 
 echo ""
 echo "[4/5] Creating systemd service file..."
