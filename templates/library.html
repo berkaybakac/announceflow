@@ -121,6 +121,9 @@
                         <button class="btn btn-outline btn-sm" onclick="playFile('{{ file.id }}')">
                             Çal
                         </button>
+                        <button class="btn btn-outline-danger btn-sm" onclick="stopPlayback()">
+                            Dur
+                        </button>
                         <form action="/api/media/{{ file.id }}/delete" method="POST" style="display: inline;">
                             <button type="submit" class="btn btn-danger btn-sm"
                                 onclick="return confirm('Bu dosyayı silmek istediğinize emin misiniz?')">
@@ -186,6 +189,9 @@
                         <button class="btn btn-outline btn-sm" onclick="playFile('{{ file.id }}')">
                             Çal
                         </button>
+                        <button class="btn btn-outline-danger btn-sm" onclick="stopPlayback()">
+                            Dur
+                        </button>
                         <form action="/api/media/{{ file.id }}/delete" method="POST" style="display: inline;">
                             <button type="submit" class="btn btn-danger btn-sm"
                                 onclick="return confirm('Bu dosyayı silmek istediğinize emin misiniz?')">
@@ -208,18 +214,39 @@
 
 {% block extra_js %}
 <script>
-    // Section Toggle
+    // Section Toggle with Persistence
     function toggleSection(type) {
         const section = document.getElementById(type + 'Section');
         const toggle = document.getElementById(type + 'Toggle');
+
         if (section.style.display === 'none') {
             section.style.display = 'block';
             toggle.textContent = '▼';
+            localStorage.setItem('section_' + type, 'open');
         } else {
             section.style.display = 'none';
             toggle.textContent = '►';
+            localStorage.setItem('section_' + type, 'closed');
         }
     }
+
+    // Initialize sections from localStorage
+    document.addEventListener('DOMContentLoaded', function () {
+        ['music', 'announcement'].forEach(type => {
+            const state = localStorage.getItem('section_' + type);
+            const section = document.getElementById(type + 'Section');
+            const toggle = document.getElementById(type + 'Toggle');
+
+            if (state === 'open') {
+                section.style.display = 'block';
+                toggle.textContent = '▼';
+            } else {
+                // Default is closed (already set in HTML style="display: none")
+                section.style.display = 'none';
+                toggle.textContent = '►';
+            }
+        });
+    });
 
     // Search/Filter
     function filterFiles() {
@@ -310,9 +337,18 @@
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ media_id: mediaId })
             });
-            alert('Çalınıyor!');
+            // Show toast or simple alert (optional, but keep it minimal)
         } catch (error) {
             console.error('Error playing file:', error);
+        }
+    }
+
+    // Stop Playback
+    async function stopPlayback() {
+        try {
+            await fetch('/api/stop', { method: 'POST' });
+        } catch (error) {
+            console.error('Error stopping playback:', error);
         }
     }
 </script>
