@@ -44,6 +44,8 @@
                 onchange="setVolume(this.value)">
             <span id="volumeValue">80%</span>
         </div>
+        <small style="color: var(--text-muted); margin-top: 4px; display: block;">0-9% = Sessiz | 10-100% = Pi4 için
+            kalibre edilmiştir</small>
     </div>
 </div>
 
@@ -55,7 +57,8 @@
     </div>
 
     <p style="color: var(--text-muted); margin-bottom: 16px;">
-        Kütüphanedeki tüm müzikler sırayla ve loop olarak çalınır. Anons geldiğinde müzik otomatik durur, anons bitince devam eder.
+        Kütüphanedeki tüm müzikler sırayla ve loop olarak çalınır. Anons geldiğinde müzik otomatik durur, anons bitince
+        devam eder.
     </p>
 
     <div style="display: flex; gap: 12px; flex-wrap: wrap;">
@@ -85,7 +88,8 @@
 
         <!-- Genişletilebilir Liste -->
         <div id="songListContainer" style="display: none; margin-top: 12px;">
-            <div id="songList" style="max-height: 400px; overflow-y: auto; background: var(--bg-input); border-radius: 8px; padding: 8px;">
+            <div id="songList"
+                style="max-height: 400px; overflow-y: auto; background: var(--bg-input); border-radius: 8px; padding: 8px;">
                 <!-- Şarkılar buraya yüklenecek -->
             </div>
         </div>
@@ -224,8 +228,8 @@
                 totalTimeEl.textContent = '0:00';
             }
 
-            volumeSlider.value = data.volume || 80;
-            volumeValue.textContent = `${data.volume || 80}%`;
+            volumeSlider.value = data.volume ?? 80;
+            volumeValue.textContent = `${data.volume ?? 80}%`;
 
         } catch (error) {
             console.error('Error fetching player state:', error);
@@ -378,8 +382,8 @@
                 totalTimeEl.textContent = '0:00';
             }
 
-            volumeSlider.value = data.volume || 80;
-            volumeValue.textContent = (data.volume || 80) + '%';
+            volumeSlider.value = data.volume ?? 80;
+            volumeValue.textContent = (data.volume ?? 80) + '%';
 
             // Update playlist status
             const playlistBadge = document.getElementById('playlistBadge');
@@ -470,7 +474,7 @@
             const data = await response.json();
             musicFiles = data.files || [];
             document.getElementById('songCount').textContent = musicFiles.length;
-        } catch (e) {}
+        } catch (e) { }
     })();
 </script>
 {% endblock %}

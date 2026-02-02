@@ -31,3 +31,7 @@ agent/dist/
 
 # Cache
 *_cache.json
+
+# Service and test files
+announceflow.service
+tests/test_api.py
