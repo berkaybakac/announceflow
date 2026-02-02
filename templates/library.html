@@ -69,8 +69,8 @@
 <!-- Search Box -->
 <div class="card animate-in">
     <div style="display: flex; gap: 16px; align-items: center;">
-        <input type="text" class="form-input" id="searchInput" placeholder="Dosya ara..."
-               onkeyup="filterFiles()" style="flex: 1;">
+        <input type="text" class="form-input" id="searchInput" placeholder="Dosya ara..." onkeyup="filterFiles()"
+            style="flex: 1;">
         <span id="searchResult" style="color: var(--text-muted); font-size: 0.9rem;"></span>
     </div>
 </div>
@@ -81,18 +81,19 @@
         <h3 class="card-title">Müzik Dosyaları</h3>
         <div style="display: flex; align-items: center; gap: 12px;">
             <span class="badge badge-primary">{{ music_files|length }} dosya</span>
-            <span id="musicToggle" style="font-size: 1.2rem;">▼</span>
+            <span id="musicToggle" style="font-size: 1.2rem;">►</span>
         </div>
     </div>
 
-    <div id="musicSection">
+    <div id="musicSection" style="display: none;">
         {% if music_files %}
         <div style="margin-bottom: 12px; display: flex; gap: 12px; align-items: center;">
             <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
                 <input type="checkbox" id="selectAllMusic" onchange="toggleSelectAll('music')">
                 <span style="color: var(--text-muted);">Tümünü Seç</span>
             </label>
-            <button class="btn btn-danger btn-sm" onclick="deleteSelected('music')" id="deleteSelectedMusic" style="display: none;">
+            <button class="btn btn-danger btn-sm" onclick="deleteSelected('music')" id="deleteSelectedMusic"
+                style="display: none;">
                 Seçilenleri Sil (<span id="musicSelectedCount">0</span>)
             </button>
         </div>
@@ -109,7 +110,8 @@
                 {% for file in music_files %}
                 <tr data-filename="{{ file.filename|lower }}">
                     <td>
-                        <input type="checkbox" class="file-checkbox music-checkbox" value="{{ file.id }}" onchange="updateDeleteButton('music')">
+                        <input type="checkbox" class="file-checkbox music-checkbox" value="{{ file.id }}"
+                            onchange="updateDeleteButton('music')">
                     </td>
                     <td>
                         <strong>{{ file.filename }}</strong>
@@ -144,18 +146,19 @@
         <h3 class="card-title">Anons Dosyaları</h3>
         <div style="display: flex; align-items: center; gap: 12px;">
             <span class="badge badge-warning">{{ announcement_files|length }} dosya</span>
-            <span id="announcementToggle" style="font-size: 1.2rem;">▼</span>
+            <span id="announcementToggle" style="font-size: 1.2rem;">►</span>
         </div>
     </div>
 
-    <div id="announcementSection">
+    <div id="announcementSection" style="display: none;">
         {% if announcement_files %}
         <div style="margin-bottom: 12px; display: flex; gap: 12px; align-items: center;">
             <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
                 <input type="checkbox" id="selectAllAnnouncement" onchange="toggleSelectAll('announcement')">
                 <span style="color: var(--text-muted);">Tümünü Seç</span>
             </label>
-            <button class="btn btn-danger btn-sm" onclick="deleteSelected('announcement')" id="deleteSelectedAnnouncement" style="display: none;">
+            <button class="btn btn-danger btn-sm" onclick="deleteSelected('announcement')"
+                id="deleteSelectedAnnouncement" style="display: none;">
                 Seçilenleri Sil (<span id="announcementSelectedCount">0</span>)
             </button>
         </div>
@@ -172,7 +175,8 @@
                 {% for file in announcement_files %}
                 <tr data-filename="{{ file.filename|lower }}">
                     <td>
-                        <input type="checkbox" class="file-checkbox announcement-checkbox" value="{{ file.id }}" onchange="updateDeleteButton('announcement')">
+                        <input type="checkbox" class="file-checkbox announcement-checkbox" value="{{ file.id }}"
+                            onchange="updateDeleteButton('announcement')">
                     </td>
                     <td>
                         <strong>{{ file.filename }}</strong>
