@@ -248,26 +248,58 @@
         });
     });
 
-    // Search/Filter
+    // Search/Filter (Smart Expansion)
     function filterFiles() {
         const query = document.getElementById('searchInput').value.toLowerCase().trim();
-        let visibleCount = 0;
-        let totalCount = 0;
+        let totalVisible = 0;
 
-        document.querySelectorAll('table tbody tr').forEach(row => {
-            totalCount++;
-            const filename = row.getAttribute('data-filename') || '';
-            if (filename.includes(query)) {
-                row.style.display = '';
-                visibleCount++;
+        const processSection = (type) => {
+            let sectionVisibleCount = 0;
+            const rows = document.querySelectorAll(`#${type}Table tbody tr`);
+
+            rows.forEach(row => {
+                const filename = row.getAttribute('data-filename') || '';
+                if (filename.includes(query)) {
+                    row.style.display = '';
+                    sectionVisibleCount++;
+                } else {
+                    row.style.display = 'none';
+                }
+            });
+
+            // Smart Logic
+            const section = document.getElementById(type + 'Section');
+            const toggle = document.getElementById(type + 'Toggle');
+
+            if (query.length > 0) {
+                // Search Mode: Force open if matches found, close otherwise (to declutter)
+                if (sectionVisibleCount > 0) {
+                    section.style.display = 'block';
+                    toggle.textContent = '▼';
+                } else {
+                    section.style.display = 'none';
+                    toggle.textContent = '►';
+                }
             } else {
-                row.style.display = 'none';
+                // Clear Mode: Restore user preference
+                const savedState = localStorage.getItem('section_' + type);
+                if (savedState === 'open') {
+                    section.style.display = 'block';
+                    toggle.textContent = '▼';
+                } else {
+                    section.style.display = 'none';
+                    toggle.textContent = '►';
+                }
             }
-        });
+            return sectionVisibleCount;
+        };
+
+        totalVisible += processSection('music');
+        totalVisible += processSection('announcement');
 
         const resultSpan = document.getElementById('searchResult');
         if (query) {
-            resultSpan.textContent = `${visibleCount} / ${totalCount} dosya gösteriliyor`;
+            resultSpan.textContent = `${totalVisible} dosya bulundu`;
         } else {
             resultSpan.textContent = '';
         }
