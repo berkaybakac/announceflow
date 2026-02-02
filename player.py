@@ -318,25 +318,32 @@ class AudioPlayer:
         # Always try to set hardware volume on Pi (mpg123 or others), but only on Linux
         if platform.system() == 'Linux':
             try:
-                # Direct 1:1 mapping (UI 0-100 -> HW 0-100)
-                # The hardware/driver already handles the logarithmic curve (dB scale).
-                if volume <= 0:
-                    # True mute - 0% unmute still produces faint audio
+                # Pi4 Calibration Curve
+                # Pi4's analog (3.5mm) output has a terrible logarithmic curve:
+                #   HW 100% = +4dB, HW 90% = -6dB, HW 80% = -15dB, HW 70% = -25dB (min audible)
+                # Solution: UI 0-9% = mute, UI 10-100% → HW 70-100%
+                import math
+                
+                if volume < 10:
+                    # Mute for 0-9%
                     result = subprocess.run(
                         ['amixer', '-c', '2', 'set', 'PCM', 'mute'],
                         capture_output=True,
                         text=True
                     )
+                    logger.info(f"Volume set to: {volume}% (muted, below threshold)")
                 else:
+                    # Calibration: hw = 70 + sqrt((ui-10)/90) * 30
+                    # UI 10% → HW 70%, UI 50% → HW 90%, UI 100% → HW 100%
+                    hw_volume = int(round(70 + math.sqrt((volume - 10) / 90.0) * 30))
                     result = subprocess.run(
-                        ['amixer', '-c', '2', 'set', 'PCM', f'{volume}%', 'unmute'],
+                        ['amixer', '-c', '2', 'set', 'PCM', f'{hw_volume}%', 'unmute'],
                         capture_output=True,
                         text=True
                     )
+                    logger.info(f"Volume set to: {volume}% (HW calibrated: {hw_volume}%)")
                 
-                if result.returncode == 0:
-                    logger.info(f"Volume set to: {volume}%")
-                else:
+                if result.returncode != 0:
                     logger.warning(f"amixer failed (code {result.returncode}): {result.stderr}")
             except (subprocess.SubprocessError, OSError) as e:
                 logger.warning(f"Failed to set hardware volume: {e}")
