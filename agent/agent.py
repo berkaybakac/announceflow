@@ -158,6 +158,15 @@ class AnnounceFlowAgent:
         except requests.exceptions.RequestException:
             return []
 
+    def get_health(self):
+        """Fetch system health including current volume (no auth required)."""
+        try:
+            # Use requests directly (no session needed - no auth)
+            response = requests.get(f"{self.api_base}/api/health", timeout=5)
+            return response.json() if response.ok else {}
+        except requests.exceptions.RequestException:
+            return {}
+
     def play_file(self, media_id):
         """Play a media file."""
         if not self.session:
@@ -341,7 +350,15 @@ class AgentGUI:
         content = tk.Frame(self.root, bg="#1a1a1a", padx=20, pady=20)
         content.pack(fill='both', expand=True)
         
+        # Sync with server immediately (using /api/health - no auth required)
+        try:
+            health = self.agent.get_health()
+            current_vol = health.get('player', {}).get('volume', 80)
+        except Exception:
+            current_vol = 80
+            
         # Quick Actions
+
         tk.Label(content, text="Hızlı İşlemler", font=('Segoe UI', 12, 'bold'),
                 bg="#1a1a1a", fg="white").pack(anchor='w', pady=(0,10))
         
@@ -368,8 +385,8 @@ class AgentGUI:
         vol_frame = tk.Frame(content, bg="#1a1a1a")
         vol_frame.pack(fill='x')
         
-        self.volume_var = tk.IntVar(value=80)
-        self.volume_label = tk.Label(vol_frame, text="80%", font=('Segoe UI', 12, 'bold'),
+        self.volume_var = tk.IntVar(value=current_vol)
+        self.volume_label = tk.Label(vol_frame, text=f"{current_vol}%", font=('Segoe UI', 12, 'bold'),
                                      bg="#1a1a1a", fg="#22c55e", width=5)
         self.volume_label.pack(side='right')
         
