@@ -7,8 +7,13 @@ import json
 import webbrowser
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
-from typing import Optional
+from typing import Optional, Dict, Any
 import requests
+
+# Credential management
+from credential_manager import (
+    save_credentials, get_credentials, delete_credentials, has_credentials
+)
 
 # Configuration
 API_BASE = "http://aflow.local:5001"
@@ -121,8 +126,16 @@ class AnnounceFlowAgent:
         self.api_base = self.config.get("api_base", API_BASE)
         self.session = None  # Will store session cookie
         
-    def login(self, username, password):
-        """Login to the API."""
+    def login(self, username: str, password: str) -> Dict[str, Any]:
+        """
+        Login to the API with detailed error handling.
+        
+        Returns:
+            dict with 'success' (bool) and optional 'error' key:
+            - 'invalid_credentials': wrong username/password
+            - 'connection_error': cannot reach server
+            - 'timeout': request timed out
+        """
         try:
             session = requests.Session()
             session.post(
@@ -134,17 +147,18 @@ class AnnounceFlowAgent:
             # Check if we got a session cookie (login successful)
             if 'session' in session.cookies:
                 self.session = session
-                return True
-            return False
+                return {"success": True}
+            # No session cookie = invalid credentials
+            return {"success": False, "error": "invalid_credentials"}
         except requests.exceptions.ConnectionError:
             print(f"Connection error: Cannot reach {self.api_base}")
-            return False
+            return {"success": False, "error": "connection_error"}
         except requests.exceptions.Timeout:
             print("Connection timeout")
-            return False
+            return {"success": False, "error": "timeout"}
         except Exception as e:
             print(f"Login error: {e}")
-            return False
+            return {"success": False, "error": "unknown"}
     
     def get_media_files(self):
         """Fetch all media files."""
@@ -254,7 +268,7 @@ class AgentGUI:
         """Run the GUI application."""
         self.root = tk.Tk()
         self.root.title("AnnounceFlow Agent")
-        self.root.geometry("400x500")
+        self.root.geometry("400x550")
         self.root.configure(bg="#1a1a1a")
         
         # Style
@@ -264,11 +278,51 @@ class AgentGUI:
         style.configure("TLabel", background="#1a1a1a", foreground="white", font=('Segoe UI', 10))
         style.configure("TEntry", padding=5)
         
-        self.show_login_frame()
+        # Try auto-login if credentials are saved
+        self._try_auto_login()
         
         self.root.mainloop()
     
-    def show_login_frame(self):
+    def _try_auto_login(self):
+        """Attempt auto-login with saved credentials."""
+        if has_credentials(self.agent.api_base):
+            # Show loading state
+            self.clear_frame()
+            loading_frame = tk.Frame(self.root, bg="#1a1a1a")
+            loading_frame.pack(expand=True)
+            
+            tk.Label(loading_frame, text="🎵", font=('Segoe UI', 48), bg="#1a1a1a", fg="white").pack(pady=20)
+            tk.Label(loading_frame, text="AnnounceFlow Agent", font=('Segoe UI', 16, 'bold'), 
+                    bg="#1a1a1a", fg="white").pack()
+            status_label = tk.Label(loading_frame, text="Otomatik giriş yapılıyor...", 
+                                   bg="#1a1a1a", fg="#f59e0b", font=('Segoe UI', 10))
+            status_label.pack(pady=20)
+            self.root.update()
+            
+            # Get saved credentials and try login
+            creds = get_credentials(self.agent.api_base)
+            if creds:
+                username, password = creds
+                result = self.agent.login(username, password)
+                
+                if result.get("success"):
+                    self.logged_in = True
+                    self.show_main_frame()
+                    return
+                elif result.get("error") == "invalid_credentials":
+                    # Password changed on server - clear stored credentials
+                    delete_credentials(self.agent.api_base)
+                    self.show_login_frame(error_message="Şifreniz değişti, lütfen tekrar girin.")
+                    return
+                else:
+                    # Connection error - show login with message
+                    self.show_login_frame(error_message="Sunucuya bağlanılamadı.")
+                    return
+        
+        # No saved credentials - show normal login
+        self.show_login_frame()
+    
+    def show_login_frame(self, error_message: str = None):
         """Show login screen."""
         self.clear_frame()
         
@@ -303,7 +357,20 @@ class AgentGUI:
         self.password_entry = tk.Entry(url_frame, font=('Segoe UI', 10), width=35, show="*")
         self.password_entry.pack(fill='x', pady=5)
         
-        # Login button
+        # Remember Me checkbox
+        self.remember_var = tk.BooleanVar(value=True)
+        remember_frame = tk.Frame(url_frame, bg="#1a1a1a")
+        remember_frame.pack(fill='x', pady=(10, 0))
+        
+        remember_cb = tk.Checkbutton(remember_frame, text="Beni Hatırla", 
+                                     variable=self.remember_var,
+                                     bg="#1a1a1a", fg="#a1a1aa", 
+                                     selectcolor="#2a2a2a",
+                                     activebackground="#1a1a1a",
+                                     activeforeground="#a1a1aa",
+                                     font=('Segoe UI', 9))
+        remember_cb.pack(anchor='w')
+        
         # Login button
         login_btn = ModernButton(frame, text="Giriş Yap", command=self.do_login,
                                bg_color="#6366f1", hover_color="#818cf8")
@@ -311,12 +378,17 @@ class AgentGUI:
         
         self.status_label = tk.Label(frame, text="", bg="#1a1a1a", fg="#ef4444")
         self.status_label.pack()
+        
+        # Show error message if provided (e.g., password changed)
+        if error_message:
+            self.status_label.config(text=error_message, fg="#f59e0b")
     
     def do_login(self):
         """Handle login."""
         url = self.url_entry.get().strip().rstrip('/')
         username = self.username_entry.get().strip()
         password = self.password_entry.get()
+        remember = self.remember_var.get()
         
         self.agent.api_base = url
         self.agent.config["api_base"] = url
@@ -326,11 +398,29 @@ class AgentGUI:
         if self.root:
             self.root.update()
         
-        if self.agent.login(username, password):
+        result = self.agent.login(username, password)
+        
+        if result.get("success"):
+            # Save credentials if "Remember Me" is checked
+            if remember:
+                save_credentials(url, username, password)
+            else:
+                # Clear any previously saved credentials
+                delete_credentials(url)
+            
             self.logged_in = True
             self.show_main_frame()
         else:
-            self.status_label.config(text="Giriş başarısız! Bilgileri kontrol edin.", fg="#ef4444")
+            # Show appropriate error message
+            error = result.get("error", "unknown")
+            if error == "invalid_credentials":
+                self.status_label.config(text="Giriş başarısız! Bilgileri kontrol edin.", fg="#ef4444")
+            elif error == "connection_error":
+                self.status_label.config(text="Sunucuya bağlanılamıyor!", fg="#ef4444")
+            elif error == "timeout":
+                self.status_label.config(text="Bağlantı zaman aşımına uğradı!", fg="#ef4444")
+            else:
+                self.status_label.config(text="Beklenmeyen bir hata oluştu.", fg="#ef4444")
     
 
     def show_main_frame(self):
@@ -441,6 +531,8 @@ class AgentGUI:
     
     def logout(self):
         """Logout and return to login screen."""
+        # Clear stored credentials on logout
+        delete_credentials(self.agent.api_base)
         self.agent.session = None
         self.logged_in = False
         self.show_login_frame()
