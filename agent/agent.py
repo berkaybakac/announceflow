@@ -66,7 +66,7 @@ class ModernButton(tk.Frame):
 
 
 class ModernSlider(tk.Frame):
-    """Modern volume slider with Canvas."""
+    """Modern volume slider with Canvas - thick bar with speaker icons."""
     def __init__(self, parent, from_=0, to=100, value=80, command=None, **kwargs):
         super().__init__(parent, bg="#1a1a1a")
         self.from_ = from_
@@ -74,49 +74,103 @@ class ModernSlider(tk.Frame):
         self.value = value
         self.command = command
         
-        # Canvas
-        self.canvas = tk.Canvas(self, width=300, height=50, bg="#1a1a1a", 
-                               highlightthickness=0, cursor="hand2")
-        self.canvas.pack(fill='x', expand=True, pady=5)
+        # Main container with icons
+        container = tk.Frame(self, bg="#1a1a1a")
+        container.pack(fill='x', expand=True)
         
+        # Left speaker icon (mute)
+        self.left_icon = tk.Label(container, text="🔈", font=('Segoe UI', 14), 
+                                  bg="#1a1a1a", fg="#a1a1aa")
+        self.left_icon.pack(side='left', padx=(0, 10))
+        
+        # Canvas for slider
+        self.canvas = tk.Canvas(container, width=220, height=50, bg="#1a1a1a", 
+                               highlightthickness=0, cursor="hand2")
+        self.canvas.pack(side='left', fill='x', expand=True)
+        
+        # Right speaker icon (loud) + percentage
+        right_frame = tk.Frame(container, bg="#1a1a1a")
+        right_frame.pack(side='left', padx=(10, 0))
+        
+        self.right_icon = tk.Label(right_frame, text="🔊", font=('Segoe UI', 14), 
+                                   bg="#1a1a1a", fg="#a1a1aa")
+        self.right_icon.pack(side='left')
+        
+        self.percent_label = tk.Label(right_frame, text=f"{int(value)}%", 
+                                      font=('Segoe UI', 12, 'bold'),
+                                      bg="#1a1a1a", fg="#22c55e", width=4)
+        self.percent_label.pack(side='left', padx=(5, 0))
+        
+        # Bind events
         self.canvas.bind("<Button-1>", self._on_click)
         self.canvas.bind("<B1-Motion>", self._on_click)
         self.bind("<Map>", lambda e: self.after(50, self._draw))
         
     def _draw(self):
         self.canvas.delete("all")
-        w = max(self.canvas.winfo_width(), 280)
+        w = max(self.canvas.winfo_width(), 200)
         h = 50
         
-        # Track
-        pad = 20
+        # Track settings
+        pad = 10
+        bar_height = 24  # Thicker bar
         track_y = h // 2
-        self.canvas.create_rectangle(pad, track_y-4, w-pad-50, track_y+4, 
+        track_top = track_y - bar_height // 2
+        track_bottom = track_y + bar_height // 2
+        track_right = w - pad
+        
+        # Background track (rounded rectangle effect with overlapping shapes)
+        radius = bar_height // 2
+        # Main rectangle
+        self.canvas.create_rectangle(pad + radius, track_top, track_right - radius, track_bottom, 
                                     fill="#404040", outline="")
+        # Left cap
+        self.canvas.create_oval(pad, track_top, pad + bar_height, track_bottom, 
+                               fill="#404040", outline="")
+        # Right cap
+        self.canvas.create_oval(track_right - bar_height, track_top, track_right, track_bottom, 
+                               fill="#404040", outline="")
         
-        # Fill
+        # Fill (progress)
         ratio = (self.value - self.from_) / max(1, self.to - self.from_)
-        fill_x = pad + ratio * (w - pad - 50 - pad)
-        self.canvas.create_rectangle(pad, track_y-4, fill_x, track_y+4,
-                                    fill="#22c55e", outline="")
+        fill_width = ratio * (track_right - pad - bar_height)
+        fill_x = pad + bar_height // 2 + fill_width
         
-        # Handle
-        self.canvas.create_oval(fill_x-8, track_y-8, fill_x+8, track_y+8,
-                               fill="white", outline="#22c55e", width=2)
+        if ratio > 0.02:  # Only draw if there's something to show
+            # Fill rectangle
+            self.canvas.create_rectangle(pad + radius, track_top, min(fill_x, track_right - radius), track_bottom, 
+                                        fill="#22c55e", outline="")
+            # Fill left cap
+            self.canvas.create_oval(pad, track_top, pad + bar_height, track_bottom, 
+                                   fill="#22c55e", outline="")
         
-        # Text
-        self.canvas.create_text(w-40, track_y, text=f"{int(self.value)}%",
-                               fill="#22c55e", font=('Segoe UI', 12, 'bold'))
+        # Handle/knob
+        handle_x = pad + bar_height // 2 + fill_width
+        handle_radius = 14
+        self.canvas.create_oval(handle_x - handle_radius, track_y - handle_radius, 
+                               handle_x + handle_radius, track_y + handle_radius,
+                               fill="white", outline="#22c55e", width=3)
+        
+        # Update percentage label
+        self.percent_label.config(text=f"{int(self.value)}%")
     
     def _on_click(self, event):
-        w = max(self.canvas.winfo_width(), 280)
-        pad = 20
-        ratio = (event.x - pad) / max(1, w - pad - 50 - pad)
+        w = max(self.canvas.winfo_width(), 200)
+        pad = 10
+        bar_height = 24
+        track_width = w - pad * 2 - bar_height
+        
+        ratio = (event.x - pad - bar_height // 2) / max(1, track_width)
         ratio = max(0, min(1, ratio))
         self.value = self.from_ + ratio * (self.to - self.from_)
         self._draw()
         if self.command:
             self.command(self.value)
+    
+    def set_value(self, value):
+        """Set slider value programmatically."""
+        self.value = max(self.from_, min(self.to, value))
+        self._draw()
 
 class AnnounceFlowAgent:
     """Main agent application."""
@@ -268,7 +322,7 @@ class AgentGUI:
         """Run the GUI application."""
         self.root = tk.Tk()
         self.root.title("AnnounceFlow Agent")
-        self.root.geometry("400x550")
+        self.root.geometry("400x700")
         self.root.configure(bg="#1a1a1a")
         
         # Style
@@ -466,32 +520,20 @@ class AgentGUI:
         for text, command, bg_color, hover_color in btn_configs:
             btn = ModernButton(btn_frame, text=text, command=command, 
                              bg_color=bg_color, hover_color=hover_color)
-            btn.pack(fill='x', pady=5)
+            btn.pack(fill='x', pady=8)
         
         # Volume Control
         tk.Label(content, text="Ses Seviyesi", font=('Segoe UI', 12, 'bold'),
-                bg="#1a1a1a", fg="white").pack(anchor='w', pady=(20,10))
+                bg="#1a1a1a", fg="white").pack(anchor='w', pady=(25,10))
         
-        vol_frame = tk.Frame(content, bg="#1a1a1a")
-        vol_frame.pack(fill='x')
+        # Modern volume slider with icons
+        self.volume_slider = ModernSlider(content, from_=0, to=100, value=current_vol,
+                                          command=self.on_volume_change)
+        self.volume_slider.pack(fill='x', pady=(0, 10))
         
-        self.volume_var = tk.IntVar(value=current_vol)
-        self.volume_label = tk.Label(vol_frame, text=f"{current_vol}%", font=('Segoe UI', 12, 'bold'),
-                                     bg="#1a1a1a", fg="#22c55e", width=5)
-        self.volume_label.pack(side='right')
-        
-        self.volume_scale = tk.Scale(vol_frame, from_=0, to=100, orient='horizontal',
-                                     variable=self.volume_var, command=self.on_volume_change,
-                                     bg="#1a1a1a", fg="#22c55e", troughcolor="#525252",
-                                     highlightthickness=0, sliderrelief='flat',
-                                     width=20, sliderlength=20,
-                                     activebackground="#22c55e", length=250)
-        self.volume_scale.pack(fill='x', side='left', expand=True)
-        
-        # Logout
         # Logout (Modern)
         ModernButton(content, text="Çıkış Yap", command=self.logout,
-                    bg_color="#ef4444", hover_color="#f87171").pack(fill='x', pady=(30,0))
+                    bg_color="#ef4444", hover_color="#f87171").pack(fill='x', pady=(40,0))
     
     def start_music(self):
         """Start background music playlist (loop)."""
