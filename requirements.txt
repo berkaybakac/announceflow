@@ -45,6 +45,11 @@ pefile==2023.2.7     # Python portable executable watcher
 typing-extensions>=4.10.0 # Backported and Experimental Type Hints (Updated for compatibility)
 
 # ---------------------------------------------------------
+# Secure Credential Storage
+# ---------------------------------------------------------
+keyring>=24.0.0          # OS-native keychain integration (Win/Mac/Linux)
+
+# ---------------------------------------------------------
 # System Requirements (Cannot be installed via pip)
 # ---------------------------------------------------------
 # These must be installed via your OS package manager:

@@ -274,6 +274,11 @@ class AudioPlayer:
             self._position = 0.0
             self._started_at = 0.0  # Reset start time
             self._stop_event.set()
+            # CRITICAL: Disable playlist to prevent monitor thread from calling play_next()
+            self._playlist_active = False
+        
+        # Persist stopped state to database (prevents auto-resume on restart)
+        db.save_playlist_state(active=False)
 
         # 2. Kill process safely
         if AUDIO_BACKEND == 'mpg123' and self._process:
