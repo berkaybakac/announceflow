@@ -802,16 +802,13 @@ def api_update_credentials():
     if password:
         # Validate password confirmation
         if password != password_confirm:
-            flash('Şifreler eşleşmiyor!', 'error')
-            return redirect(url_for('settings'))
+            return _flash_redirect('Şifreler eşleşmiyor!', 'error', 'settings')
 
         logging.info("Admin password changed")
         config['admin_password'] = password
 
     save_config(config)
-    flash('Yönetici bilgileri güncellendi', 'success')
-
-    return redirect(url_for('settings'))
+    return _flash_redirect('Yönetici bilgileri güncellendi', 'success', 'settings')
 
 
 @app.route('/api/prayer-times/districts')
@@ -839,9 +836,7 @@ def api_update_working_hours():
     config['working_hours_end'] = request.form.get('working_hours_end', '22:00')
 
     save_config(config)
-    flash('Çalışma saatleri ayarları güncellendi', 'success')
-
-    return redirect(url_for('settings'))
+    return _flash_redirect('Çalışma saatleri ayarları güncellendi', 'success', 'settings')
 
 
 @app.route('/api/settings/prayer-times', methods=['POST'])
@@ -855,17 +850,14 @@ def api_update_prayer_times():
 
     # Validate: if city is selected, district is required
     if city and not district:
-        flash('İl seçiliyken ilçe zorunludur!', 'error')
-        return redirect(url_for('settings'))
+        return _flash_redirect('İl seçiliyken ilçe zorunludur!', 'error', 'settings')
 
     config['prayer_times_enabled'] = 'prayer_times_enabled' in request.form
     config['prayer_times_city'] = city
     config['prayer_times_district'] = district
 
     save_config(config)
-    flash('Ezan vakitleri ayarları güncellendi', 'success')
-
-    return redirect(url_for('settings'))
+    return _flash_redirect('Ezan vakitleri ayarları güncellendi', 'success', 'settings')
 
 
 # ============ MAIN ============
