@@ -568,15 +568,13 @@ def api_playlist_start_all():
 def api_media_upload():
     """Upload a media file."""
     if 'file' not in request.files:
-        flash('Dosya seçilmedi', 'error')
-        return redirect(url_for('library'))
+        return _flash_redirect('Dosya seçilmedi', 'error', 'library')
 
     file = request.files['file']
     media_type = request.form.get('media_type', 'music')
 
     if file.filename == '':
-        flash('Dosya seçilmedi', 'error')
-        return redirect(url_for('library'))
+        return _flash_redirect('Dosya seçilmedi', 'error', 'library')
 
     if file and file.filename and allowed_file(file.filename):
         original_filename = secure_filename(file.filename)
@@ -638,7 +636,7 @@ def api_media_upload():
             log_web("upload", {"filename": original_filename, "media_type": media_type})
             flash(f'{original_filename} başarıyla yüklendi!', 'success')
     else:
-        flash('Geçersiz dosya türü. Kabul edilen: MP3, WAV, OGG, AIFF, FLAC, M4A, WMA, MP2', 'error')
+        return _flash_redirect('Geçersiz dosya türü. Kabul edilen: MP3, WAV, OGG, AIFF, FLAC, M4A, WMA, MP2', 'error', 'library')
 
     return redirect(url_for('library'))
 
@@ -656,11 +654,9 @@ def api_media_delete(media_id):
         # Delete from database
         db.delete_media_file(media_id)
         log_web("delete", {"media_id": media_id, "filename": media['filename']})
-        flash('Dosya silindi', 'success')
+        return _flash_redirect('Dosya silindi', 'success', 'library')
     else:
-        flash('Dosya bulunamadı', 'error')
-
-    return redirect(url_for('library'))
+        return _flash_redirect('Dosya bulunamadı', 'error', 'library')
 
 
 # ============ SCHEDULE API ============
