@@ -12,6 +12,7 @@ import time
 from typing import Optional, Callable
 
 import database as db
+from logger import log_play, log_volume, log_error
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +104,7 @@ class AudioPlayer:
         )
 
         logger.info(f"Playlist set with {len(file_paths)} tracks, loop={loop}")
+        log_play("playlist_set", {"tracks": len(file_paths), "loop": loop})
         return True
     
     def play_playlist(self) -> bool:
@@ -132,6 +134,7 @@ class AudioPlayer:
                 self._playlist_active = False
                 db.save_playlist_state(active=False)
                 logger.info("Playlist ended (no loop)")
+                log_play("playlist_end", {"reason": "no_loop", "total_tracks": len(self._playlist)})
                 return False
 
         self._playlist_index = next_index
@@ -140,6 +143,11 @@ class AudioPlayer:
         db.save_playlist_state(index=next_index, active=True)
 
         logger.info(f"Playing next track: {next_index + 1}/{len(self._playlist)}")
+        log_play("track_start", {
+            "file": os.path.basename(self._playlist[next_index]),
+            "index": next_index + 1,
+            "total": len(self._playlist)
+        })
         return self.play(self._playlist[next_index])
     
     def stop_playlist(self):
@@ -296,6 +304,7 @@ class AudioPlayer:
             pygame.mixer.music.stop()
         
         logger.info("Playback stopped")
+        log_play("stop", {})
         return True
     
     # Pause/Resume removed for stability with mpg123
@@ -337,6 +346,7 @@ class AudioPlayer:
                         text=True
                     )
                     logger.info(f"Volume set to: {volume}% (muted, below threshold)")
+                    log_volume("change", {"ui_volume": volume, "hw_volume": 0, "muted": True})
                 else:
                     # Calibration: hw = 70 + sqrt((ui-10)/90) * 30
                     # UI 10% → HW 70%, UI 50% → HW 90%, UI 100% → HW 100%
@@ -347,6 +357,7 @@ class AudioPlayer:
                         text=True
                     )
                     logger.info(f"Volume set to: {volume}% (HW calibrated: {hw_volume}%)")
+                    log_volume("change", {"ui_volume": volume, "hw_volume": hw_volume, "muted": False})
                 
                 if result.returncode != 0:
                     logger.warning(f"amixer failed (code {result.returncode}): {result.stderr}")
@@ -403,6 +414,7 @@ class AudioPlayer:
                         self.on_track_end()
                     
                     logger.info("Track ended (mpg123)")
+                    log_play("track_end", {"backend": "mpg123"})
                     break
                 time.sleep(0.5)
         
@@ -426,6 +438,7 @@ class AudioPlayer:
                         self.on_track_end()
                     
                     logger.info("Track ended (pygame)")
+                    log_play("track_end", {"backend": "pygame"})
                     break
                 time.sleep(0.5)
         

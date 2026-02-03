@@ -12,6 +12,14 @@ import urllib.error
 
 logger = logging.getLogger(__name__)
 
+# Import event logger (lazy to avoid circular imports)
+def _log_prayer_event(event: str, data: dict = None):
+    try:
+        from logger import log_prayer
+        log_prayer(event, data)
+    except ImportError:
+        pass
+
 # Cache file path
 CACHE_FILE = 'prayer_times_cache.json'
 
@@ -248,6 +256,7 @@ def fetch_weekly_prayer_times(city: str, district: str) -> bool:
                 if cached_count > 0:
                     _save_cache(cache)
                     logger.info(f"Cached {cached_count} days of prayer times for {city}/{district}")
+                    _log_prayer_event("fetch", {"city": city, "district": district, "days": cached_count})
                     return True
 
     except urllib.error.URLError as e:
@@ -272,6 +281,7 @@ def fetch_prayer_times(city: str, district: str) -> Optional[Dict]:
     cache = _load_cache()
     if cache_key in cache:
         logger.debug(f"Using cached prayer times for {city}/{district} ({today})")
+        _log_prayer_event("cache_hit", {"city": city, "district": district, "date": today})
         return cache[cache_key]
 
     # Cache miss - try to fetch weekly data
@@ -364,6 +374,7 @@ def is_prayer_time(city: str, district: str, buffer_minutes: int = 1) -> bool:
             
             if start <= current_minutes <= end:
                 logger.info(f"In prayer time window: {prayer_key} ({prayer_time_str})")
+                _log_prayer_event("in_window", {"prayer": prayer_key, "time": prayer_time_str})
                 return True
                 
         except (ValueError, AttributeError):

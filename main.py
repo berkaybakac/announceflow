@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import database as db
 from scheduler import get_scheduler
 from player import get_player
+from logger import log_system, log_error
 
 
 def setup_logging():
@@ -51,6 +52,10 @@ def main():
     logger.info("=" * 50)
     logger.info("AnnounceFlow - Planlı Müzik & Anons Sistemi")
     logger.info("=" * 50)
+    
+    # Log system boot event
+    from player import AUDIO_BACKEND
+    log_system("boot", {"version": "1.5.1", "backend": AUDIO_BACKEND})
     
     # Initialize database
     logger.info("Veritabanı başlatılıyor...")
@@ -92,8 +97,10 @@ def main():
             # Start playing from saved position
             player.play_next()
             logger.info("Playlist otomatik başlatıldı!")
+            log_system("playlist_restore", {"tracks": len(valid_playlist), "index": index})
         else:
             logger.warning("Kaydedilmiş playlist'teki dosyalar bulunamadı")
+            log_error("playlist_restore_failed", {"reason": "files_not_found"})
 
     # Initialize scheduler
     logger.info("Zamanlayıcı başlatılıyor...")
@@ -103,6 +110,8 @@ def main():
     # Signal handlers
     def graceful_exit(signum, frame):
         logger.info("Kapatma sinyali alındı. Sistem durduruluyor...")
+        signal_name = "SIGINT" if signum == signal.SIGINT else "SIGTERM"
+        log_system("shutdown", {"signal": signal_name})
         scheduler.stop()
         player.stop()
         sys.exit(0)
