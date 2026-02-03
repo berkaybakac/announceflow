@@ -84,8 +84,7 @@ from utils.helpers import (
     login_required,
     _json_success,
     _json_error,
-    _flash_redirect,
-    _get_media_or_404
+    _flash_redirect
 )
 
 
@@ -339,20 +338,10 @@ def settings():
 
 
 # ============ PLAYER API ============
-# Phase 3.1a: /api/health, /api/play, /api/stop, /api/volume moved to routes/player_routes.py
-# Phase 3.1b: /api/now-playing, /api/media/music moved to routes/player_routes.py
-
-@app.route('/api/pause', methods=['POST'])
-@login_required
-def api_pause():
-    """Deprecated."""
-    return _json_error('Not supported', 405)
-
-@app.route('/api/resume', methods=['POST'])
-@login_required
-def api_resume():
-    """Deprecated."""
-    return _json_error('Not supported', 405)
+# Phase 3.1: All player endpoints moved to routes/player_routes.py
+# - 3.1a: /api/health, /api/play, /api/stop, /api/volume
+# - 3.1b: /api/now-playing, /api/media/music
+# - 3.1c: /api/pause, /api/resume (deprecated)
 
 
 # ============ PLAYLIST API ============
