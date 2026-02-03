@@ -36,4 +36,4 @@ agent/dist/
 announceflow.service
 tests/test_api.py
 
-fetch_logs.expect
+fetch_logs.expectlogs/
