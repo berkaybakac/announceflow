@@ -13,16 +13,7 @@ class ScheduleRepository(BaseRepository):
     # ============ ONE-TIME SCHEDULES ============
 
     def add_one_time_schedule(self, media_id: int, scheduled_datetime: datetime, reason: Optional[str] = None) -> int:
-        """Add a one-time schedule.
-
-        Args:
-            media_id: ID of media file to play
-            scheduled_datetime: When to play the media
-            reason: Optional reason for scheduling
-
-        Returns:
-            ID of the newly created schedule
-        """
+        """Add a one-time schedule."""
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute('''
@@ -35,11 +26,7 @@ class ScheduleRepository(BaseRepository):
         return schedule_id
 
     def get_pending_one_time_schedules(self) -> List[Dict[str, Any]]:
-        """Get all pending one-time schedules.
-
-        Returns:
-            List of pending schedule dictionaries with media info
-        """
+        """Get all pending one-time schedules with media info."""
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute('''
@@ -54,11 +41,7 @@ class ScheduleRepository(BaseRepository):
         return [dict(row) for row in rows]
 
     def get_all_one_time_schedules(self) -> List[Dict[str, Any]]:
-        """Get all one-time schedules.
-
-        Returns:
-            List of all schedule dictionaries with media info
-        """
+        """Get all one-time schedules with media info."""
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute('''
@@ -72,15 +55,7 @@ class ScheduleRepository(BaseRepository):
         return [dict(row) for row in rows]
 
     def update_one_time_schedule_status(self, schedule_id: int, status: str) -> bool:
-        """Update status of a one-time schedule.
-
-        Args:
-            schedule_id: Schedule ID to update
-            status: New status ('pending', 'played', or 'cancelled')
-
-        Returns:
-            True if updated, False otherwise
-        """
+        """Update status of a one-time schedule."""
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute('''
@@ -92,14 +67,7 @@ class ScheduleRepository(BaseRepository):
         return updated
 
     def delete_one_time_schedule(self, schedule_id: int) -> bool:
-        """Delete a one-time schedule.
-
-        Args:
-            schedule_id: Schedule ID to delete
-
-        Returns:
-            True if deleted, False otherwise
-        """
+        """Delete a one-time schedule."""
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute('DELETE FROM one_time_schedules WHERE id = ?', (schedule_id,))
@@ -119,19 +87,7 @@ class ScheduleRepository(BaseRepository):
         interval_minutes: int = 0,
         specific_times: Optional[List[str]] = None
     ) -> int:
-        """Add a recurring schedule.
-
-        Args:
-            media_id: ID of media file to play
-            days_of_week: List of integers 0-6 (Monday=0, Sunday=6)
-            start_time: Start time (HH:MM format)
-            end_time: Optional end time (HH:MM format)
-            interval_minutes: Interval in minutes for repeated playback
-            specific_times: Optional list of specific times like ["10:00", "12:00", "15:00"]
-
-        Returns:
-            ID of the newly created schedule
-        """
+        """Add a recurring schedule."""
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute('''
@@ -151,11 +107,7 @@ class ScheduleRepository(BaseRepository):
         return schedule_id
 
     def get_active_recurring_schedules(self) -> List[Dict[str, Any]]:
-        """Get all active recurring schedules.
-
-        Returns:
-            List of active schedule dictionaries with media info
-        """
+        """Get all active recurring schedules with media info."""
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute('''
@@ -178,11 +130,7 @@ class ScheduleRepository(BaseRepository):
         return result
 
     def get_all_recurring_schedules(self) -> List[Dict[str, Any]]:
-        """Get all recurring schedules.
-
-        Returns:
-            List of all schedule dictionaries with media info
-        """
+        """Get all recurring schedules with media info."""
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute('''
@@ -204,15 +152,7 @@ class ScheduleRepository(BaseRepository):
         return result
 
     def toggle_recurring_schedule(self, schedule_id: int, is_active: bool) -> bool:
-        """Enable or disable a recurring schedule.
-
-        Args:
-            schedule_id: Schedule ID to toggle
-            is_active: True to enable, False to disable
-
-        Returns:
-            True if updated, False otherwise
-        """
+        """Enable or disable a recurring schedule."""
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute('''
@@ -224,14 +164,7 @@ class ScheduleRepository(BaseRepository):
         return updated
 
     def delete_recurring_schedule(self, schedule_id: int) -> bool:
-        """Delete a recurring schedule.
-
-        Args:
-            schedule_id: Schedule ID to delete
-
-        Returns:
-            True if deleted, False otherwise
-        """
+        """Delete a recurring schedule."""
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute('DELETE FROM recurring_schedules WHERE id = ?', (schedule_id,))
@@ -241,11 +174,7 @@ class ScheduleRepository(BaseRepository):
         return deleted
 
     def delete_all_recurring_announcements(self) -> int:
-        """Delete all recurring announcement schedules (not music).
-
-        Returns:
-            Number of schedules deleted
-        """
+        """Delete all recurring announcement schedules (not music)."""
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute('''
