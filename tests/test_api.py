@@ -1,0 +1,153 @@
+#!/usr/bin/env python3
+"""AnnounceFlow API Test Script - Production Readiness Check"""
+import requests
+import sys
+
+BASE_URL = "http://localhost:5001"
+SESSION = requests.Session()
+
+
+def test_health():
+    """Health endpoint calisiyor mu?"""
+    r = requests.get(f"{BASE_URL}/api/health", timeout=5)
+    assert r.status_code == 200, f"Status: {r.status_code}"
+    data = r.json()
+    assert data['status'] == 'ok', f"Status: {data.get('status')}"
+    print(f"  Backend: {data['player']['backend']}")
+    print(f"  Volume: {data['player']['volume']}%")
+    print(f"  Scheduler: {'Running' if data['scheduler']['running'] else 'Stopped'}")
+    print("✓ Health check OK")
+    return True
+
+
+def test_login():
+    """Login calisiyor mu?"""
+    r = SESSION.post(f"{BASE_URL}/login", data={
+        "username": "admin",
+        "password": "admin123"
+    }, allow_redirects=False, timeout=5)
+    assert r.status_code in [200, 302], f"Status: {r.status_code}"
+    print("✓ Login OK")
+    return True
+
+
+def test_volume():
+    """Ses ayari calisiyor mu?"""
+    # Get current volume
+    r = SESSION.get(f"{BASE_URL}/api/now-playing", timeout=5)
+    current_vol = r.json().get('volume', 80)
+    
+    # Set new volume
+    new_vol = 75 if current_vol != 75 else 80
+    r = SESSION.post(f"{BASE_URL}/api/volume", json={"volume": new_vol}, timeout=5)
+    assert r.json()["success"] == True, "Volume set failed"
+    
+    # Restore original
+    SESSION.post(f"{BASE_URL}/api/volume", json={"volume": current_vol}, timeout=5)
+    print(f"  Volume test: {current_vol}% -> {new_vol}% -> {current_vol}%")
+    print("✓ Volume OK")
+    return True
+
+
+def test_player_state():
+    """Player durumu alinabiliyor mu?"""
+    r = SESSION.get(f"{BASE_URL}/api/now-playing", timeout=5)
+    data = r.json()
+    assert "volume" in data, "Missing: volume"
+    assert "is_playing" in data, "Missing: is_playing"
+    print(f"  Playing: {data.get('is_playing')}")
+    print(f"  File: {data.get('filename') or 'None'}")
+    print("✓ Player state OK")
+    return True
+
+
+def test_media_library():
+    """Media kutuphanesi erisilebiliyor mu?"""
+    r = SESSION.get(f"{BASE_URL}/api/media/music", timeout=5)
+    data = r.json()
+    assert "files" in data, "Missing: files"
+    print(f"  Music files: {data.get('count', 0)}")
+    print("✓ Media library OK")
+    return True
+
+
+def test_playlist_operations():
+    """Playlist endpoint calisiyor mu? (Playlist Blueprint)"""
+    # Test playlist/stop (en basit endpoint)
+    r = SESSION.post(f"{BASE_URL}/api/playlist/stop", timeout=5)
+    assert r.status_code == 200, f"Status: {r.status_code}"
+    data = r.json()
+    assert data.get('success') == True, "Playlist stop failed"
+    print("  Playlist stop: OK")
+    print("✓ Playlist blueprint OK")
+    return True
+
+
+def test_library_page():
+    """Library sayfasi aciliyor mu? (Media Blueprint)"""
+    r = SESSION.get(f"{BASE_URL}/library", timeout=5)
+    assert r.status_code == 200, f"Status: {r.status_code}"
+    assert b"library" in r.content.lower() or b"k\xc3\xbct\xc3\xbcphane" in r.content.lower(), "Page content check failed"
+    print("  Library page rendered: OK")
+    print("✓ Media blueprint (page) OK")
+    return True
+
+
+def test_settings_page():
+    """Settings sayfasi aciliyor mu? (Settings Blueprint)"""
+    r = SESSION.get(f"{BASE_URL}/settings", timeout=5)
+    assert r.status_code == 200, f"Status: {r.status_code}"
+    assert b"settings" in r.content.lower() or b"ayarlar" in r.content.lower(), "Page content check failed"
+    print("  Settings page rendered: OK")
+    print("✓ Settings blueprint (page) OK")
+    return True
+
+
+if __name__ == "__main__":
+    print()
+    print("=" * 40)
+    print("  AnnounceFlow API Test Suite")
+    print("=" * 40)
+    print()
+
+    tests = [
+        ("Health Check", test_health),
+        ("Login", test_login),
+        ("Volume Control", test_volume),
+        ("Player State", test_player_state),
+        ("Media Library", test_media_library),
+        ("Playlist Operations", test_playlist_operations),
+        ("Library Page", test_library_page),
+        ("Settings Page", test_settings_page),
+    ]
+    
+    passed = 0
+    failed = 0
+
+    for name, test_func in tests:
+        print(f"\n[{name}]")
+        try:
+            if test_func():
+                passed += 1
+        except AssertionError as e:
+            print(f"✗ FAILED: {e}")
+            failed += 1
+        except requests.exceptions.ConnectionError:
+            print(f"✗ FAILED: Baglanti kurulamadi - uygulama calisiyor mu?")
+            failed += 1
+        except Exception as e:
+            print(f"✗ FAILED: {type(e).__name__}: {e}")
+            failed += 1
+
+    print()
+    print("=" * 40)
+    if failed == 0:
+        print(f"  SONUC: {passed}/{passed} test BASARILI ✓")
+        print("  Sistem uretim icin hazir!")
+    else:
+        print(f"  SONUC: {passed}/{passed+failed} test basarili")
+        print(f"  {failed} test BASARISIZ!")
+    print("=" * 40)
+    print()
+    
+    sys.exit(0 if failed == 0 else 1)
