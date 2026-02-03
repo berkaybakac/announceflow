@@ -860,6 +860,12 @@ def api_update_prayer_times():
     return _flash_redirect('Ezan vakitleri ayarları güncellendi', 'success', 'settings')
 
 
+# ============ BLUEPRINT REGISTRATION ============
+
+from routes import register_blueprints
+register_blueprints(app)
+
+
 # ============ MAIN ============
 
 if __name__ == '__main__':
