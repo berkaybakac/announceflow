@@ -422,11 +422,11 @@ def api_play():
     media_id = data.get('media_id')
 
     if not media_id:
-        return jsonify({'error': 'media_id required'}), 400
+        return _json_error('media_id required', 400)
 
-    media = db.get_media_file(media_id)
-    if not media:
-        return jsonify({'error': 'Media not found'}), 404
+    media, error = _get_media_or_404(media_id)
+    if error:
+        return error
 
     player = get_player()
     success = player.play(media['filepath'])
@@ -435,20 +435,20 @@ def api_play():
         db.update_playback_state(current_media_id=media_id, is_playing=True, position_seconds=0)
         log_web("play", {"media_id": media_id, "filename": media['filename']})
 
-    return jsonify({'success': success})
+    return _json_success({'success': success})
 
 
 @app.route('/api/pause', methods=['POST'])
 @login_required
 def api_pause():
     """Deprecated."""
-    return jsonify({'success': False, 'error': 'Not supported'}), 405
+    return _json_error('Not supported', 405)
 
 @app.route('/api/resume', methods=['POST'])
 @login_required
 def api_resume():
     """Deprecated."""
-    return jsonify({'success': False, 'error': 'Not supported'}), 405
+    return _json_error('Not supported', 405)
 
 
 @app.route('/api/stop', methods=['POST'])
@@ -459,7 +459,7 @@ def api_stop():
     success = player.stop()
     db.update_playback_state(current_media_id=0, is_playing=False, position_seconds=0)
     log_web("stop", {})
-    return jsonify({'success': success})
+    return _json_success({'success': success})
 
 @app.route('/api/volume', methods=['POST'])
 @login_required
@@ -473,7 +473,7 @@ def api_volume():
     db.update_playback_state(volume=volume)
     log_web("volume", {"volume": volume})
 
-    return jsonify({'success': success, 'volume': volume})
+    return _json_success({'success': success, 'volume': volume})
 
 
 # ============ PLAYLIST API ============
