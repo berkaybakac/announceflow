@@ -6,6 +6,7 @@ from .player_routes import player_bp
 from .playlist_routes import playlist_bp
 from .media_routes import media_bp
 from .schedule_routes import schedule_bp
+from .settings_routes import settings_bp
 
 
 def register_blueprints(app):
@@ -26,5 +27,7 @@ def register_blueprints(app):
     # Phase 3.4: Schedule endpoints (7 endpoints)
     app.register_blueprint(schedule_bp)
 
-    # Phase 3.5: settings_bp (settings API endpoints)
+    # Phase 3.5: Settings endpoints (4 endpoints)
+    app.register_blueprint(settings_bp)
+
     # Phase 3.6: auth_bp (auth routes)
