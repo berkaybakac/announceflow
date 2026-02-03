@@ -35,3 +35,5 @@ agent/dist/
 # Service and test files
 announceflow.service
 tests/test_api.py
+
+fetch_logs.expect

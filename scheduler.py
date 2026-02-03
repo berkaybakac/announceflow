@@ -12,6 +12,7 @@ from typing import Optional
 
 import database as db
 from player import get_player
+from logger import log_trigger, log_schedule, log_prayer, log_error
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +117,7 @@ class Scheduler:
                                 'active': player._playlist_active
                             }
                             logger.info(f"Prayer time - saving playlist state (index={player._playlist_index}, tracks={len(player._playlist)})")
+                            log_prayer("silence_start", {"index": player._playlist_index, "tracks": len(player._playlist)})
                         # Use stop() instead of stop_playlist() to preserve DB state
                         # Playlist will auto-resume from DB on restart
                         player.stop()
@@ -130,6 +132,7 @@ class Scheduler:
 
                     if state['active'] and state['playlist']:
                         logger.info(f"Prayer ended - restoring playlist (index={state['index']})")
+                        log_prayer("silence_end", {"index": state['index']})
                         player._playlist = state['playlist']
                         player._playlist_loop = state['loop']
                         player._playlist_index = state['index']
@@ -157,6 +160,7 @@ class Scheduler:
                                 'active': player._playlist_active
                             }
                             logger.info(f"Outside working hours - saving playlist state (index={player._playlist_index}, tracks={len(player._playlist)})")
+                            log_schedule("working_hours_end", {"index": player._playlist_index, "tracks": len(player._playlist)})
                         # Use stop() instead of stop_playlist() to preserve DB state
                         player.stop()
                         player._playlist_active = False  # Temporarily disable without clearing
@@ -168,6 +172,7 @@ class Scheduler:
 
                         if state['active'] and state['playlist']:
                             logger.info(f"Working hours started - restoring playlist (index={state['index']})")
+                            log_schedule("working_hours_start", {"index": state['index']})
                             player._playlist = state['playlist']
                             player._playlist_loop = state['loop']
                             player._playlist_index = state['index']
@@ -223,6 +228,11 @@ class Scheduler:
             if 0 <= time_diff <= 120:
                 # Time to play!
                 logger.info(f"Triggering one-time schedule: {schedule['filename']} (diff: {time_diff:.0f}s)")
+                log_trigger("one_time", {
+                    "filename": schedule['filename'],
+                    "media_type": schedule.get('media_type', 'music'),
+                    "delay_seconds": int(time_diff)
+                })
                 self._play_media(
                     schedule['filepath'],
                     schedule['id'],
@@ -284,6 +294,11 @@ class Scheduler:
                     continue
                 
                 logger.info(f"Triggering recurring schedule: {schedule['filename']}")
+                log_trigger("recurring", {
+                    "filename": schedule['filename'],
+                    "media_type": schedule.get('media_type', 'music'),
+                    "schedule_id": schedule_id
+                })
                 self._play_media(
                     schedule['filepath'],
                     schedule_id,

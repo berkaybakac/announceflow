@@ -16,6 +16,7 @@ from werkzeug.utils import secure_filename
 import database as db
 from player import get_player
 from scheduler import get_scheduler
+from logger import log_web
 
 app = Flask(__name__)
 app.secret_key = 'announceflow_secret_key_2024'
@@ -112,6 +113,7 @@ def login():
 
         if username == valid_user and password == valid_pass:
             session['logged_in'] = True
+            log_web("login", {"username": username})
             return redirect(url_for('index'))
         else:
             flash('Hatalı kullanıcı adı veya şifre!', 'error')
@@ -415,6 +417,7 @@ def api_play():
 
     if success:
         db.update_playback_state(current_media_id=media_id, is_playing=True, position_seconds=0)
+        log_web("play", {"media_id": media_id, "filename": media['filename']})
 
     return jsonify({'success': success})
 
@@ -439,6 +442,7 @@ def api_stop():
     player = get_player()
     success = player.stop()
     db.update_playback_state(current_media_id=0, is_playing=False, position_seconds=0)
+    log_web("stop", {})
     return jsonify({'success': success})
 
 @app.route('/api/volume', methods=['POST'])
@@ -451,6 +455,7 @@ def api_volume():
     player = get_player()
     success = player.set_volume(volume)
     db.update_playback_state(volume=volume)
+    log_web("volume", {"volume": volume})
 
     return jsonify({'success': success, 'volume': volume})
 
@@ -614,6 +619,7 @@ def api_media_upload():
             # Get duration
             duration = get_audio_duration(filepath)
             db.add_media_file(original_filename, filepath, media_type, duration)
+            log_web("upload", {"filename": original_filename, "media_type": media_type})
             flash(f'{original_filename} başarıyla yüklendi!', 'success')
     else:
         flash('Geçersiz dosya türü. Kabul edilen: MP3, WAV, OGG, AIFF, FLAC, M4A, WMA, MP2', 'error')
@@ -633,6 +639,7 @@ def api_media_delete(media_id):
 
         # Delete from database
         db.delete_media_file(media_id)
+        log_web("delete", {"media_id": media_id, "filename": media['filename']})
         flash('Dosya silindi', 'success')
     else:
         flash('Dosya bulunamadı', 'error')
