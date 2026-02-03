@@ -12,11 +12,7 @@ class PlaybackRepository(BaseRepository):
     # ============ PLAYBACK STATE ============
 
     def get_playback_state(self) -> Dict[str, Any]:
-        """Get current playback state.
-
-        Returns:
-            Playback state dictionary with media info
-        """
+        """Get current playback state with media info."""
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute('''
@@ -36,17 +32,7 @@ class PlaybackRepository(BaseRepository):
         is_playing: Optional[bool] = None,
         volume: Optional[int] = None
     ) -> bool:
-        """Update playback state.
-
-        Args:
-            current_media_id: Optional media ID currently playing
-            position_seconds: Optional playback position in seconds
-            is_playing: Optional playing status
-            volume: Optional volume level (0-100)
-
-        Returns:
-            True if updated
-        """
+        """Update playback state."""
         conn = self.get_connection()
         cursor = conn.cursor()
 
@@ -88,17 +74,7 @@ class PlaybackRepository(BaseRepository):
         loop: Optional[bool] = None,
         active: Optional[bool] = None
     ) -> bool:
-        """Save playlist state to database for persistence across restarts.
-
-        Args:
-            playlist: Optional list of media file paths in playlist
-            index: Optional current playlist index
-            loop: Optional loop enabled status
-            active: Optional playlist active status
-
-        Returns:
-            True if updated
-        """
+        """Save playlist state to database for persistence across restarts."""
         conn = self.get_connection()
         cursor = conn.cursor()
 
@@ -128,11 +104,7 @@ class PlaybackRepository(BaseRepository):
         return True
 
     def get_playlist_state(self) -> Dict[str, Any]:
-        """Get saved playlist state from database.
-
-        Returns:
-            Playlist state dictionary with playlist, index, loop, and active status
-        """
+        """Get saved playlist state from database."""
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute('''
