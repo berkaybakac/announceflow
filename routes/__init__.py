@@ -5,6 +5,7 @@ Blueprint registration for modular route organization.
 from .player_routes import player_bp
 from .playlist_routes import playlist_bp
 from .media_routes import media_bp
+from .schedule_routes import schedule_bp
 
 
 def register_blueprints(app):
@@ -22,6 +23,8 @@ def register_blueprints(app):
     # Phase 3.3: Media endpoints (2 endpoints)
     app.register_blueprint(media_bp)
 
-    # Phase 3.4: schedule_bp (schedule API endpoints)
+    # Phase 3.4: Schedule endpoints (7 endpoints)
+    app.register_blueprint(schedule_bp)
+
     # Phase 3.5: settings_bp (settings API endpoints)
     # Phase 3.6: auth_bp (auth routes)
