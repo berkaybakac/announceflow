@@ -82,3 +82,32 @@ def api_volume():
     log_web("volume", {"volume": volume})
 
     return _json_success({'success': success, 'volume': volume})
+
+
+@player_bp.route('/api/now-playing')
+@login_required
+def api_now_playing():
+    """Get current player state."""
+    player = get_player()
+    state = player.get_state()
+    db_state = db.get_playback_state()
+    state['volume'] = db_state.get('volume', 80)
+
+    # Get duration from database if file is playing
+    if state.get('filename'):
+        media = db.get_media_by_filename(state['filename'])
+        if media:
+            state['duration_seconds'] = media.get('duration_seconds', 0)
+
+    return jsonify(state)
+
+
+@player_bp.route('/api/media/music')
+@login_required
+def api_get_music_files():
+    """Get all music files for playlist display."""
+    files = db.get_all_media_files(media_type='music')
+    return jsonify({
+        'files': files,
+        'count': len(files)
+    })
