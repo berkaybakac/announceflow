@@ -487,7 +487,7 @@ def api_playlist_set():
     loop = data.get('loop', True)
 
     if not media_ids:
-        return jsonify({'success': False, 'error': 'media_ids required'}), 400
+        return _json_error('media_ids required', 400)
 
     # Get file paths for all media IDs
     file_paths = []
@@ -497,12 +497,12 @@ def api_playlist_set():
             file_paths.append(media['filepath'])
 
     if not file_paths:
-        return jsonify({'success': False, 'error': 'No valid media files'}), 404
+        return _json_error('No valid media files', 404)
 
     player = get_player()
     success = player.set_playlist(file_paths, loop=loop)
 
-    return jsonify({'success': success, 'tracks': len(file_paths)})
+    return _json_success({'success': success, 'tracks': len(file_paths)})
 
 
 @app.route('/api/playlist/play', methods=['POST'])
@@ -515,7 +515,7 @@ def api_playlist_play():
     if success:
         db.update_playback_state(is_playing=True)
 
-    return jsonify({'success': success})
+    return _json_success({'success': success})
 
 
 @app.route('/api/playlist/next', methods=['POST'])
@@ -524,7 +524,7 @@ def api_playlist_next():
     """Skip to next track in playlist."""
     player = get_player()
     success = player.play_next()
-    return jsonify({'success': success})
+    return _json_success({'success': success})
 
 
 @app.route('/api/playlist/stop', methods=['POST'])
@@ -534,7 +534,7 @@ def api_playlist_stop():
     player = get_player()
     player.stop_playlist()
     db.update_playback_state(current_media_id=0, is_playing=False)
-    return jsonify({'success': True})
+    return _json_success()
 
 
 @app.route('/api/playlist/start-all', methods=['POST'])
@@ -545,7 +545,7 @@ def api_playlist_start_all():
     music_files = db.get_all_media_files('music')
 
     if not music_files:
-        return jsonify({'success': False, 'error': 'Kütüphanede müzik yok'}), 404
+        return _json_error('Kütüphanede müzik yok', 404)
 
     # Get file paths
     file_paths = [f['filepath'] for f in music_files]
@@ -558,7 +558,7 @@ def api_playlist_start_all():
     if success:
         db.update_playback_state(is_playing=True)
 
-    return jsonify({'success': success, 'tracks': len(file_paths)})
+    return _json_success({'success': success, 'tracks': len(file_paths)})
 
 
 # ============ MEDIA API ============
