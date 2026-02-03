@@ -5,26 +5,15 @@ Handles one-time and recurring schedule checking and triggering.
 import logging
 import threading
 import time
-import json
-import os
 from datetime import datetime
 from typing import Optional
 
 import database as db
 from player import get_player
 from logger import log_trigger, log_schedule, log_prayer, log_error
+from services.config_service import load_config
 
 logger = logging.getLogger(__name__)
-
-CONFIG_FILE = 'config.json'
-
-
-def load_config():
-    """Load configuration from file."""
-    if not os.path.exists(CONFIG_FILE):
-        return {}
-    with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-        return json.load(f)
 
 
 def is_within_working_hours(config: dict) -> bool:
