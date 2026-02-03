@@ -671,35 +671,29 @@ def api_add_one_time():
     reason = request.form.get('reason', '').strip() or None
 
     if not all([media_id, date, time]):
-        flash('Tüm alanları doldurun', 'error')
-        return redirect(url_for('one_time_schedules'))
+        return _flash_redirect('Tüm alanları doldurun', 'error', 'one_time_schedules')
 
     scheduled_dt = datetime.strptime(f"{date} {time}", "%Y-%m-%d %H:%M")
 
     if scheduled_dt <= datetime.now():
-        flash('Geçmiş bir tarih seçemezsiniz', 'error')
-        return redirect(url_for('one_time_schedules'))
+        return _flash_redirect('Geçmiş bir tarih seçemezsiniz', 'error', 'one_time_schedules')
 
     db.add_one_time_schedule(int(media_id), scheduled_dt, reason)
-    flash('Plan başarıyla eklendi!', 'success')
-
-    return redirect(url_for('one_time_schedules'))
+    return _flash_redirect('Plan başarıyla eklendi!', 'success', 'one_time_schedules')
 
 @app.route('/api/schedules/one-time/<int:schedule_id>/cancel', methods=['POST'])
 @login_required
 def api_cancel_one_time(schedule_id):
     """Cancel a one-time schedule."""
     db.update_one_time_schedule_status(schedule_id, 'cancelled')
-    flash('Plan iptal edildi', 'success')
-    return redirect(url_for('one_time_schedules'))
+    return _flash_redirect('Plan iptal edildi', 'success', 'one_time_schedules')
 
 @app.route('/api/schedules/one-time/<int:schedule_id>/delete', methods=['POST'])
 @login_required
 def api_delete_one_time(schedule_id):
     """Delete a one-time schedule."""
     db.delete_one_time_schedule(schedule_id)
-    flash('Plan silindi', 'success')
-    return redirect(url_for('one_time_schedules'))
+    return _flash_redirect('Plan silindi', 'success', 'one_time_schedules')
 
 @app.route('/api/schedules/recurring', methods=['POST'])
 @login_required
@@ -715,22 +709,19 @@ def api_add_recurring():
         days = []
 
     if not media_id or not days:
-        flash('Dosya ve günler gerekli', 'error')
-        return redirect(url_for('recurring_schedules'))
+        return _flash_redirect('Dosya ve günler gerekli', 'error', 'recurring_schedules')
 
     if schedule_type == 'specific':
         times_str = request.form.get('specific_times', '')
         times = [t.strip() for t in times_str.split(',') if t.strip()]
 
         if not times:
-            flash('En az bir saat girin', 'error')
-            return redirect(url_for('recurring_schedules'))
+            return _flash_redirect('En az bir saat girin', 'error', 'recurring_schedules')
 
         # Validate time format (HH:MM)
         invalid_times = [t for t in times if not validate_time_format(t)]
         if invalid_times:
-            flash(f'Geçersiz saat formatı: {", ".join(invalid_times)} (Doğru format: Saat:Dakika, örn: 09:00)', 'error')
-            return redirect(url_for('recurring_schedules'))
+            return _flash_redirect(f'Geçersiz saat formatı: {", ".join(invalid_times)} (Doğru format: Saat:Dakika, örn: 09:00)', 'error', 'recurring_schedules')
 
         db.add_recurring_schedule(
             int(media_id),
@@ -745,13 +736,11 @@ def api_add_recurring():
 
         # Validate time formats
         if not validate_time_format(start_time) or not validate_time_format(end_time):
-            flash('Geçersiz saat formatı (Doğru format: Saat:Dakika, örn: 09:00)', 'error')
-            return redirect(url_for('recurring_schedules'))
+            return _flash_redirect('Geçersiz saat formatı (Doğru format: Saat:Dakika, örn: 09:00)', 'error', 'recurring_schedules')
 
         # Backend validation: minimum interval is 1 minute
         if interval < 1:
-            flash('Zaman aralığı en az 1 dakika olmalıdır', 'error')
-            return redirect(url_for('recurring_schedules'))
+            return _flash_redirect('Zaman aralığı en az 1 dakika olmalıdır', 'error', 'recurring_schedules')
 
         db.add_recurring_schedule(
             int(media_id),
@@ -761,8 +750,7 @@ def api_add_recurring():
             interval
         )
 
-    flash('Tekrarlı plan oluşturuldu!', 'success')
-    return redirect(url_for('recurring_schedules'))
+    return _flash_redirect('Tekrarlı plan oluşturuldu!', 'success', 'recurring_schedules')
 
 @app.route('/api/schedules/recurring/<int:schedule_id>/toggle', methods=['POST'])
 @login_required
@@ -774,7 +762,7 @@ def api_toggle_recurring(schedule_id):
     if current:
         new_state = not current['is_active']
         db.toggle_recurring_schedule(schedule_id, new_state)
-        flash('Plan durumu güncellendi', 'success')
+        return _flash_redirect('Plan durumu güncellendi', 'success', 'recurring_schedules')
 
     return redirect(url_for('recurring_schedules'))
 
@@ -783,16 +771,14 @@ def api_toggle_recurring(schedule_id):
 def api_delete_recurring(schedule_id):
     """Delete a recurring schedule."""
     db.delete_recurring_schedule(schedule_id)
-    flash('Plan silindi', 'success')
-    return redirect(url_for('recurring_schedules'))
+    return _flash_redirect('Plan silindi', 'success', 'recurring_schedules')
 
 @app.route('/api/schedules/recurring/delete-all-announcements', methods=['POST'])
 @login_required
 def api_delete_all_recurring_announcements():
     """Delete all recurring announcement schedules."""
     deleted_count = db.delete_all_recurring_announcements()
-    flash(f'{deleted_count} tekrarlı anons planı silindi', 'success')
-    return redirect(url_for('recurring_schedules'))
+    return _flash_redirect(f'{deleted_count} tekrarlı anons planı silindi', 'success', 'recurring_schedules')
 
 
 # ============ SETTINGS API ============
