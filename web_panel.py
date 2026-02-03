@@ -17,11 +17,11 @@ import database as db
 from player import get_player
 from scheduler import get_scheduler
 from logger import log_web
+from services.config_service import load_config, save_config
 
 app = Flask(__name__)
 app.secret_key = 'announceflow_secret_key_2024'
 
-CONFIG_FILE = 'config.json'
 MEDIA_FOLDER = 'media'
 # Accepted upload formats (will be converted to MP3 if needed)
 ALLOWED_EXTENSIONS = {'mp3', 'wav', 'ogg', 'aiff', 'aif', 'flac', 'm4a', 'wma', 'mp2'}
@@ -37,16 +37,6 @@ os.makedirs(os.path.join(MEDIA_FOLDER, 'announcements'), exist_ok=True)
 
 
 # ============ HELPERS ============
-
-def load_config():
-    if not os.path.exists(CONFIG_FILE):
-        return {'volume': 80, 'admin_username': 'admin', 'admin_password': 'admin123'}
-    with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
-        return json.load(f)
-
-def save_config(config):
-    with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
-        json.dump(config, f, indent=4, ensure_ascii=False)
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS

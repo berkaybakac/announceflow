@@ -90,6 +90,12 @@ class ConfigService:
         self._ensure_loaded()
         return dict(self._config)
 
+    def update_all(self, config_dict: dict) -> bool:
+        """Update multiple config values at once with atomic write."""
+        self._ensure_loaded()
+        self._config.update(config_dict)
+        return self._save()
+
     def _save(self) -> bool:
         """Atomic write: write to temp file, then rename."""
         if not self._config_path:
@@ -130,7 +136,12 @@ def get_config() -> ConfigService:
     return ConfigService()
 
 
-# For backward compatibility: allow direct function call
+# For backward compatibility: allow direct function calls
 def load_config() -> dict:
     """Legacy function - returns config as dict."""
     return get_config().get_all()
+
+
+def save_config(config_dict: dict) -> bool:
+    """Legacy function - saves entire config dict with atomic write."""
+    return get_config().update_all(config_dict)
