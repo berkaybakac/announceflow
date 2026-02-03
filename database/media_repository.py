@@ -9,17 +9,7 @@ class MediaRepository(BaseRepository):
     """Repository for media file operations."""
 
     def add_media_file(self, filename: str, filepath: str, media_type: str, duration_seconds: int = 0) -> int:
-        """Add a new media file to the database.
-
-        Args:
-            filename: Name of the media file
-            filepath: Full path to the media file
-            media_type: Type of media ('music' or 'announcement')
-            duration_seconds: Duration in seconds (default: 0)
-
-        Returns:
-            ID of the newly created media file
-        """
+        """Add a new media file to the database."""
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute('''
@@ -32,14 +22,7 @@ class MediaRepository(BaseRepository):
         return media_id
 
     def get_all_media_files(self, media_type: Optional[str] = None) -> List[Dict[str, Any]]:
-        """Get all media files, optionally filtered by type.
-
-        Args:
-            media_type: Optional filter by type ('music' or 'announcement')
-
-        Returns:
-            List of media file dictionaries
-        """
+        """Get all media files, optionally filtered by type."""
         conn = self.get_connection()
         cursor = conn.cursor()
 
@@ -53,14 +36,7 @@ class MediaRepository(BaseRepository):
         return [dict(row) for row in rows]
 
     def get_media_file(self, media_id: int) -> Optional[Dict[str, Any]]:
-        """Get a single media file by ID.
-
-        Args:
-            media_id: Media file ID
-
-        Returns:
-            Media file dictionary or None if not found
-        """
+        """Get a single media file by ID."""
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute('SELECT * FROM media_files WHERE id = ?', (media_id,))
@@ -69,14 +45,7 @@ class MediaRepository(BaseRepository):
         return dict(row) if row else None
 
     def get_media_by_filename(self, filename: str) -> Optional[Dict[str, Any]]:
-        """Get a media file by filename.
-
-        Args:
-            filename: Name of the media file
-
-        Returns:
-            Media file dictionary or None if not found
-        """
+        """Get a media file by filename."""
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute('SELECT * FROM media_files WHERE filename = ?', (filename,))
@@ -85,14 +54,7 @@ class MediaRepository(BaseRepository):
         return dict(row) if row else None
 
     def delete_media_file(self, media_id: int) -> bool:
-        """Delete a media file by ID.
-
-        Args:
-            media_id: Media file ID to delete
-
-        Returns:
-            True if deleted, False otherwise
-        """
+        """Delete a media file by ID."""
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute('DELETE FROM media_files WHERE id = ?', (media_id,))
