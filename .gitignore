@@ -37,3 +37,7 @@ announceflow.service
 tests/test_api.py
 
 fetch_logs.expectlogs/
+
+# Logs
+logs/
+logs/**
