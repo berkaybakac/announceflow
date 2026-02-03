@@ -13,7 +13,7 @@ import database as db
 from player import get_player
 from scheduler import get_scheduler
 from logger import log_web
-from services.config_service import load_config, save_config
+from services.config_service import load_config
 
 app = Flask(__name__)
 app.secret_key = 'announceflow_secret_key_2024'
@@ -28,10 +28,7 @@ os.makedirs(os.path.join(MEDIA_FOLDER, 'announcements'), exist_ok=True)
 # ============ HELPERS ============
 
 # Helper functions moved to utils/helpers.py (avoid circular imports)
-from utils.helpers import (
-    login_required,
-    _flash_redirect
-)
+from utils.helpers import login_required
 
 
 # ============ AUTH ROUTES ============
@@ -303,82 +300,7 @@ def settings():
 
 
 # ============ SETTINGS API ============
-
-@app.route('/api/settings/credentials', methods=['POST'])
-@login_required
-def api_update_credentials():
-    """Update admin credentials."""
-    config = load_config()
-
-    username = request.form.get('username')
-    password = request.form.get('password')
-    password_confirm = request.form.get('password_confirm')
-
-    import logging
-
-    if username and username != config.get('admin_username'):
-        logging.info(f"Admin username changed from {config.get('admin_username')} to {username}")
-        config['admin_username'] = username
-
-    if password:
-        # Validate password confirmation
-        if password != password_confirm:
-            return _flash_redirect('Şifreler eşleşmiyor!', 'error', 'settings')
-
-        logging.info("Admin password changed")
-        config['admin_password'] = password
-
-    save_config(config)
-    return _flash_redirect('Yönetici bilgileri güncellendi', 'success', 'settings')
-
-
-@app.route('/api/prayer-times/districts')
-@login_required
-def api_get_districts():
-    """Get districts for a city."""
-    city = request.args.get('city')
-    if not city:
-        return jsonify([])
-
-    import prayer_times as pt
-    districts = pt.get_districts(city)
-    return jsonify(districts)
-
-
-@app.route('/api/settings/working-hours', methods=['POST'])
-@login_required
-def api_update_working_hours():
-    """Update working hours settings."""
-    config = load_config()
-
-    # Checkbox sends '1' when checked, missing when unchecked
-    config['working_hours_enabled'] = 'working_hours_enabled' in request.form
-    config['working_hours_start'] = request.form.get('working_hours_start', '09:00')
-    config['working_hours_end'] = request.form.get('working_hours_end', '22:00')
-
-    save_config(config)
-    return _flash_redirect('Çalışma saatleri ayarları güncellendi', 'success', 'settings')
-
-
-@app.route('/api/settings/prayer-times', methods=['POST'])
-@login_required
-def api_update_prayer_times():
-    """Update prayer times settings."""
-    config = load_config()
-
-    city = request.form.get('prayer_times_city', '')
-    district = request.form.get('prayer_times_district', '')
-
-    # Validate: if city is selected, district is required
-    if city and not district:
-        return _flash_redirect('İl seçiliyken ilçe zorunludur!', 'error', 'settings')
-
-    config['prayer_times_enabled'] = 'prayer_times_enabled' in request.form
-    config['prayer_times_city'] = city
-    config['prayer_times_district'] = district
-
-    save_config(config)
-    return _flash_redirect('Ezan vakitleri ayarları güncellendi', 'success', 'settings')
+# Phase 3.5: All settings endpoints moved to routes/settings_routes.py
 
 
 # ============ BLUEPRINT REGISTRATION ============
