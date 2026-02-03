@@ -111,3 +111,17 @@ def api_get_music_files():
         'files': files,
         'count': len(files)
     })
+
+
+@player_bp.route('/api/pause', methods=['POST'])
+@login_required
+def api_pause():
+    """Deprecated."""
+    return _json_error('Not supported', 405)
+
+
+@player_bp.route('/api/resume', methods=['POST'])
+@login_required
+def api_resume():
+    """Deprecated."""
+    return _json_error('Not supported', 405)
