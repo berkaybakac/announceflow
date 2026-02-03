@@ -32,9 +32,8 @@ agent/dist/
 # Cache
 *_cache.json
 
-# Service and test files
+# Service files
 announceflow.service
-tests/test_api.py
 
 fetch_logs.expectlogs/
 
