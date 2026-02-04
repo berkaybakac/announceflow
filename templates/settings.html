@@ -21,10 +21,14 @@
 
     <div style="padding: 20px 0;">
         <div style="display: flex; align-items: center; gap: 20px;">
-            <span style="font-size: 24px;">🔈</span>
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 24px; height: 24px; color: var(--text-muted); flex-shrink: 0;">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M17.25 9.75L19.5 12m0 0l2.25 2.25M19.5 12l2.25-2.25M19.5 12l-2.25 2.25m-10.5-6l4.72-4.72a.75.75 0 011.28.531V19.94a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.506-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.395C2.806 8.757 3.63 8.25 4.51 8.25H6.75z" />
+            </svg>
             <input type="range" class="volume-slider" id="mainVolumeSlider" min="0" max="100" value="{{ volume }}"
                 style="flex: 1;" onchange="updateVolume(this.value)">
-            <span style="font-size: 24px;">🔊</span>
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 24px; height: 24px; color: var(--text-secondary); flex-shrink: 0;">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" />
+            </svg>
         </div>
 
         <div
@@ -53,19 +57,31 @@
 
     <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px;">
         <div style="text-align: center; padding: 20px; background: var(--bg-input); border-radius: 12px;">
-            <div style="font-size: 32px; margin-bottom: 8px;">🎵</div>
+            <div style="margin-bottom: 8px; display: flex; justify-content: center;">
+                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 32px; height: 32px; color: var(--primary);">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 9l10.5-3m0 6.553v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 11-.99-3.467l2.31-.66a2.25 2.25 0 001.632-2.163zm0 0V2.25L9 5.25v10.303m0 0v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 01-.99-3.467l2.31-.66A2.25 2.25 0 009 15.553z" />
+                </svg>
+            </div>
             <div style="font-size: 1.5rem; font-weight: 700; color: var(--primary);">{{ total_music }}</div>
             <div style="color: var(--text-muted); font-size: 0.9rem;">Müzik Dosyası</div>
         </div>
 
         <div style="text-align: center; padding: 20px; background: var(--bg-input); border-radius: 12px;">
-            <div style="font-size: 32px; margin-bottom: 8px;">📢</div>
+            <div style="margin-bottom: 8px; display: flex; justify-content: center;">
+                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 32px; height: 32px; color: var(--warning);">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M10.34 15.84c-.688-.06-1.386-.09-2.09-.09H7.5a4.5 4.5 0 110-9h.75c.704 0 1.402-.03 2.09-.09m0 9.18c.253.962.584 1.892.985 2.783.247.55.06 1.21-.463 1.511l-.657.38c-.551.318-1.26.117-1.527-.461a20.845 20.845 0 01-1.44-4.282m3.102.069a18.03 18.03 0 01-.59-4.59c0-1.586.205-3.124.59-4.59m0 9.18a23.848 23.848 0 018.835 2.535M10.34 6.66a23.847 23.847 0 008.835-2.535m0 0A23.74 23.74 0 0018.795 3m.38 1.125a23.91 23.91 0 011.014 5.395m-1.014 8.855c-.118.38-.245.754-.38 1.125m.38-1.125a23.91 23.91 0 001.014-5.395m0-3.46c.495.413.811 1.035.811 1.73 0 .695-.316 1.317-.811 1.73m0-3.46a24.347 24.347 0 010 3.46" />
+                </svg>
+            </div>
             <div style="font-size: 1.5rem; font-weight: 700; color: var(--warning);">{{ total_announcements }}</div>
             <div style="color: var(--text-muted); font-size: 0.9rem;">Anons Dosyası</div>
         </div>
 
         <div style="text-align: center; padding: 20px; background: var(--bg-input); border-radius: 12px;">
-            <div style="font-size: 32px; margin-bottom: 8px;">📅</div>
+            <div style="margin-bottom: 8px; display: flex; justify-content: center;">
+                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 32px; height: 32px; color: var(--success);">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
+                </svg>
+            </div>
             <div style="font-size: 1.5rem; font-weight: 700; color: var(--success);">{{ total_schedules }}</div>
             <div style="color: var(--text-muted); font-size: 0.9rem;">Aktif Plan</div>
         </div>
@@ -110,14 +126,22 @@
         </div>
 
         <div style="text-align: center; padding: 16px; background: var(--bg-input); border-radius: 10px;">
-            <div style="font-size: 24px; margin-bottom: 4px;">🧠</div>
+            <div style="margin-bottom: 4px; display: flex; justify-content: center;">
+                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 24px; height: 24px; color: var(--success);">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 3v1.5M4.5 8.25H3m18 0h-1.5M4.5 12H3m18 0h-1.5m-15 3.75H3m18 0h-1.5M8.25 19.5V21M12 3v1.5m0 15V21m3.75-18v1.5m0 15V21m-9-1.5h10.5a2.25 2.25 0 002.25-2.25V6.75a2.25 2.25 0 00-2.25-2.25H6.75A2.25 2.25 0 004.5 6.75v10.5a2.25 2.25 0 002.25 2.25zm.75-12h9v9h-9v-9z" />
+                </svg>
+            </div>
             <div style="font-size: 1rem; font-weight: 700; color: var(--success);">{{ system_stats.ram_free_mb }} MB
             </div>
             <div style="color: var(--text-muted); font-size: 0.85rem;">Boş Bellek (RAM)</div>
         </div>
 
         <div style="text-align: center; padding: 16px; background: var(--bg-input); border-radius: 10px;">
-            <div style="font-size: 24px; margin-bottom: 4px;">🎵</div>
+            <div style="margin-bottom: 4px; display: flex; justify-content: center;">
+                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 24px; height: 24px; color: var(--warning);">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 9l10.5-3m0 6.553v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 11-.99-3.467l2.31-.66a2.25 2.25 0 001.632-2.163zm0 0V2.25L9 5.25v10.303m0 0v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 01-.99-3.467l2.31-.66A2.25 2.25 0 009 15.553z" />
+                </svg>
+            </div>
             <div style="font-size: 1rem; font-weight: 700; color: var(--warning);">~{{ system_stats.estimated_songs }}
             </div>
             <div style="color: var(--text-muted); font-size: 0.85rem;">Tahmini Parça Kapasitesi</div>
