@@ -8,6 +8,25 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+    <!--
+        Theme Flash Prevention (FOUC):
+        This script MUST run before CSS loads to prevent flash of unstyled content.
+        It reads the saved theme preference and sets data-theme attribute immediately.
+        DO NOT move this script or make it async/defer - it must be blocking.
+    -->
+    <script>
+        (function() {
+            try {
+                const savedTheme = localStorage.getItem('theme') || 'light';
+                document.documentElement.setAttribute('data-theme', savedTheme);
+            } catch (e) {
+                // localStorage unavailable (private browsing, etc.) - default to light
+                document.documentElement.setAttribute('data-theme', 'light');
+            }
+        })();
+    </script>
+
     <style>
         :root {
             --bg-dark: #0f0f0f;
@@ -717,6 +736,9 @@
         }
     </style>
     {% block extra_css %}{% endblock %}
+
+    <!-- Alpine.js - Lightweight reactive framework (14KB) -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"></script>
 </head>
 
 <body>
@@ -849,15 +871,15 @@
         });
 
         // Theme Switcher
+        // Note: Initial theme is set by blocking script in <head> to prevent flash
         (function() {
             const themeToggle = document.getElementById('themeToggle');
             const themeIcon = document.getElementById('themeIcon');
             const html = document.documentElement;
 
-            // Load saved theme or default to light
-            const savedTheme = localStorage.getItem('theme') || 'light';
-            html.setAttribute('data-theme', savedTheme);
-            updateIcon(savedTheme);
+            // Theme already set by blocking script in <head>, just update icon
+            const currentTheme = html.getAttribute('data-theme') || 'light';
+            updateIcon(currentTheme);
 
             // Toggle theme on button click
             themeToggle.addEventListener('click', () => {

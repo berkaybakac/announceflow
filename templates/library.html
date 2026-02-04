@@ -118,8 +118,8 @@
                     </td>
                     <td style="color: var(--text-muted);">{{ file.created_at_formatted }}</td>
                     <td>
-                        <button class="btn btn-outline btn-sm" onclick="playFile('{{ file.id }}')">
-                            Çal
+                        <button class="btn btn-outline btn-sm" onclick="startMusicPlaylist()">
+                            Müzik Başlat
                         </button>
                         <button class="btn btn-outline-danger btn-sm" onclick="stopPlayback()">
                             Dur
@@ -360,14 +360,29 @@
     // Play File
     async function playFile(mediaId) {
         try {
+            // Play single file (for announcements preview)
             await fetch('/api/play', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ media_id: mediaId })
             });
-            // Show toast or simple alert (optional, but keep it minimal)
         } catch (error) {
             console.error('Error playing file:', error);
+        }
+    }
+
+    // Start music playlist (loop mode) - for music section only
+    async function startMusicPlaylist() {
+        try {
+            const response = await fetch('/api/playlist/start-all', {
+                method: 'POST'
+            });
+            if (response.ok) {
+                showToast('Müzik listesi başlatıldı (loop mode)', 'success');
+            }
+        } catch (error) {
+            console.error('Error starting playlist:', error);
+            showToast('Müzik başlatılamadı', 'error');
         }
     }
 
