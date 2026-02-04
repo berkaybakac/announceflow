@@ -72,6 +72,10 @@ class Scheduler:
         self._restore_threads: list = []
         self._restore_lock = threading.Lock()
         self._restore_in_progress = False  # Idempotency: prevent multiple simultaneous restores
+        # Config caching to reduce disk I/O
+        self._config_cache: Optional[dict] = None
+        self._config_cache_time: float = 0
+        self._config_cache_ttl: int = 30  # Reload config every 30 seconds max
         
     def start(self):
         """Start the scheduler background thread."""
@@ -90,12 +94,20 @@ class Scheduler:
         if self._thread:
             self._thread.join(timeout=5)
         logger.info("Scheduler stopped")
-    
+
+    def _get_cached_config(self) -> dict:
+        """Get config with TTL caching to reduce disk I/O."""
+        now = time.time()
+        if self._config_cache is None or (now - self._config_cache_time) > self._config_cache_ttl:
+            self._config_cache = load_config()
+            self._config_cache_time = now
+        return self._config_cache
+
     def _run_loop(self):
         """Main scheduler loop."""
         while self._running:
             try:
-                config = load_config()
+                config = self._get_cached_config()
                 player = get_player()
 
                 # 1. Prayer time check - highest priority, stops EVERYTHING
@@ -193,7 +205,7 @@ class Scheduler:
     
     def _check_one_time_schedules(self):
         """Check and trigger pending one-time schedules."""
-        config = load_config()
+        config = self._get_cached_config()
         outside_working_hours = not is_within_working_hours(config)
 
         now = datetime.now()
