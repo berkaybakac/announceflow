@@ -79,10 +79,18 @@ def get_cities() -> List[str]:
             _save_geo_cache(cache)
             return sorted(cities.keys())
             
+    except urllib.error.HTTPError as e:
+        logger.warning(f"Cities API HTTP error: {e.code} {e.reason}")
+    except urllib.error.URLError as e:
+        if 'timed out' in str(e.reason).lower():
+            logger.warning(f"Cities API timeout: {e.reason}")
+        else:
+            logger.warning(f"Cities API network error: {e.reason}")
     except Exception as e:
-        logger.error(f"City fetch error: {e}")
-        # Fallback list if API fails
-        return ["Adana", "Ankara", "Antalya", "Bursa", "Diyarbakır", "Erzurum", "Gaziantep", "İstanbul", "İzmir", "Konya", "Trabzon", "Van"]
+        logger.error(f"City fetch error: {type(e).__name__}: {e}")
+
+    # Fallback list if API fails
+    return ["Adana", "Ankara", "Antalya", "Bursa", "Diyarbakır", "Erzurum", "Gaziantep", "İstanbul", "İzmir", "Konya", "Trabzon", "Van"]
 
 def get_districts(city: str) -> List[str]:
     """Get districts for a city from API."""
@@ -134,9 +142,17 @@ def get_districts(city: str) -> List[str]:
             _save_geo_cache(cache)
             return sorted(districts)
 
+    except urllib.error.HTTPError as e:
+        logger.warning(f"Districts API HTTP error for {city}: {e.code} {e.reason}")
+    except urllib.error.URLError as e:
+        if 'timed out' in str(e.reason).lower():
+            logger.warning(f"Districts API timeout for {city}: {e.reason}")
+        else:
+            logger.warning(f"Districts API network error for {city}: {e.reason}")
     except Exception as e:
-        logger.error(f"District fetch error for {city}: {e}")
-        return []
+        logger.error(f"District fetch error for {city}: {type(e).__name__}: {e}")
+
+    return []
 
 def _load_cache() -> Dict:
     """Load cached prayer times."""
@@ -259,10 +275,15 @@ def fetch_weekly_prayer_times(city: str, district: str) -> bool:
                     _log_prayer_event("fetch", {"city": city, "district": district, "days": cached_count})
                     return True
 
+    except urllib.error.HTTPError as e:
+        logger.warning(f"Prayer API HTTP error for {city}/{district}: {e.code} {e.reason}")
     except urllib.error.URLError as e:
-        logger.error(f"Weekly prayer times API error: {e}")
+        if 'timed out' in str(e.reason).lower():
+            logger.warning(f"Prayer API timeout for {city}/{district}: {e.reason}")
+        else:
+            logger.warning(f"Prayer API network error for {city}/{district}: {e.reason}")
     except Exception as e:
-        logger.error(f"Weekly prayer times fetch error: {e}")
+        logger.error(f"Prayer times fetch error for {city}/{district}: {type(e).__name__}: {e}")
 
     return False
 
@@ -321,8 +342,15 @@ def fetch_prayer_times(city: str, district: str) -> Optional[Dict]:
                 logger.info(f"Fetched prayer times (alt API) for {city}: {prayer_times}")
                 return prayer_times
 
+    except urllib.error.HTTPError as e:
+        logger.warning(f"Alternative API HTTP error for {city}: {e.code} {e.reason}")
+    except urllib.error.URLError as e:
+        if 'timed out' in str(e.reason).lower():
+            logger.warning(f"Alternative API timeout for {city}: {e.reason}")
+        else:
+            logger.warning(f"Alternative API network error for {city}: {e.reason}")
     except Exception as e:
-        logger.error(f"Alternative API error: {e}")
+        logger.error(f"Alternative API error for {city}: {type(e).__name__}: {e}")
 
     # Last resort: Check if we have ANY cached data for this city/district
     # (might be from a different day but better than nothing)
