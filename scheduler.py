@@ -103,6 +103,97 @@ class Scheduler:
             self._config_cache_time = now
         return self._config_cache
 
+    def _handle_prayer_time(self, config: dict, player) -> bool:
+        """Handle prayer time check and playlist pause/resume.
+
+        Returns True if we should skip the rest of the loop (prayer time active).
+        """
+        if is_prayer_time_active(config):
+            if player.is_playing or player._playlist_active:
+                # Save playlist state BEFORE stopping (only once)
+                if self._prayer_pause_state is None:
+                    self._prayer_pause_state = {
+                        'playlist': list(player._playlist),
+                        'index': player._playlist_index,
+                        'loop': player._playlist_loop,
+                        'active': player._playlist_active
+                    }
+                    logger.info(f"Prayer time - saving playlist state (index={player._playlist_index}, tracks={len(player._playlist)})")
+                    log_prayer("silence_start", {"index": player._playlist_index, "tracks": len(player._playlist)})
+                # Use stop() instead of stop_playlist() to preserve DB state
+                player.stop()
+                player._playlist_active = False  # Temporarily disable without clearing
+            return True  # Skip rest of loop
+
+        # Prayer time ended - restore playlist if we saved state
+        if self._prayer_pause_state is not None:
+            state = self._prayer_pause_state
+            self._prayer_pause_state = None
+
+            if state['active'] and state['playlist']:
+                logger.info(f"Prayer ended - restoring playlist (index={state['index']})")
+                log_prayer("silence_end", {"index": state['index']})
+                player._playlist = state['playlist']
+                player._playlist_loop = state['loop']
+                player._playlist_index = state['index']
+                player._playlist_active = True
+                # Sync to DB and play next
+                db.save_playlist_state(
+                    playlist=state['playlist'],
+                    index=state['index'],
+                    loop=state['loop'],
+                    active=True
+                )
+                player.play_next()
+
+        return False  # Continue with rest of loop
+
+    def _handle_working_hours(self, config: dict, player) -> bool:
+        """Handle working hours check and playlist pause/resume.
+
+        Returns True if outside working hours (schedules should be limited).
+        """
+        outside_working_hours = not is_within_working_hours(config)
+
+        if outside_working_hours:
+            # Save playlist state BEFORE stopping (only once)
+            if player._playlist_active or player.is_playing:
+                if self._working_hours_pause_state is None:
+                    self._working_hours_pause_state = {
+                        'playlist': list(player._playlist),
+                        'index': player._playlist_index,
+                        'loop': player._playlist_loop,
+                        'active': player._playlist_active
+                    }
+                    logger.info(f"Outside working hours - saving playlist state (index={player._playlist_index}, tracks={len(player._playlist)})")
+                    log_schedule("working_hours_end", {"index": player._playlist_index, "tracks": len(player._playlist)})
+                # Use stop() instead of stop_playlist() to preserve DB state
+                player.stop()
+                player._playlist_active = False  # Temporarily disable without clearing
+        else:
+            # Working hours started - restore playlist if we saved state
+            if self._working_hours_pause_state is not None:
+                state = self._working_hours_pause_state
+                self._working_hours_pause_state = None
+
+                if state['active'] and state['playlist']:
+                    logger.info(f"Working hours started - restoring playlist (index={state['index']})")
+                    log_schedule("working_hours_start", {"index": state['index']})
+                    player._playlist = state['playlist']
+                    player._playlist_loop = state['loop']
+                    player._playlist_index = state['index']
+                    player._playlist_active = True
+                    # Sync to DB and play next
+                    db.save_playlist_state(
+                        playlist=state['playlist'],
+                        index=state['index'],
+                        loop=state['loop'],
+                        active=True
+                    )
+                    player.play_next()
+
+        return outside_working_hours
+
     def _run_loop(self):
         """Main scheduler loop."""
         while self._running:
@@ -111,85 +202,12 @@ class Scheduler:
                 player = get_player()
 
                 # 1. Prayer time check - highest priority, stops EVERYTHING
-                if is_prayer_time_active(config):
-                    if player.is_playing or player._playlist_active:
-                        # Save playlist state BEFORE stopping (only once)
-                        if self._prayer_pause_state is None:
-                            self._prayer_pause_state = {
-                                'playlist': list(player._playlist),
-                                'index': player._playlist_index,
-                                'loop': player._playlist_loop,
-                                'active': player._playlist_active
-                            }
-                            logger.info(f"Prayer time - saving playlist state (index={player._playlist_index}, tracks={len(player._playlist)})")
-                            log_prayer("silence_start", {"index": player._playlist_index, "tracks": len(player._playlist)})
-                        # Use stop() instead of stop_playlist() to preserve DB state
-                        # Playlist will auto-resume from DB on restart
-                        player.stop()
-                        player._playlist_active = False  # Temporarily disable without clearing
+                if self._handle_prayer_time(config, player):
                     time.sleep(self.check_interval)
                     continue
 
-                # Prayer time ended - restore playlist if we saved state
-                if self._prayer_pause_state is not None:
-                    state = self._prayer_pause_state
-                    self._prayer_pause_state = None
-
-                    if state['active'] and state['playlist']:
-                        logger.info(f"Prayer ended - restoring playlist (index={state['index']})")
-                        log_prayer("silence_end", {"index": state['index']})
-                        player._playlist = state['playlist']
-                        player._playlist_loop = state['loop']
-                        player._playlist_index = state['index']
-                        player._playlist_active = True
-                        # Sync to DB and play next
-                        db.save_playlist_state(
-                            playlist=state['playlist'],
-                            index=state['index'],
-                            loop=state['loop'],
-                            active=True
-                        )
-                        player.play_next()
-
                 # 2. Working hours check
-                outside_working_hours = not is_within_working_hours(config)
-
-                if outside_working_hours:
-                    # Save playlist state BEFORE stopping (only once)
-                    if player._playlist_active or player.is_playing:
-                        if self._working_hours_pause_state is None:
-                            self._working_hours_pause_state = {
-                                'playlist': list(player._playlist),
-                                'index': player._playlist_index,
-                                'loop': player._playlist_loop,
-                                'active': player._playlist_active
-                            }
-                            logger.info(f"Outside working hours - saving playlist state (index={player._playlist_index}, tracks={len(player._playlist)})")
-                            log_schedule("working_hours_end", {"index": player._playlist_index, "tracks": len(player._playlist)})
-                        # Use stop() instead of stop_playlist() to preserve DB state
-                        player.stop()
-                        player._playlist_active = False  # Temporarily disable without clearing
-                else:
-                    # Working hours started - restore playlist if we saved state
-                    if self._working_hours_pause_state is not None:
-                        state = self._working_hours_pause_state
-                        self._working_hours_pause_state = None
-
-                        if state['active'] and state['playlist']:
-                            logger.info(f"Working hours started - restoring playlist (index={state['index']})")
-                            log_schedule("working_hours_start", {"index": state['index']})
-                            player._playlist = state['playlist']
-                            player._playlist_loop = state['loop']
-                            player._playlist_index = state['index']
-                            player._playlist_active = True
-                            # Sync to DB and play next
-                            db.save_playlist_state(
-                                playlist=state['playlist'],
-                                index=state['index'],
-                                loop=state['loop'],
-                                active=True
-                            )
-                            player.play_next()
+                outside_working_hours = self._handle_working_hours(config, player)
 
                 # 3. Always check one-time schedules (announcements play even outside hours)
                 self._check_one_time_schedules()
