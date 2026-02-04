@@ -421,6 +421,14 @@
     updatePlayerState();
 
     // ============ ŞARKI LİSTESİ FONKSİYONLARI ============
+
+    // XSS prevention: escape HTML special characters
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
     let songListVisible = false;
     let musicFiles = [];
 
@@ -462,7 +470,7 @@
         const currentId = currentMediaId;
         container.innerHTML = musicFiles.map(file => `
             <div style="padding: 8px 12px; border-bottom: 1px solid var(--border-color); ${file.id === currentId && isPlaying ? 'background: rgba(46, 204, 113, 0.15); border-left: 3px solid var(--primary);' : ''}">
-                ${file.id === currentId && isPlaying ? '▶️' : '🎵'} ${file.filename}
+                ${file.id === currentId && isPlaying ? '▶️' : '🎵'} ${escapeHtml(file.filename)}
             </div>
         `).join('');
     }
