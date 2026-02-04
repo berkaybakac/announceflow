@@ -160,15 +160,17 @@ def library():
 
     # Calculate storage statistics
     total_files = len(music_files) + len(announcement_files)
-    total_size_bytes = 0
-    total_duration_seconds = 0
+    all_files = list(music_files) + list(announcement_files)
 
-    for f in list(music_files) + list(announcement_files):
-        # Get file size
-        if os.path.exists(f['filepath']):
-            total_size_bytes += os.path.getsize(f['filepath'])
-        # Get duration
-        total_duration_seconds += f.get('duration_seconds', 0)
+    # Optimized: use os.stat() for single syscall per file (instead of exists + getsize)
+    total_size_bytes = 0
+    for f in all_files:
+        try:
+            total_size_bytes += os.stat(f['filepath']).st_size
+        except (OSError, FileNotFoundError):
+            pass  # File doesn't exist or inaccessible
+
+    total_duration_seconds = sum(f.get('duration_seconds', 0) for f in all_files)
 
     # Format for display
     total_size_mb = round(total_size_bytes / (1024 * 1024), 1)
