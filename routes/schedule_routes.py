@@ -5,7 +5,7 @@ API endpoints for schedule management (one-time and recurring).
 import json
 import re
 from datetime import datetime
-from flask import Blueprint, request, redirect, url_for
+from flask import Blueprint, request, redirect, url_for, jsonify
 import database as db
 from utils.helpers import login_required, _flash_redirect
 
@@ -47,15 +47,15 @@ def api_add_one_time():
 def api_cancel_one_time(schedule_id):
     """Cancel a one-time schedule."""
     db.update_one_time_schedule_status(schedule_id, "cancelled")
-    return _flash_redirect("Plan iptal edildi", "success", "one_time_schedules")
+    return jsonify({"success": True, "message": "Plan iptal edildi"})
 
 
-@schedule_bp.route("/api/schedules/one-time/<int:schedule_id>/delete", methods=["POST"])
+@schedule_bp.route("/api/schedules/one-time/<int:schedule_id>/delete", methods=["POST", "DELETE"])
 @login_required
 def api_delete_one_time(schedule_id):
     """Delete a one-time schedule."""
     db.delete_one_time_schedule(schedule_id)
-    return _flash_redirect("Plan silindi", "success", "one_time_schedules")
+    return jsonify({"success": True, "message": "Plan silindi"})
 
 
 @schedule_bp.route("/api/schedules/recurring", methods=["POST"])
@@ -143,13 +143,13 @@ def api_toggle_recurring(schedule_id):
 
 
 @schedule_bp.route(
-    "/api/schedules/recurring/<int:schedule_id>/delete", methods=["POST"]
+    "/api/schedules/recurring/<int:schedule_id>/delete", methods=["POST", "DELETE"]
 )
 @login_required
 def api_delete_recurring(schedule_id):
     """Delete a recurring schedule."""
     db.delete_recurring_schedule(schedule_id)
-    return _flash_redirect("Plan silindi", "success", "recurring_schedules")
+    return jsonify({"success": True, "message": "Plan silindi"})
 
 
 @schedule_bp.route(

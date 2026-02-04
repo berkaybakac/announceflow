@@ -84,6 +84,37 @@
             flex-direction: column;
         }
 
+        .sidebar-nav {
+            flex: 1;
+            overflow-y: auto;
+            padding-bottom: 16px;
+            margin-right: -8px;
+            padding-right: 8px;
+        }
+
+        .sidebar-nav::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .sidebar-nav::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        .sidebar-nav::-webkit-scrollbar-thumb {
+            background: var(--border);
+            border-radius: 3px;
+        }
+
+        .sidebar-nav::-webkit-scrollbar-thumb:hover {
+            background: var(--text-muted);
+        }
+
+        .sidebar-footer {
+            flex-shrink: 0;
+            padding-top: 20px;
+            border-top: 1px solid var(--border);
+        }
+
         .logo {
             display: flex;
             align-items: center;
@@ -251,7 +282,7 @@
         }
 
         .btn-primary:hover {
-            transform: translateY(-2px);
+            transform: scale(1.02);
             box-shadow: 0 6px 20px var(--primary-glow);
         }
 
@@ -270,11 +301,19 @@
         .btn-outline:hover {
             border-color: var(--primary);
             color: var(--primary);
+            background: var(--bg-card-hover);
+            transform: scale(1.01);
         }
 
         .btn-danger {
             background: var(--danger);
             color: white;
+            box-shadow: 0 4px 12px rgba(239, 68, 68, 0.2);
+        }
+
+        .btn-danger:hover {
+            transform: scale(1.02);
+            box-shadow: 0 6px 20px rgba(239, 68, 68, 0.3);
         }
 
         .btn-icon {
@@ -610,11 +649,80 @@
         #themeIcon {
             font-size: 1.2rem;
         }
+
+        /* Toast Notifications */
+        .toast-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 10000;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            pointer-events: none;
+        }
+
+        .toast {
+            min-width: 250px;
+            max-width: 400px;
+            padding: 16px 20px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            pointer-events: auto;
+            animation: slideIn 0.3s ease;
+            font-weight: 500;
+        }
+
+        .toast-success {
+            border-left: 4px solid var(--success);
+        }
+
+        .toast-error {
+            border-left: 4px solid var(--danger);
+        }
+
+        .toast-info {
+            border-left: 4px solid var(--primary);
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateX(100%);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        @keyframes slideOut {
+            from {
+                opacity: 1;
+                transform: translateX(0);
+            }
+            to {
+                opacity: 0;
+                transform: translateX(100%);
+            }
+        }
+
+        .toast.hiding {
+            animation: slideOut 0.3s ease;
+        }
     </style>
     {% block extra_css %}{% endblock %}
 </head>
 
 <body>
+    <!-- Toast Container -->
+    <div class="toast-container" id="toastContainer"></div>
+
     <div class="app-container">
         <!-- Sidebar -->
         <aside class="sidebar">
@@ -627,7 +735,8 @@
                 <span class="logo-text">AnnounceFlow</span>
             </div>
 
-            <nav>
+            <div class="sidebar-nav">
+                <nav>
                 <div class="nav-section">
                     <div class="nav-section-title">Oynatıcı</div>
                     <a href="/" class="nav-link {% if active_page == 'now-playing' %}active{% endif %}">
@@ -682,9 +791,10 @@
                         <span>Ayarlar</span>
                     </a>
                 </div>
-            </nav>
+                </nav>
+            </div>
 
-            <div style="margin-top: auto; padding-top: 20px; border-top: 1px solid var(--border);">
+            <div class="sidebar-footer">
                 <button id="themeToggle" class="theme-toggle-btn">
                     <span id="themeIcon">
                         <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 20px; height: 20px;">
@@ -771,6 +881,95 @@
                 themeIcon.innerHTML = iconSVG;
             }
         })();
+
+        // Toast Notification System
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            toast.className = `toast toast-${type}`;
+            toast.textContent = message;
+
+            container.appendChild(toast);
+
+            // Auto remove after 3 seconds
+            setTimeout(() => {
+                toast.classList.add('hiding');
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+
+        // Helper function for delete operations
+        async function confirmAndDelete(url, itemName, elementToRemove) {
+            if (!confirm(`${itemName} silmek istediğinize emin misiniz?`)) {
+                return;
+            }
+
+            try {
+                const response = await fetch(url, {
+                    method: 'DELETE',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    showToast(data.message, 'success');
+                    if (elementToRemove) {
+                        elementToRemove.style.transition = 'opacity 0.3s ease';
+                        elementToRemove.style.opacity = '0';
+                        setTimeout(() => elementToRemove.remove(), 300);
+                    }
+                } else {
+                    showToast(data.message || 'İşlem başarısız oldu', 'error');
+                }
+            } catch (error) {
+                console.error('Delete error:', error);
+                showToast('Bir hata oluştu', 'error');
+            }
+        }
+
+        // Helper function for cancel operations
+        async function confirmAndCancel(url, elementToUpdate) {
+            if (!confirm('Planı iptal etmek istediğinize emin misiniz?')) {
+                return;
+            }
+
+            try {
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    }
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    showToast(data.message, 'success');
+                    if (elementToUpdate) {
+                        // Update status badge to cancelled
+                        const statusBadge = elementToUpdate.querySelector('.status-badge');
+                        if (statusBadge) {
+                            statusBadge.textContent = 'İptal Edildi';
+                            statusBadge.className = 'status-badge status-cancelled';
+                        }
+                        // Disable cancel button
+                        const cancelBtn = elementToUpdate.querySelector('button[onclick*="cancel"]');
+                        if (cancelBtn) {
+                            cancelBtn.disabled = true;
+                            cancelBtn.style.opacity = '0.5';
+                        }
+                    }
+                } else {
+                    showToast(data.message || 'İşlem başarısız oldu', 'error');
+                }
+            } catch (error) {
+                console.error('Cancel error:', error);
+                showToast('Bir hata oluştu', 'error');
+            }
+        }
     </script>
     {% block extra_js %}{% endblock %}
 </body>

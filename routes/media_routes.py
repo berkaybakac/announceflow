@@ -5,7 +5,7 @@ API endpoints for media file management (upload, delete).
 import os
 import subprocess
 import tempfile
-from flask import Blueprint, request, redirect, url_for, flash
+from flask import Blueprint, request, redirect, url_for, flash, jsonify
 from werkzeug.utils import secure_filename
 import database as db
 from logger import log_web
@@ -174,7 +174,7 @@ def api_media_upload():
     return redirect(url_for("library"))
 
 
-@media_bp.route("/api/media/<int:media_id>/delete", methods=["POST"])
+@media_bp.route("/api/media/<int:media_id>/delete", methods=["POST", "DELETE"])
 @login_required
 def api_media_delete(media_id):
     """Delete a media file."""
@@ -188,6 +188,6 @@ def api_media_delete(media_id):
         # Delete from database
         db.delete_media_file(media_id)
         log_web("delete", {"media_id": media_id, "filename": media["filename"]})
-        return _flash_redirect("Dosya silindi", "success", "library")
+        return jsonify({"success": True, "message": "Dosya silindi"})
     else:
-        return _flash_redirect("Dosya bulunamadı", "error", "library")
+        return jsonify({"success": False, "message": "Dosya bulunamadı"}), 404
