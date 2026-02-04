@@ -4,6 +4,10 @@ FAZA 3 Test Suite - Cleanup
 Tests for C1 (Turkish character normalization).
 """
 import sys
+import os
+
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 def test_imports():
     """Test all critical imports work."""
