@@ -5,19 +5,26 @@ __pycache__/
 *.pyd
 *.log
 *.db
-.DS_Store
+**/.DS_Store
 Thumbs.db
 venv/
+env/
 .env
+
+# Test artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+test_*.db
+test_*.log
 
 # IDE
 .vscode/
 .idea/
 *.swp
 
-# Project Config & Docs
+# Project Config
 config.json
-docs/
 
 # Media (Ignore all except placeholder)
 media/*
@@ -26,6 +33,7 @@ media/*
 # Build
 agent/build/
 agent/dist/
+docs/build/
 *.spec
 *.exe
 
