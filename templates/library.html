@@ -124,12 +124,10 @@
                         <button class="btn btn-outline-danger btn-sm" onclick="stopPlayback()">
                             Dur
                         </button>
-                        <form action="/api/media/{{ file.id }}/delete" method="POST" style="display: inline;">
-                            <button type="submit" class="btn btn-danger btn-sm"
-                                onclick="return confirm('Bu dosyayı silmek istediğinize emin misiniz?')">
-                                Sil
-                            </button>
-                        </form>
+                        <button class="btn btn-danger btn-sm"
+                                onclick="confirmAndDelete('/api/media/{{ file.id }}/delete', 'Bu dosyayı', this.closest('tr'))">
+                            Sil
+                        </button>
                     </td>
                 </tr>
                 {% endfor %}
@@ -192,12 +190,10 @@
                         <button class="btn btn-outline-danger btn-sm" onclick="stopPlayback()">
                             Dur
                         </button>
-                        <form action="/api/media/{{ file.id }}/delete" method="POST" style="display: inline;">
-                            <button type="submit" class="btn btn-danger btn-sm"
-                                onclick="return confirm('Bu dosyayı silmek istediğinize emin misiniz?')">
-                                Sil
-                            </button>
-                        </form>
+                        <button class="btn btn-danger btn-sm"
+                                onclick="confirmAndDelete('/api/media/{{ file.id }}/delete', 'Bu dosyayı', this.closest('tr'))">
+                            Sil
+                        </button>
                     </td>
                 </tr>
                 {% endfor %}

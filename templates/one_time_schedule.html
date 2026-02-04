@@ -105,21 +105,15 @@
                 </td>
                 <td>
                     {% if schedule.status == 'pending' %}
-                    <form action="/api/schedules/one-time/{{ schedule.id }}/cancel" method="POST"
-                        style="display: inline;">
-                        <button type="submit" class="btn btn-outline btn-sm"
-                            onclick="return confirm('Bu planı iptal etmek istediğinize emin misiniz?')">
-                            İptal
-                        </button>
-                    </form>
+                    <button class="btn btn-outline btn-sm"
+                            onclick="confirmAndCancel('/api/schedules/one-time/{{ schedule.id }}/cancel', this.closest('tr'))">
+                        İptal
+                    </button>
                     {% endif %}
-                    <form action="/api/schedules/one-time/{{ schedule.id }}/delete" method="POST"
-                        style="display: inline;">
-                        <button type="submit" class="btn btn-danger btn-sm"
-                            onclick="return confirm('Bu planı silmek istediğinize emin misiniz?')">
-                            🗑️
-                        </button>
-                    </form>
+                    <button class="btn btn-danger btn-sm"
+                            onclick="confirmAndDelete('/api/schedules/one-time/{{ schedule.id }}/delete', 'Bu planı', this.closest('tr'))">
+                        🗑️
+                    </button>
                 </td>
             </tr>
             {% endfor %}
@@ -176,21 +170,15 @@
                 </td>
                 <td>
                     {% if schedule.status == 'pending' %}
-                    <form action="/api/schedules/one-time/{{ schedule.id }}/cancel" method="POST"
-                        style="display: inline;">
-                        <button type="submit" class="btn btn-outline btn-sm"
-                            onclick="return confirm('Bu planı iptal etmek istediğinize emin misiniz?')">
-                            İptal
-                        </button>
-                    </form>
+                    <button class="btn btn-outline btn-sm"
+                            onclick="confirmAndCancel('/api/schedules/one-time/{{ schedule.id }}/cancel', this.closest('tr'))">
+                        İptal
+                    </button>
                     {% endif %}
-                    <form action="/api/schedules/one-time/{{ schedule.id }}/delete" method="POST"
-                        style="display: inline;">
-                        <button type="submit" class="btn btn-danger btn-sm"
-                            onclick="return confirm('Bu planı silmek istediğinize emin misiniz?')">
-                            🗑️
-                        </button>
-                    </form>
+                    <button class="btn btn-danger btn-sm"
+                            onclick="confirmAndDelete('/api/schedules/one-time/{{ schedule.id }}/delete', 'Bu planı', this.closest('tr'))">
+                        🗑️
+                    </button>
                 </td>
             </tr>
             {% endfor %}

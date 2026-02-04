@@ -173,13 +173,10 @@
                             {% if schedule.is_active %}Devre Dışı{% else %}Etkinleştir{% endif %}
                         </button>
                     </form>
-                    <form action="/api/schedules/recurring/{{ schedule.id }}/delete" method="POST"
-                        style="display: inline;">
-                        <button type="submit" class="btn btn-danger btn-sm"
-                            onclick="return confirm('Bu planı silmek istediğinize emin misiniz?')">
-                            🗑️
-                        </button>
-                    </form>
+                    <button class="btn btn-danger btn-sm"
+                            onclick="confirmAndDelete('/api/schedules/recurring/{{ schedule.id }}/delete', 'Bu planı', this.closest('tr'))">
+                        🗑️
+                    </button>
                 </td>
             </tr>
             {% endfor %}
