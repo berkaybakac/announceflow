@@ -6,6 +6,10 @@ Tests for R1 (Scheduler loop refactoring).
 CRITICAL: These tests verify scheduler behavior hasn't changed after refactoring.
 """
 import sys
+import os
+
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 def test_imports():
     """Test all critical imports work."""

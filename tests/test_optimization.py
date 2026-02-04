@@ -4,7 +4,11 @@ FAZA 2 Test Suite - Optimize
 Tests for O1 (Config Cache) and O2 (File Size) optimizations.
 """
 import sys
+import os
 import time
+
+# Add parent directory to path for imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 def test_imports():
     """Test all critical imports work."""
