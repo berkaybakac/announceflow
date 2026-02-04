@@ -212,7 +212,9 @@ class Scheduler:
                 except ValueError:
                     scheduled_dt = datetime.strptime(dt_str, '%Y-%m-%d %H:%M')
             except Exception as e:
-                logger.error(f"Failed to parse schedule datetime '{schedule['scheduled_datetime']}': {e}")
+                # Invalid datetime format - mark as cancelled to prevent infinite retry
+                logger.error(f"Invalid datetime for schedule #{schedule['id']}: '{schedule['scheduled_datetime']}' - marking as cancelled")
+                db.update_one_time_schedule_status(schedule['id'], 'cancelled')
                 continue
 
             # Check if it's time (within 2 minute tolerance for safety)
