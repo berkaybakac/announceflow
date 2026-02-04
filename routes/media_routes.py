@@ -12,30 +12,44 @@ from logger import log_web
 from utils.helpers import login_required, _flash_redirect
 
 
-media_bp = Blueprint('media', __name__)
+media_bp = Blueprint("media", __name__)
 
 
 # Media constants
-MEDIA_FOLDER = 'media'
-ALLOWED_EXTENSIONS = {'mp3', 'wav', 'ogg', 'aiff', 'aif', 'flac', 'm4a', 'wma', 'mp2'}
-NEEDS_CONVERSION = {'wav', 'ogg', 'aiff', 'aif', 'flac', 'm4a', 'wma', 'mp2'}
+MEDIA_FOLDER = "media"
+ALLOWED_EXTENSIONS = {"mp3", "wav", "ogg", "aiff", "aif", "flac", "m4a", "wma", "mp2"}
+NEEDS_CONVERSION = {"wav", "ogg", "aiff", "aif", "flac", "m4a", "wma", "mp2"}
 
 
 def allowed_file(filename):
     """Check if file extension is allowed."""
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+    return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
 
 
 def convert_to_mp3(input_path: str, output_path: str) -> bool:
     """Convert any audio format to MP3 using ffmpeg."""
     import logging
+
     logger = logging.getLogger(__name__)
     try:
-        result = subprocess.run([
-            'ffmpeg', '-y', '-i', input_path,
-            '-acodec', 'libmp3lame', '-ab', '192k', '-ar', '44100',
-            output_path
-        ], capture_output=True, text=True, timeout=120)
+        result = subprocess.run(
+            [
+                "ffmpeg",
+                "-y",
+                "-i",
+                input_path,
+                "-acodec",
+                "libmp3lame",
+                "-ab",
+                "192k",
+                "-ar",
+                "44100",
+                output_path,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
         if result.returncode != 0:
             logger.error(f"ffmpeg conversion failed: {result.stderr}")
             return False
@@ -51,10 +65,21 @@ def convert_to_mp3(input_path: str, output_path: str) -> bool:
 def get_audio_duration(file_path: str) -> int:
     """Get audio duration in seconds using ffprobe."""
     try:
-        result = subprocess.run([
-            'ffprobe', '-v', 'error', '-show_entries', 'format=duration',
-            '-of', 'csv=p=0', file_path
-        ], capture_output=True, text=True, timeout=30)
+        result = subprocess.run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "csv=p=0",
+                file_path,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
         if result.returncode == 0 and result.stdout.strip():
             return int(float(result.stdout.strip()))
     except Exception:
@@ -62,26 +87,26 @@ def get_audio_duration(file_path: str) -> int:
     return 0
 
 
-@media_bp.route('/api/media/upload', methods=['POST'])
+@media_bp.route("/api/media/upload", methods=["POST"])
 @login_required
 def api_media_upload():
     """Upload a media file."""
-    if 'file' not in request.files:
-        return _flash_redirect('Dosya seçilmedi', 'error', 'library')
+    if "file" not in request.files:
+        return _flash_redirect("Dosya seçilmedi", "error", "library")
 
-    file = request.files['file']
-    media_type = request.form.get('media_type', 'music')
+    file = request.files["file"]
+    media_type = request.form.get("media_type", "music")
 
-    if file.filename == '':
-        return _flash_redirect('Dosya seçilmedi', 'error', 'library')
+    if file.filename == "":
+        return _flash_redirect("Dosya seçilmedi", "error", "library")
 
     if file and file.filename and allowed_file(file.filename):
         original_filename = secure_filename(file.filename)
-        subfolder = 'music' if media_type == 'music' else 'announcements'
+        subfolder = "music" if media_type == "music" else "announcements"
 
         # Get file extension
         base, ext = os.path.splitext(original_filename)
-        ext_lower = ext.lower().lstrip('.')
+        ext_lower = ext.lower().lstrip(".")
 
         # Check if conversion is needed
         needs_convert = ext_lower in NEEDS_CONVERSION
@@ -110,9 +135,14 @@ def api_media_upload():
                     # Get duration from converted file
                     duration = get_audio_duration(mp3_filepath)
                     db.add_media_file(mp3_filename, mp3_filepath, media_type, duration)
-                    flash(f'{original_filename} → {mp3_filename} dönüştürüldü ve yüklendi!', 'success')
+                    flash(
+                        f"{original_filename} → {mp3_filename} dönüştürüldü ve yüklendi!",
+                        "success",
+                    )
                 else:
-                    flash(f'{original_filename} dönüştürülemedi. ffmpeg hatası.', 'error')
+                    flash(
+                        f"{original_filename} dönüştürülemedi. ffmpeg hatası.", "error"
+                    )
             finally:
                 # Always clean up temp file
                 if os.path.exists(temp_path):
@@ -133,14 +163,18 @@ def api_media_upload():
             duration = get_audio_duration(filepath)
             db.add_media_file(original_filename, filepath, media_type, duration)
             log_web("upload", {"filename": original_filename, "media_type": media_type})
-            flash(f'{original_filename} başarıyla yüklendi!', 'success')
+            flash(f"{original_filename} başarıyla yüklendi!", "success")
     else:
-        return _flash_redirect('Geçersiz dosya türü. Kabul edilen: MP3, WAV, OGG, AIFF, FLAC, M4A, WMA, MP2', 'error', 'library')
+        return _flash_redirect(
+            "Geçersiz dosya türü. Kabul edilen: MP3, WAV, OGG, AIFF, FLAC, M4A, WMA, MP2",
+            "error",
+            "library",
+        )
 
-    return redirect(url_for('library'))
+    return redirect(url_for("library"))
 
 
-@media_bp.route('/api/media/<int:media_id>/delete', methods=['POST'])
+@media_bp.route("/api/media/<int:media_id>/delete", methods=["POST"])
 @login_required
 def api_media_delete(media_id):
     """Delete a media file."""
@@ -148,12 +182,12 @@ def api_media_delete(media_id):
 
     if media:
         # Delete file from disk
-        if os.path.exists(media['filepath']):
-            os.remove(media['filepath'])
+        if os.path.exists(media["filepath"]):
+            os.remove(media["filepath"])
 
         # Delete from database
         db.delete_media_file(media_id)
-        log_web("delete", {"media_id": media_id, "filename": media['filename']})
-        return _flash_redirect('Dosya silindi', 'success', 'library')
+        log_web("delete", {"media_id": media_id, "filename": media["filename"]})
+        return _flash_redirect("Dosya silindi", "success", "library")
     else:
-        return _flash_redirect('Dosya bulunamadı', 'error', 'library')
+        return _flash_redirect("Dosya bulunamadı", "error", "library")

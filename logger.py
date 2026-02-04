@@ -54,27 +54,28 @@ from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from typing import Any, Dict, Optional
 
+
 # Event categories
 class EventCategory:
-    SYSTEM = "SYSTEM"       # Boot, shutdown, service status
-    PLAY = "PLAY"           # Track start/end, playlist events
-    TRIGGER = "TRIGGER"     # Schedule triggers (one-time, recurring)
-    PRAYER = "PRAYER"       # Prayer time silence periods
-    SCHEDULE = "SCHEDULE"   # Working hours, scheduling decisions
-    VOLUME = "VOLUME"       # Volume changes
-    WEB = "WEB"             # Panel access, API calls
-    ERROR = "ERROR"         # Errors and warnings
+    SYSTEM = "SYSTEM"  # Boot, shutdown, service status
+    PLAY = "PLAY"  # Track start/end, playlist events
+    TRIGGER = "TRIGGER"  # Schedule triggers (one-time, recurring)
+    PRAYER = "PRAYER"  # Prayer time silence periods
+    SCHEDULE = "SCHEDULE"  # Working hours, scheduling decisions
+    VOLUME = "VOLUME"  # Volume changes
+    WEB = "WEB"  # Panel access, API calls
+    ERROR = "ERROR"  # Errors and warnings
 
 
 # Log directory
-LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'logs')
-EVENT_LOG_FILE = os.path.join(LOG_DIR, 'events.jsonl')
+LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+EVENT_LOG_FILE = os.path.join(LOG_DIR, "events.jsonl")
 
 # Ensure log directory exists
 os.makedirs(LOG_DIR, exist_ok=True)
 
 # Configure event file handler
-_event_logger = logging.getLogger('events')
+_event_logger = logging.getLogger("events")
 _event_logger.setLevel(logging.INFO)
 _event_logger.propagate = False  # Don't propagate to root logger
 
@@ -84,23 +85,21 @@ if _event_logger.hasHandlers():
 
 # JSON Lines file handler (1MB, 5 backups)
 _event_handler = RotatingFileHandler(
-    EVENT_LOG_FILE,
-    maxBytes=1_000_000,  # 1 MB
-    backupCount=5
+    EVENT_LOG_FILE, maxBytes=1_000_000, backupCount=5  # 1 MB
 )
-_event_handler.setFormatter(logging.Formatter('%(message)s'))
+_event_handler.setFormatter(logging.Formatter("%(message)s"))
 _event_logger.addHandler(_event_handler)
 
 
 def log_event(category: str, event: str, data: Optional[Dict[str, Any]] = None) -> None:
     """
     Log an event in JSON Lines format.
-    
+
     Args:
         category: Event category (SYSTEM, PLAY, TRIGGER, etc.)
         event: Event name (e.g., 'track_start', 'boot', 'silence_start')
         data: Optional additional data dictionary
-    
+
     Example:
         log_event("PLAY", "track_start", {"file": "song.mp3", "index": 1})
     """
@@ -111,7 +110,7 @@ def log_event(category: str, event: str, data: Optional[Dict[str, Any]] = None) 
     }
     if data:
         entry["data"] = data
-    
+
     _event_logger.info(json.dumps(entry, ensure_ascii=False))
 
 
@@ -155,13 +154,13 @@ def log_error(event: str, data: Optional[Dict[str, Any]] = None) -> None:
     log_event(EventCategory.ERROR, event, data)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     # Test logging
     print(f"Log directory: {LOG_DIR}")
     print(f"Event log file: {EVENT_LOG_FILE}")
-    
+
     log_system("test", {"message": "Logger test"})
     log_play("track_start", {"file": "test.mp3", "index": 1, "total": 5})
     log_volume("change", {"old": 50, "new": 75})
-    
+
     print("Test events logged. Check events.jsonl")

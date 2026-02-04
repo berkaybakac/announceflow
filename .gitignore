@@ -7,16 +7,9 @@ __pycache__/
 *.db
 **/.DS_Store
 Thumbs.db
-venv/
-env/
-.env
 
-# Test artifacts
-.pytest_cache/
-.coverage
-htmlcov/
-test_*.db
-test_*.log
+# Development Environment
+.env
 
 # IDE
 .vscode/
@@ -33,7 +26,6 @@ media/*
 # Build
 agent/build/
 agent/dist/
-docs/build/
 *.spec
 *.exe
 
@@ -42,8 +34,6 @@ docs/build/
 
 # Service files
 announceflow.service
-
-fetch_logs.expectlogs/
 
 # Logs
 logs/

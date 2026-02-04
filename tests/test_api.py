@@ -12,7 +12,7 @@ def test_health():
     r = requests.get(f"{BASE_URL}/api/health", timeout=5)
     assert r.status_code == 200, f"Status: {r.status_code}"
     data = r.json()
-    assert data['status'] == 'ok', f"Status: {data.get('status')}"
+    assert data["status"] == "ok", f"Status: {data.get('status')}"
     print(f"  Backend: {data['player']['backend']}")
     print(f"  Volume: {data['player']['volume']}%")
     print(f"  Scheduler: {'Running' if data['scheduler']['running'] else 'Stopped'}")
@@ -22,10 +22,12 @@ def test_health():
 
 def test_login():
     """Login calisiyor mu?"""
-    r = SESSION.post(f"{BASE_URL}/login", data={
-        "username": "admin",
-        "password": "admin123"
-    }, allow_redirects=False, timeout=5)
+    r = SESSION.post(
+        f"{BASE_URL}/login",
+        data={"username": "admin", "password": "admin123"},
+        allow_redirects=False,
+        timeout=5,
+    )
     assert r.status_code in [200, 302], f"Status: {r.status_code}"
     print("✓ Login OK")
     return True
@@ -35,13 +37,13 @@ def test_volume():
     """Ses ayari calisiyor mu?"""
     # Get current volume
     r = SESSION.get(f"{BASE_URL}/api/now-playing", timeout=5)
-    current_vol = r.json().get('volume', 80)
-    
+    current_vol = r.json().get("volume", 80)
+
     # Set new volume
     new_vol = 75 if current_vol != 75 else 80
     r = SESSION.post(f"{BASE_URL}/api/volume", json={"volume": new_vol}, timeout=5)
     assert r.json()["success"] == True, "Volume set failed"
-    
+
     # Restore original
     SESSION.post(f"{BASE_URL}/api/volume", json={"volume": current_vol}, timeout=5)
     print(f"  Volume test: {current_vol}% -> {new_vol}% -> {current_vol}%")
@@ -77,7 +79,7 @@ def test_playlist_operations():
     r = SESSION.post(f"{BASE_URL}/api/playlist/stop", timeout=5)
     assert r.status_code == 200, f"Status: {r.status_code}"
     data = r.json()
-    assert data.get('success') == True, "Playlist stop failed"
+    assert data.get("success") == True, "Playlist stop failed"
     print("  Playlist stop: OK")
     print("✓ Playlist blueprint OK")
     return True
@@ -87,7 +89,10 @@ def test_library_page():
     """Library sayfasi aciliyor mu? (Media Blueprint)"""
     r = SESSION.get(f"{BASE_URL}/library", timeout=5)
     assert r.status_code == 200, f"Status: {r.status_code}"
-    assert b"library" in r.content.lower() or b"k\xc3\xbct\xc3\xbcphane" in r.content.lower(), "Page content check failed"
+    assert (
+        b"library" in r.content.lower()
+        or b"k\xc3\xbct\xc3\xbcphane" in r.content.lower()
+    ), "Page content check failed"
     print("  Library page rendered: OK")
     print("✓ Media blueprint (page) OK")
     return True
@@ -97,7 +102,9 @@ def test_settings_page():
     """Settings sayfasi aciliyor mu? (Settings Blueprint)"""
     r = SESSION.get(f"{BASE_URL}/settings", timeout=5)
     assert r.status_code == 200, f"Status: {r.status_code}"
-    assert b"settings" in r.content.lower() or b"ayarlar" in r.content.lower(), "Page content check failed"
+    assert (
+        b"settings" in r.content.lower() or b"ayarlar" in r.content.lower()
+    ), "Page content check failed"
     print("  Settings page rendered: OK")
     print("✓ Settings blueprint (page) OK")
     return True
@@ -120,7 +127,7 @@ if __name__ == "__main__":
         ("Library Page", test_library_page),
         ("Settings Page", test_settings_page),
     ]
-    
+
     passed = 0
     failed = 0
 
@@ -149,5 +156,5 @@ if __name__ == "__main__":
         print(f"  {failed} test BASARISIZ!")
     print("=" * 40)
     print()
-    
+
     sys.exit(0 if failed == 0 else 1)

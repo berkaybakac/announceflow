@@ -15,12 +15,14 @@ class PlaybackRepository(BaseRepository):
         """Get current playback state with media info."""
         conn = self.get_connection()
         cursor = conn.cursor()
-        cursor.execute('''
+        cursor.execute(
+            """
             SELECT ps.*, m.filename, m.filepath
             FROM playback_state ps
             LEFT JOIN media_files m ON ps.current_media_id = m.id
             WHERE ps.id = 1
-        ''')
+        """
+        )
         row = cursor.fetchone()
         conn.close()
         return dict(row) if row else {}
@@ -30,7 +32,7 @@ class PlaybackRepository(BaseRepository):
         current_media_id: Optional[int] = None,
         position_seconds: Optional[float] = None,
         is_playing: Optional[bool] = None,
-        volume: Optional[int] = None
+        volume: Optional[int] = None,
     ) -> bool:
         """Update playback state."""
         conn = self.get_connection()
@@ -40,24 +42,24 @@ class PlaybackRepository(BaseRepository):
         values = []
 
         if current_media_id is not None:
-            updates.append('current_media_id = ?')
+            updates.append("current_media_id = ?")
             try:
                 mid = int(current_media_id)
                 values.append(mid if mid > 0 else None)
             except (ValueError, TypeError):
                 values.append(None)
         if position_seconds is not None:
-            updates.append('position_seconds = ?')
+            updates.append("position_seconds = ?")
             values.append(position_seconds)
         if is_playing is not None:
-            updates.append('is_playing = ?')
+            updates.append("is_playing = ?")
             values.append(1 if is_playing else 0)
         if volume is not None:
-            updates.append('volume = ?')
+            updates.append("volume = ?")
             values.append(volume)
 
         if updates:
-            updates.append('updated_at = CURRENT_TIMESTAMP')
+            updates.append("updated_at = CURRENT_TIMESTAMP")
             query = f"UPDATE playback_state SET {', '.join(updates)} WHERE id = 1"
             cursor.execute(query, values)
             conn.commit()
@@ -72,7 +74,7 @@ class PlaybackRepository(BaseRepository):
         playlist: Optional[List[str]] = None,
         index: Optional[int] = None,
         loop: Optional[bool] = None,
-        active: Optional[bool] = None
+        active: Optional[bool] = None,
     ) -> bool:
         """Save playlist state to database for persistence across restarts."""
         conn = self.get_connection()
@@ -82,20 +84,20 @@ class PlaybackRepository(BaseRepository):
         values = []
 
         if playlist is not None:
-            updates.append('playlist_json = ?')
+            updates.append("playlist_json = ?")
             values.append(json.dumps(playlist) if playlist else None)
         if index is not None:
-            updates.append('playlist_index = ?')
+            updates.append("playlist_index = ?")
             values.append(index)
         if loop is not None:
-            updates.append('playlist_loop = ?')
+            updates.append("playlist_loop = ?")
             values.append(1 if loop else 0)
         if active is not None:
-            updates.append('playlist_active = ?')
+            updates.append("playlist_active = ?")
             values.append(1 if active else 0)
 
         if updates:
-            updates.append('updated_at = CURRENT_TIMESTAMP')
+            updates.append("updated_at = CURRENT_TIMESTAMP")
             query = f"UPDATE playback_state SET {', '.join(updates)} WHERE id = 1"
             cursor.execute(query, values)
             conn.commit()
@@ -107,19 +109,27 @@ class PlaybackRepository(BaseRepository):
         """Get saved playlist state from database."""
         conn = self.get_connection()
         cursor = conn.cursor()
-        cursor.execute('''
+        cursor.execute(
+            """
             SELECT playlist_json, playlist_index, playlist_loop, playlist_active
             FROM playback_state WHERE id = 1
-        ''')
+        """
+        )
         row = cursor.fetchone()
         conn.close()
 
         if row:
-            playlist_json = row['playlist_json']
+            playlist_json = row["playlist_json"]
             return {
-                'playlist': json.loads(playlist_json) if playlist_json else [],
-                'index': row['playlist_index'] if row['playlist_index'] is not None else -1,
-                'loop': bool(row['playlist_loop']) if row['playlist_loop'] is not None else True,
-                'active': bool(row['playlist_active']) if row['playlist_active'] is not None else False
+                "playlist": json.loads(playlist_json) if playlist_json else [],
+                "index": row["playlist_index"]
+                if row["playlist_index"] is not None
+                else -1,
+                "loop": bool(row["playlist_loop"])
+                if row["playlist_loop"] is not None
+                else True,
+                "active": bool(row["playlist_active"])
+                if row["playlist_active"] is not None
+                else False,
             }
-        return {'playlist': [], 'index': -1, 'loop': True, 'active': False}
+        return {"playlist": [], "index": -1, "loop": True, "active": False}

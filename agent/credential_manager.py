@@ -24,22 +24,19 @@ def _get_account_name(server_url: str) -> str:
 def save_credentials(server_url: str, username: str, password: str) -> bool:
     """
     Save credentials securely using OS keychain.
-    
+
     Args:
         server_url: API server URL (used as identifier)
         username: Login username
         password: Login password
-        
+
     Returns:
         True if saved successfully, False otherwise
     """
     try:
         account = _get_account_name(server_url)
         # Store as JSON to keep both username and password
-        credential_data = json.dumps({
-            "username": username,
-            "password": password
-        })
+        credential_data = json.dumps({"username": username, "password": password})
         keyring.set_password(SERVICE_NAME, account, credential_data)
         return True
     except Exception as e:
@@ -50,17 +47,17 @@ def save_credentials(server_url: str, username: str, password: str) -> bool:
 def get_credentials(server_url: str) -> Optional[Tuple[str, str]]:
     """
     Retrieve stored credentials for a server.
-    
+
     Args:
         server_url: API server URL
-        
+
     Returns:
         Tuple of (username, password) if found, None otherwise
     """
     try:
         account = _get_account_name(server_url)
         credential_data = keyring.get_password(SERVICE_NAME, account)
-        
+
         if credential_data:
             data = json.loads(credential_data)
             return (data.get("username"), data.get("password"))
@@ -73,10 +70,10 @@ def get_credentials(server_url: str) -> Optional[Tuple[str, str]]:
 def delete_credentials(server_url: str) -> bool:
     """
     Delete stored credentials for a server.
-    
+
     Args:
         server_url: API server URL
-        
+
     Returns:
         True if deleted successfully, False otherwise
     """
@@ -95,10 +92,10 @@ def delete_credentials(server_url: str) -> bool:
 def has_credentials(server_url: str) -> bool:
     """
     Check if credentials exist for a server.
-    
+
     Args:
         server_url: API server URL
-        
+
     Returns:
         True if credentials exist, False otherwise
     """

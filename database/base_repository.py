@@ -7,7 +7,7 @@ import sqlite3
 class BaseRepository:
     """Base class for all repositories with shared connection logic."""
 
-    def __init__(self, db_path: str = 'announceflow.db'):
+    def __init__(self, db_path: str = "announceflow.db"):
         """Initialize repository with database path.
 
         Args:

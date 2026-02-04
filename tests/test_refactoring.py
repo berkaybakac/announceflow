@@ -11,6 +11,7 @@ import os
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+
 def test_imports():
     """Test all critical imports work."""
     print("TEST 1: Imports...", end=" ")
@@ -18,28 +19,38 @@ def test_imports():
         import scheduler
         import database as db
         from scheduler import Scheduler, is_prayer_time_active, is_within_working_hours
+
         print("✅ PASS")
         return True
     except Exception as e:
         print(f"❌ FAIL: {e}")
         return False
 
+
 def test_scheduler_attributes():
     """Test scheduler has all required attributes."""
     print("TEST 2: Scheduler attributes...", end=" ")
     try:
         import scheduler
+
         s = scheduler.Scheduler()
 
         # Core attributes
         required_attrs = [
-            'check_interval', '_running', '_thread',
-            '_last_recurring_triggers',
-            '_prayer_pause_state', '_working_hours_pause_state',
+            "check_interval",
+            "_running",
+            "_thread",
+            "_last_recurring_triggers",
+            "_prayer_pause_state",
+            "_working_hours_pause_state",
             # S1: Thread management
-            '_restore_threads', '_restore_lock', '_restore_in_progress',
+            "_restore_threads",
+            "_restore_lock",
+            "_restore_in_progress",
             # O1: Config cache
-            '_config_cache', '_config_cache_time', '_config_cache_ttl'
+            "_config_cache",
+            "_config_cache_time",
+            "_config_cache_ttl",
         ]
 
         for attr in required_attrs:
@@ -54,19 +65,27 @@ def test_scheduler_attributes():
         print(f"❌ FAIL: {e}")
         return False
 
+
 def test_scheduler_methods():
     """Test scheduler has all required methods."""
     print("TEST 3: Scheduler methods...", end=" ")
     try:
         import scheduler
+
         s = scheduler.Scheduler()
 
         # Core methods
         required_methods = [
-            'start', 'stop', '_run_loop',
-            '_get_cached_config',
-            '_check_one_time_schedules', '_check_recurring_schedules',
-            '_play_media', '_times_match', '_is_time_in_range', '_is_interval_point'
+            "start",
+            "stop",
+            "_run_loop",
+            "_get_cached_config",
+            "_check_one_time_schedules",
+            "_check_recurring_schedules",
+            "_play_media",
+            "_times_match",
+            "_is_time_in_range",
+            "_is_interval_point",
         ]
 
         for method in required_methods:
@@ -81,6 +100,7 @@ def test_scheduler_methods():
     except Exception as e:
         print(f"❌ FAIL: {e}")
         return False
+
 
 def test_scheduler_helper_functions():
     """Test scheduler module-level helper functions."""
@@ -108,11 +128,13 @@ def test_scheduler_helper_functions():
         print(f"❌ FAIL: {e}")
         return False
 
+
 def test_scheduler_config_cache():
     """Test config caching works correctly."""
     print("TEST 5: Config cache...", end=" ")
     try:
         import scheduler
+
         s = scheduler.Scheduler()
 
         # Get config twice, should be cached
@@ -132,18 +154,17 @@ def test_scheduler_config_cache():
         print(f"❌ FAIL: {e}")
         return False
 
+
 def test_refactored_methods_exist():
     """Test that refactored methods exist (after refactoring)."""
     print("TEST 6: Refactored methods...", end=" ")
     try:
         import scheduler
+
         s = scheduler.Scheduler()
 
         # These methods should exist after refactoring
-        refactored_methods = [
-            '_handle_prayer_time',
-            '_handle_working_hours'
-        ]
+        refactored_methods = ["_handle_prayer_time", "_handle_working_hours"]
 
         missing = []
         for method in refactored_methods:
@@ -164,21 +185,24 @@ def test_refactored_methods_exist():
         print(f"❌ FAIL: {e}")
         return False
 
+
 def test_database():
     """Test database functions still work."""
     print("TEST 7: Database...", end=" ")
     try:
         import database as db
+
         db.init_database()
 
         state = db.get_playback_state()
-        assert 'volume' in state, "Missing volume"
+        assert "volume" in state, "Missing volume"
 
         print("✅ PASS")
         return True
     except Exception as e:
         print(f"❌ FAIL: {e}")
         return False
+
 
 def test_previous_faza_fixes():
     """Verify all previous fixes still work."""
@@ -186,16 +210,18 @@ def test_previous_faza_fixes():
     try:
         # FAZA 3: Turkish normalize
         from prayer_times import _turkish_title, _normalize_turkish
+
         assert _turkish_title("İSTANBUL") == "İstanbul"
         assert _normalize_turkish("İstanbul") == "istanbul"
 
         # FAZA 2: Config cache
         import scheduler
+
         s = scheduler.Scheduler()
-        assert hasattr(s, '_get_cached_config')
+        assert hasattr(s, "_get_cached_config")
 
         # FAZA 1: Thread management
-        assert hasattr(s, '_restore_in_progress')
+        assert hasattr(s, "_restore_in_progress")
 
         print("✅ PASS")
         return True
@@ -203,11 +229,12 @@ def test_previous_faza_fixes():
         print(f"❌ FAIL: {e}")
         return False
 
+
 def run_all_tests():
     """Run all tests and report results."""
-    print("\n" + "="*50)
+    print("\n" + "=" * 50)
     print("FAZA 4 TEST SUITE - Scheduler Refactor")
-    print("="*50 + "\n")
+    print("=" * 50 + "\n")
 
     results = []
     results.append(test_imports())
@@ -219,16 +246,17 @@ def run_all_tests():
     results.append(test_database())
     results.append(test_previous_faza_fixes())
 
-    print("\n" + "="*50)
+    print("\n" + "=" * 50)
     passed = sum(1 for r in results if r is True)
     pending = sum(1 for r in results if r is None)
     failed = sum(1 for r in results if r is False)
 
     print(f"Results: {passed} passed, {pending} pending, {failed} failed")
-    print("="*50 + "\n")
+    print("=" * 50 + "\n")
 
     return failed == 0
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     success = run_all_tests()
     sys.exit(0 if success else 1)
