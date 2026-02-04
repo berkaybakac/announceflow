@@ -17,19 +17,19 @@ logger = logging.getLogger(__name__)
 
 # Default values (fallback if key missing)
 DEFAULTS = {
-    'volume': 100,
-    'admin_username': 'admin',
-    'admin_password': 'admin123',
-    'database_path': 'announceflow.db',
-    'media_folder': 'media',
-    'web_port': 5001,
-    'scheduler_interval_seconds': 30,
-    'working_hours_enabled': False,
-    'working_hours_start': '09:00',
-    'working_hours_end': '22:00',
-    'prayer_times_enabled': False,
-    'prayer_times_city': 'Istanbul',
-    'prayer_times_district': 'Istanbul',
+    "volume": 100,
+    "admin_username": "admin",
+    "admin_password": "admin123",
+    "database_path": "announceflow.db",
+    "media_folder": "media",
+    "web_port": 5001,
+    "scheduler_interval_seconds": 30,
+    "working_hours_enabled": False,
+    "working_hours_start": "09:00",
+    "working_hours_end": "22:00",
+    "prayer_times_enabled": False,
+    "prayer_times_city": "Istanbul",
+    "prayer_times_district": "Istanbul",
     # Future: device_id, mode, central_server
 }
 
@@ -52,15 +52,14 @@ class ConfigService:
 
         # Find config.json relative to project root
         self._config_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            'config.json'
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.json"
         )
 
         self._config = dict(DEFAULTS)  # Start with defaults
 
         if os.path.exists(self._config_path):
             try:
-                with open(self._config_path, 'r', encoding='utf-8') as f:
+                with open(self._config_path, "r", encoding="utf-8") as f:
                     loaded = json.load(f)
                     self._config.update(loaded)  # Override defaults
                 logger.info(f"Config loaded from {self._config_path}")
@@ -105,9 +104,9 @@ class ConfigService:
         try:
             # Write to temp file in same directory (for atomic rename)
             dir_name = os.path.dirname(self._config_path)
-            fd, temp_path = tempfile.mkstemp(dir=dir_name, suffix='.tmp')
+            fd, temp_path = tempfile.mkstemp(dir=dir_name, suffix=".tmp")
 
-            with os.fdopen(fd, 'w', encoding='utf-8') as f:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
                 json.dump(self._config, f, indent=4, ensure_ascii=False)
 
             # Atomic rename (POSIX) or replace (Windows)

@@ -12,14 +12,19 @@ class ScheduleRepository(BaseRepository):
 
     # ============ ONE-TIME SCHEDULES ============
 
-    def add_one_time_schedule(self, media_id: int, scheduled_datetime: datetime, reason: Optional[str] = None) -> int:
+    def add_one_time_schedule(
+        self, media_id: int, scheduled_datetime: datetime, reason: Optional[str] = None
+    ) -> int:
         """Add a one-time schedule."""
         conn = self.get_connection()
         cursor = conn.cursor()
-        cursor.execute('''
+        cursor.execute(
+            """
             INSERT INTO one_time_schedules (media_id, scheduled_datetime, reason)
             VALUES (?, ?, ?)
-        ''', (media_id, scheduled_datetime.isoformat(), reason))
+        """,
+            (media_id, scheduled_datetime.isoformat(), reason),
+        )
         schedule_id = cursor.lastrowid or 0
         conn.commit()
         conn.close()
@@ -29,13 +34,15 @@ class ScheduleRepository(BaseRepository):
         """Get all pending one-time schedules with media info."""
         conn = self.get_connection()
         cursor = conn.cursor()
-        cursor.execute('''
+        cursor.execute(
+            """
             SELECT s.*, m.filename, m.filepath, m.media_type
             FROM one_time_schedules s
             JOIN media_files m ON s.media_id = m.id
             WHERE s.status = 'pending'
             ORDER BY s.scheduled_datetime ASC
-        ''')
+        """
+        )
         rows = cursor.fetchall()
         conn.close()
         return [dict(row) for row in rows]
@@ -44,12 +51,14 @@ class ScheduleRepository(BaseRepository):
         """Get all one-time schedules with media info."""
         conn = self.get_connection()
         cursor = conn.cursor()
-        cursor.execute('''
+        cursor.execute(
+            """
             SELECT s.*, m.filename, m.filepath, m.media_type
             FROM one_time_schedules s
             JOIN media_files m ON s.media_id = m.id
             ORDER BY s.scheduled_datetime DESC
-        ''')
+        """
+        )
         rows = cursor.fetchall()
         conn.close()
         return [dict(row) for row in rows]
@@ -58,9 +67,12 @@ class ScheduleRepository(BaseRepository):
         """Update status of a one-time schedule."""
         conn = self.get_connection()
         cursor = conn.cursor()
-        cursor.execute('''
+        cursor.execute(
+            """
             UPDATE one_time_schedules SET status = ? WHERE id = ?
-        ''', (status, schedule_id))
+        """,
+            (status, schedule_id),
+        )
         updated = cursor.rowcount > 0
         conn.commit()
         conn.close()
@@ -70,7 +82,7 @@ class ScheduleRepository(BaseRepository):
         """Delete a one-time schedule."""
         conn = self.get_connection()
         cursor = conn.cursor()
-        cursor.execute('DELETE FROM one_time_schedules WHERE id = ?', (schedule_id,))
+        cursor.execute("DELETE FROM one_time_schedules WHERE id = ?", (schedule_id,))
         deleted = cursor.rowcount > 0
         conn.commit()
         conn.close()
@@ -85,22 +97,25 @@ class ScheduleRepository(BaseRepository):
         start_time: str,
         end_time: Optional[str] = None,
         interval_minutes: int = 0,
-        specific_times: Optional[List[str]] = None
+        specific_times: Optional[List[str]] = None,
     ) -> int:
         """Add a recurring schedule."""
         conn = self.get_connection()
         cursor = conn.cursor()
-        cursor.execute('''
+        cursor.execute(
+            """
             INSERT INTO recurring_schedules (media_id, days_of_week, start_time, end_time, interval_minutes, specific_times)
             VALUES (?, ?, ?, ?, ?, ?)
-        ''', (
-            media_id,
-            json.dumps(days_of_week),
-            start_time,
-            end_time,
-            interval_minutes,
-            json.dumps(specific_times) if specific_times else None
-        ))
+        """,
+            (
+                media_id,
+                json.dumps(days_of_week),
+                start_time,
+                end_time,
+                interval_minutes,
+                json.dumps(specific_times) if specific_times else None,
+            ),
+        )
         schedule_id = cursor.lastrowid or 0
         conn.commit()
         conn.close()
@@ -110,22 +125,24 @@ class ScheduleRepository(BaseRepository):
         """Get all active recurring schedules with media info."""
         conn = self.get_connection()
         cursor = conn.cursor()
-        cursor.execute('''
+        cursor.execute(
+            """
             SELECT s.*, m.filename, m.filepath, m.media_type
             FROM recurring_schedules s
             JOIN media_files m ON s.media_id = m.id
             WHERE s.is_active = 1
             ORDER BY s.start_time ASC
-        ''')
+        """
+        )
         rows = cursor.fetchall()
         conn.close()
 
         result = []
         for row in rows:
             item = dict(row)
-            item['days_of_week'] = json.loads(item['days_of_week'])
-            if item['specific_times']:
-                item['specific_times'] = json.loads(item['specific_times'])
+            item["days_of_week"] = json.loads(item["days_of_week"])
+            if item["specific_times"]:
+                item["specific_times"] = json.loads(item["specific_times"])
             result.append(item)
         return result
 
@@ -133,21 +150,23 @@ class ScheduleRepository(BaseRepository):
         """Get all recurring schedules with media info."""
         conn = self.get_connection()
         cursor = conn.cursor()
-        cursor.execute('''
+        cursor.execute(
+            """
             SELECT s.*, m.filename, m.filepath, m.media_type
             FROM recurring_schedules s
             JOIN media_files m ON s.media_id = m.id
             ORDER BY s.created_at DESC
-        ''')
+        """
+        )
         rows = cursor.fetchall()
         conn.close()
 
         result = []
         for row in rows:
             item = dict(row)
-            item['days_of_week'] = json.loads(item['days_of_week'])
-            if item['specific_times']:
-                item['specific_times'] = json.loads(item['specific_times'])
+            item["days_of_week"] = json.loads(item["days_of_week"])
+            if item["specific_times"]:
+                item["specific_times"] = json.loads(item["specific_times"])
             result.append(item)
         return result
 
@@ -155,9 +174,12 @@ class ScheduleRepository(BaseRepository):
         """Enable or disable a recurring schedule."""
         conn = self.get_connection()
         cursor = conn.cursor()
-        cursor.execute('''
+        cursor.execute(
+            """
             UPDATE recurring_schedules SET is_active = ? WHERE id = ?
-        ''', (1 if is_active else 0, schedule_id))
+        """,
+            (1 if is_active else 0, schedule_id),
+        )
         updated = cursor.rowcount > 0
         conn.commit()
         conn.close()
@@ -167,7 +189,7 @@ class ScheduleRepository(BaseRepository):
         """Delete a recurring schedule."""
         conn = self.get_connection()
         cursor = conn.cursor()
-        cursor.execute('DELETE FROM recurring_schedules WHERE id = ?', (schedule_id,))
+        cursor.execute("DELETE FROM recurring_schedules WHERE id = ?", (schedule_id,))
         deleted = cursor.rowcount > 0
         conn.commit()
         conn.close()
@@ -177,12 +199,14 @@ class ScheduleRepository(BaseRepository):
         """Delete all recurring announcement schedules (not music)."""
         conn = self.get_connection()
         cursor = conn.cursor()
-        cursor.execute('''
+        cursor.execute(
+            """
             DELETE FROM recurring_schedules
             WHERE media_id IN (
                 SELECT id FROM media_files WHERE media_type = 'announcement'
             )
-        ''')
+        """
+        )
         deleted_count = cursor.rowcount
         conn.commit()
         conn.close()

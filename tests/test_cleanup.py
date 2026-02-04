@@ -9,16 +9,19 @@ import os
 # Add parent directory to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+
 def test_imports():
     """Test all critical imports work."""
     print("TEST 1: Imports...", end=" ")
     try:
         import prayer_times
+
         print("✅ PASS")
         return True
     except Exception as e:
         print(f"❌ FAIL: {e}")
         return False
+
 
 def test_normalize_turkish():
     """Test C1: Turkish character normalization."""
@@ -41,7 +44,9 @@ def test_normalize_turkish():
 
         for input_text, expected in test_cases:
             result = _normalize_turkish(input_text)
-            assert result == expected, f"Expected '{expected}' for '{input_text}', got '{result}'"
+            assert (
+                result == expected
+            ), f"Expected '{expected}' for '{input_text}', got '{result}'"
 
         print("✅ PASS")
         return True
@@ -51,6 +56,7 @@ def test_normalize_turkish():
     except Exception as e:
         print(f"❌ FAIL: {e}")
         return False
+
 
 def test_city_name_processing():
     """Test that city names are processed correctly from API format."""
@@ -80,20 +86,22 @@ def test_city_name_processing():
         print(f"❌ FAIL: {e}")
         return False
 
+
 def test_previous_fixes():
     """Verify previous stabilization fixes still work."""
     print("TEST 4: Previous fixes...", end=" ")
     try:
         import scheduler
+
         s = scheduler.Scheduler()
 
         # S1: Thread management
-        assert hasattr(s, '_restore_threads'), "Missing thread tracking"
-        assert hasattr(s, '_restore_in_progress'), "Missing idempotency flag"
+        assert hasattr(s, "_restore_threads"), "Missing thread tracking"
+        assert hasattr(s, "_restore_in_progress"), "Missing idempotency flag"
 
         # O1: Config cache
-        assert hasattr(s, '_config_cache'), "Missing config cache"
-        assert hasattr(s, '_get_cached_config'), "Missing cache method"
+        assert hasattr(s, "_config_cache"), "Missing config cache"
+        assert hasattr(s, "_get_cached_config"), "Missing cache method"
 
         print("✅ PASS")
         return True
@@ -101,11 +109,12 @@ def test_previous_fixes():
         print(f"❌ FAIL: {e}")
         return False
 
+
 def run_all_tests():
     """Run all tests and report results."""
-    print("\n" + "="*50)
+    print("\n" + "=" * 50)
     print("FAZA 3 TEST SUITE")
-    print("="*50 + "\n")
+    print("=" * 50 + "\n")
 
     results = []
     results.append(test_imports())
@@ -113,16 +122,17 @@ def run_all_tests():
     results.append(test_city_name_processing())
     results.append(test_previous_fixes())
 
-    print("\n" + "="*50)
+    print("\n" + "=" * 50)
     passed = sum(1 for r in results if r is True)
     pending = sum(1 for r in results if r is None)
     failed = sum(1 for r in results if r is False)
 
     print(f"Results: {passed} passed, {pending} pending, {failed} failed")
-    print("="*50 + "\n")
+    print("=" * 50 + "\n")
 
     return failed == 0
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     success = run_all_tests()
     sys.exit(0 if success else 1)

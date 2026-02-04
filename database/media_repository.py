@@ -8,28 +8,38 @@ from .base_repository import BaseRepository
 class MediaRepository(BaseRepository):
     """Repository for media file operations."""
 
-    def add_media_file(self, filename: str, filepath: str, media_type: str, duration_seconds: int = 0) -> int:
+    def add_media_file(
+        self, filename: str, filepath: str, media_type: str, duration_seconds: int = 0
+    ) -> int:
         """Add a new media file to the database."""
         conn = self.get_connection()
         cursor = conn.cursor()
-        cursor.execute('''
+        cursor.execute(
+            """
             INSERT INTO media_files (filename, filepath, media_type, duration_seconds)
             VALUES (?, ?, ?, ?)
-        ''', (filename, filepath, media_type, duration_seconds))
+        """,
+            (filename, filepath, media_type, duration_seconds),
+        )
         media_id = cursor.lastrowid or 0
         conn.commit()
         conn.close()
         return media_id
 
-    def get_all_media_files(self, media_type: Optional[str] = None) -> List[Dict[str, Any]]:
+    def get_all_media_files(
+        self, media_type: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
         """Get all media files, optionally filtered by type."""
         conn = self.get_connection()
         cursor = conn.cursor()
 
         if media_type:
-            cursor.execute('SELECT * FROM media_files WHERE media_type = ? ORDER BY created_at DESC', (media_type,))
+            cursor.execute(
+                "SELECT * FROM media_files WHERE media_type = ? ORDER BY created_at DESC",
+                (media_type,),
+            )
         else:
-            cursor.execute('SELECT * FROM media_files ORDER BY created_at DESC')
+            cursor.execute("SELECT * FROM media_files ORDER BY created_at DESC")
 
         rows = cursor.fetchall()
         conn.close()
@@ -39,7 +49,7 @@ class MediaRepository(BaseRepository):
         """Get a single media file by ID."""
         conn = self.get_connection()
         cursor = conn.cursor()
-        cursor.execute('SELECT * FROM media_files WHERE id = ?', (media_id,))
+        cursor.execute("SELECT * FROM media_files WHERE id = ?", (media_id,))
         row = cursor.fetchone()
         conn.close()
         return dict(row) if row else None
@@ -48,7 +58,7 @@ class MediaRepository(BaseRepository):
         """Get a media file by filename."""
         conn = self.get_connection()
         cursor = conn.cursor()
-        cursor.execute('SELECT * FROM media_files WHERE filename = ?', (filename,))
+        cursor.execute("SELECT * FROM media_files WHERE filename = ?", (filename,))
         row = cursor.fetchone()
         conn.close()
         return dict(row) if row else None
@@ -57,7 +67,7 @@ class MediaRepository(BaseRepository):
         """Delete a media file by ID."""
         conn = self.get_connection()
         cursor = conn.cursor()
-        cursor.execute('DELETE FROM media_files WHERE id = ?', (media_id,))
+        cursor.execute("DELETE FROM media_files WHERE id = ?", (media_id,))
         deleted = cursor.rowcount > 0
         conn.commit()
         conn.close()

@@ -18,7 +18,7 @@ from .playback_repository import PlaybackRepository
 
 
 # Database path
-DATABASE_PATH = 'announceflow.db'
+DATABASE_PATH = "announceflow.db"
 
 
 # ============ SINGLETON REPOSITORY INSTANCES ============
@@ -30,13 +30,25 @@ _playback_repo = PlaybackRepository(DATABASE_PATH)
 
 # ============ UTILITY FUNCTIONS ============
 
+
 def _get_audio_duration(file_path: str) -> int:
     """Get audio duration in seconds using ffprobe."""
     try:
-        result = subprocess.run([
-            'ffprobe', '-v', 'error', '-show_entries', 'format=duration',
-            '-of', 'csv=p=0', file_path
-        ], capture_output=True, text=True, timeout=30)
+        result = subprocess.run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "csv=p=0",
+                file_path,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
         if result.returncode == 0 and result.stdout.strip():
             return int(float(result.stdout.strip()))
     except Exception:
@@ -48,15 +60,20 @@ def _backfill_durations():
     """Backfill missing duration values for existing media files."""
     conn = get_db_connection()
     cursor = conn.cursor()
-    cursor.execute('SELECT id, filepath FROM media_files WHERE duration_seconds = 0 OR duration_seconds IS NULL')
+    cursor.execute(
+        "SELECT id, filepath FROM media_files WHERE duration_seconds = 0 OR duration_seconds IS NULL"
+    )
     rows = cursor.fetchall()
 
     for row in rows:
-        mid, fpath = row['id'], row['filepath']
+        mid, fpath = row["id"], row["filepath"]
         if os.path.exists(fpath):
             duration = _get_audio_duration(fpath)
             if duration > 0:
-                cursor.execute('UPDATE media_files SET duration_seconds = ? WHERE id = ?', (duration, mid))
+                cursor.execute(
+                    "UPDATE media_files SET duration_seconds = ? WHERE id = ?",
+                    (duration, mid),
+                )
 
     conn.commit()
     conn.close()
@@ -71,13 +88,15 @@ def get_db_connection():
 
 # ============ INITIALIZATION ============
 
+
 def init_database():
     """Initialize database tables."""
     conn = get_db_connection()
     cursor = conn.cursor()
 
     # Media files table
-    cursor.execute('''
+    cursor.execute(
+        """
         CREATE TABLE IF NOT EXISTS media_files (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             filename TEXT NOT NULL,
@@ -86,10 +105,12 @@ def init_database():
             duration_seconds INTEGER DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
-    ''')
+    """
+    )
 
     # One-time schedules table
-    cursor.execute('''
+    cursor.execute(
+        """
         CREATE TABLE IF NOT EXISTS one_time_schedules (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             media_id INTEGER NOT NULL,
@@ -99,10 +120,12 @@ def init_database():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (media_id) REFERENCES media_files (id) ON DELETE CASCADE
         )
-    ''')
+    """
+    )
 
     # Recurring schedules table
-    cursor.execute('''
+    cursor.execute(
+        """
         CREATE TABLE IF NOT EXISTS recurring_schedules (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             media_id INTEGER NOT NULL,
@@ -115,10 +138,12 @@ def init_database():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (media_id) REFERENCES media_files (id) ON DELETE CASCADE
         )
-    ''')
+    """
+    )
 
     # Playback state table (single row for current state)
-    cursor.execute('''
+    cursor.execute(
+        """
         CREATE TABLE IF NOT EXISTS playback_state (
             id INTEGER PRIMARY KEY CHECK (id = 1),
             current_media_id INTEGER,
@@ -128,12 +153,15 @@ def init_database():
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (current_media_id) REFERENCES media_files (id) ON DELETE SET NULL
         )
-    ''')
+    """
+    )
 
     # Initialize playback state if not exists
-    cursor.execute('''
+    cursor.execute(
+        """
         INSERT OR IGNORE INTO playback_state (id, volume) VALUES (1, 80)
-    ''')
+    """
+    )
 
     conn.commit()
     conn.close()
@@ -163,9 +191,15 @@ def _run_migrations():
         cursor.execute("SELECT playlist_json FROM playback_state LIMIT 1")
     except sqlite3.OperationalError:
         cursor.execute("ALTER TABLE playback_state ADD COLUMN playlist_json TEXT")
-        cursor.execute("ALTER TABLE playback_state ADD COLUMN playlist_index INTEGER DEFAULT -1")
-        cursor.execute("ALTER TABLE playback_state ADD COLUMN playlist_loop INTEGER DEFAULT 1")
-        cursor.execute("ALTER TABLE playback_state ADD COLUMN playlist_active INTEGER DEFAULT 0")
+        cursor.execute(
+            "ALTER TABLE playback_state ADD COLUMN playlist_index INTEGER DEFAULT -1"
+        )
+        cursor.execute(
+            "ALTER TABLE playback_state ADD COLUMN playlist_loop INTEGER DEFAULT 1"
+        )
+        cursor.execute(
+            "ALTER TABLE playback_state ADD COLUMN playlist_active INTEGER DEFAULT 0"
+        )
         conn.commit()
 
     conn.close()
@@ -173,8 +207,11 @@ def _run_migrations():
 
 # ============ BACKWARD COMPATIBLE DELEGATE FUNCTIONS ============
 
+
 # Media Files (5 functions)
-def add_media_file(filename: str, filepath: str, media_type: str, duration_seconds: int = 0) -> int:
+def add_media_file(
+    filename: str, filepath: str, media_type: str, duration_seconds: int = 0
+) -> int:
     """Add a new media file to the database."""
     return _media_repo.add_media_file(filename, filepath, media_type, duration_seconds)
 
@@ -200,7 +237,9 @@ def delete_media_file(media_id: int) -> bool:
 
 
 # One-Time Schedules (5 functions)
-def add_one_time_schedule(media_id: int, scheduled_datetime: datetime, reason: Optional[str] = None) -> int:
+def add_one_time_schedule(
+    media_id: int, scheduled_datetime: datetime, reason: Optional[str] = None
+) -> int:
     """Add a one-time schedule."""
     return _schedule_repo.add_one_time_schedule(media_id, scheduled_datetime, reason)
 
@@ -232,7 +271,7 @@ def add_recurring_schedule(
     start_time: str,
     end_time: Optional[str] = None,
     interval_minutes: int = 0,
-    specific_times: Optional[List[str]] = None
+    specific_times: Optional[List[str]] = None,
 ) -> int:
     """Add a recurring schedule."""
     return _schedule_repo.add_recurring_schedule(
@@ -275,10 +314,12 @@ def update_playback_state(
     current_media_id: Optional[int] = None,
     position_seconds: Optional[float] = None,
     is_playing: Optional[bool] = None,
-    volume: Optional[int] = None
+    volume: Optional[int] = None,
 ) -> bool:
     """Update playback state."""
-    return _playback_repo.update_playback_state(current_media_id, position_seconds, is_playing, volume)
+    return _playback_repo.update_playback_state(
+        current_media_id, position_seconds, is_playing, volume
+    )
 
 
 # Playlist State (2 functions)
@@ -286,7 +327,7 @@ def save_playlist_state(
     playlist: Optional[List[str]] = None,
     index: Optional[int] = None,
     loop: Optional[bool] = None,
-    active: Optional[bool] = None
+    active: Optional[bool] = None,
 ) -> bool:
     """Save playlist state to database for persistence across restarts."""
     return _playback_repo.save_playlist_state(playlist, index, loop, active)
