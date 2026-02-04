@@ -16,7 +16,15 @@ from logger import log_web
 from services.config_service import load_config
 
 app = Flask(__name__)
-app.secret_key = 'announceflow_secret_key_2024'
+
+# Security: Read secret key from environment variable
+# In production, set FLASK_SECRET_KEY environment variable
+app.secret_key = os.environ.get('FLASK_SECRET_KEY', 'dev-only-change-in-production')
+if app.secret_key == 'dev-only-change-in-production':
+    import logging
+    logging.getLogger(__name__).warning(
+        "Using default secret key! Set FLASK_SECRET_KEY environment variable in production."
+    )
 
 MEDIA_FOLDER = 'media'
 
