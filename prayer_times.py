@@ -63,16 +63,8 @@ def get_cities() -> List[str]:
             
             cities = {}
             for item in data:
-                # Store as {Name: ID}
-                # API returns "ADANA", normalize title case for display
-                final_name = item['SehirAdi'].title()
-                # Fix problematic I/İ in title
-                if final_name.startswith('I'):
-                    final_name = 'I' + final_name[1:]
-                if 'İ' in item['SehirAdi']:
-                    final_name = item['SehirAdi'].replace('İ', 'i').title()
-                
-                # Just use the raw name from mapping for ID lookup, return sorted keys
+                # API returns "ADANA", "İSTANBUL" etc - convert to proper title case
+                final_name = _turkish_title(item['SehirAdi'])
                 cities[final_name] = item['SehirID']
             
             cache["cities"] = cities
@@ -185,6 +177,37 @@ def _normalize_turkish(text: str) -> str:
     for tr, en in replacements.items():
         text = text.replace(tr, en)
     return text.lower()
+
+
+def _turkish_title(text: str) -> str:
+    """Convert text to title case with proper Turkish character handling.
+
+    Standard Python title() doesn't handle Turkish I/İ correctly.
+    """
+    if not text:
+        return text
+
+    # First lowercase with Turkish rules (İ→i, I→ı)
+    lower_map = str.maketrans('İIĞÜŞÖÇ', 'iığüşöç')
+    lowered = text.translate(lower_map).lower()
+
+    # Then titlecase each word with Turkish rules
+    words = lowered.split()
+    result = []
+    for word in words:
+        if not word:
+            continue
+        first = word[0]
+        # Turkish uppercase: i→İ, ı→I
+        if first == 'i':
+            first = 'İ'
+        elif first == 'ı':
+            first = 'I'
+        else:
+            first = first.upper()
+        result.append(first + word[1:])
+
+    return ' '.join(result)
 
 
 def _get_district_id(city: str, district: str) -> Optional[str]:
