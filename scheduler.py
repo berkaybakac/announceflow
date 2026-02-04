@@ -60,7 +60,7 @@ def is_prayer_time_active(config: dict) -> bool:
 
 class Scheduler:
     """Schedule manager for one-time and recurring playback."""
-    
+
     def __init__(self, check_interval_seconds: int = 10):
         self.check_interval = check_interval_seconds
         self._running = False
@@ -68,6 +68,10 @@ class Scheduler:
         self._last_recurring_triggers: dict = {}  # {schedule_id: last_trigger_time}
         self._prayer_pause_state: Optional[dict] = None  # Playlist state saved during prayer time
         self._working_hours_pause_state: Optional[dict] = None  # Playlist state saved outside working hours
+        # Thread management for restore operations
+        self._restore_threads: list = []
+        self._restore_lock = threading.Lock()
+        self._restore_in_progress = False  # Idempotency: prevent multiple simultaneous restores
         
     def start(self):
         """Start the scheduler background thread."""
@@ -319,33 +323,53 @@ class Scheduler:
                 # Play announcement
                 success = player.play(filepath)
                 
-                if success:
-                    # Wait for announcement to finish, then restore playlist
-                    def restore_playlist():
-                        # Wait for current playback to finish
-                        while player.is_playing:
-                            time.sleep(0.5)
+                if success and playlist_was_active and playlist_files:
+                    # Idempotency: don't start another restore if one is already in progress
+                    should_start_restore = False
+                    with self._restore_lock:
+                        if not self._restore_in_progress:
+                            self._restore_in_progress = True
+                            should_start_restore = True
+                        else:
+                            logger.info("Restore already in progress, skipping duplicate")
 
-                        # Restore playlist if it was active
-                        if playlist_was_active and playlist_files:
-                            logger.info(f"Announcement finished - resuming playlist from index {playlist_index + 1}")
-                            player._playlist = playlist_files
-                            player._playlist_loop = playlist_loop
-                            # Resume from NEXT track (user requested this behavior)
-                            next_idx = (playlist_index + 1) % len(playlist_files)
-                            player._playlist_index = next_idx - 1  # Will be incremented by play_next
-                            player._playlist_active = True
-                            # Sync to DB before playing
-                            db.save_playlist_state(
-                                playlist=playlist_files,
-                                index=next_idx - 1,
-                                loop=playlist_loop,
-                                active=True
-                            )
-                            player.play_next()
+                    if should_start_restore:
+                        # Wait for announcement to finish, then restore playlist
+                        def restore_playlist():
+                            try:
+                                # Wait for current playback to finish
+                                while player.is_playing:
+                                    time.sleep(0.5)
 
-                    # Run restore in background thread
-                    threading.Thread(target=restore_playlist, daemon=True).start()
+                                logger.info(f"Announcement finished - resuming playlist from index {playlist_index + 1}")
+                                player._playlist = playlist_files
+                                player._playlist_loop = playlist_loop
+                                # Resume from NEXT track (user requested this behavior)
+                                next_idx = (playlist_index + 1) % len(playlist_files)
+                                player._playlist_index = next_idx - 1  # Will be incremented by play_next
+                                player._playlist_active = True
+                                # Sync to DB before playing
+                                db.save_playlist_state(
+                                    playlist=playlist_files,
+                                    index=next_idx - 1,
+                                    loop=playlist_loop,
+                                    active=True
+                                )
+                                player.play_next()
+                            except Exception as e:
+                                logger.error(f"Restore playlist thread error: {e}")
+                            finally:
+                                # Cleanup: remove from tracking and reset flag
+                                with self._restore_lock:
+                                    self._restore_in_progress = False
+                                    if restore_thread in self._restore_threads:
+                                        self._restore_threads.remove(restore_thread)
+
+                        # Run restore in background thread with tracking
+                        restore_thread = threading.Thread(target=restore_playlist, daemon=True)
+                        with self._restore_lock:
+                            self._restore_threads.append(restore_thread)
+                        restore_thread.start()
             else:
                 # For music: just interrupt
                 logger.info("Interrupting current playback for scheduled music")
