@@ -264,6 +264,30 @@ AnnounceFlow has been running flawlessly in a real fast-food restaurant for mont
 
 ---
 
+## Changelog
+
+### v2.7.0 - Stabilization & Optimization *(Latest)*
+
+**Major Improvements:**
+
+- **Thread Management (S1):** Improved scheduler thread tracking and cleanup, preventing memory leaks during restore operations
+- **Config Caching (O1):** Reduced disk I/O by 97% with 30-second config cache (86,400 → 2,880 reads/day)
+- **XSS Prevention (S5):** Added HTML escaping for user-generated content to prevent cross-site scripting attacks
+- **Turkish Character Support (C1):** Fixed prayer time city name normalization for proper İ/I handling
+- **Scheduler Refactoring (R1):** Reduced `_run_loop()` complexity from 100 lines to 25 lines with extracted methods
+- **Repository Pattern (v2.6.0):** Migrated to clean repository architecture with MediaRepository, ScheduleRepository, and PlaybackRepository
+- **API Error Handling (S4):** Enhanced prayer time API error logging for better debugging
+- **Security Hardening (S3):** Environment-based secret key management instead of hardcoded values
+- **DateTime Robustness (S2):** Added exception handling for corrupted schedule datetime parsing
+- **File Size Optimization (O2):** Improved media library performance with optimized file stat operations
+
+**Test Coverage:**
+- 18 regression tests passing (Stabilization, Optimization, Cleanup, Refactoring)
+- 8 blueprint API tests passing (v2.6.0)
+- Comprehensive test suite for all major features
+
+---
+
 ## Roadmap
 
 ### v1.7 - Multi-Device Management *(Planned)*
