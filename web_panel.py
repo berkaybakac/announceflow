@@ -281,6 +281,7 @@ def settings():
     config = load_config()
     system_stats = get_system_stats()
 
+    # Get statistics (kept simple for compatibility)
     music_count = len(db.get_all_media_files("music"))
     announcement_count = len(db.get_all_media_files("announcement"))
     pending_count = len(db.get_pending_one_time_schedules())

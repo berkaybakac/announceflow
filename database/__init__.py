@@ -123,6 +123,26 @@ def init_database():
     """
     )
 
+    # Indexes for one_time_schedules (performance optimization)
+    cursor.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_one_time_schedules_media_id
+        ON one_time_schedules(media_id)
+    """
+    )
+    cursor.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_one_time_schedules_status
+        ON one_time_schedules(status)
+    """
+    )
+    cursor.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_one_time_schedules_datetime
+        ON one_time_schedules(scheduled_datetime)
+    """
+    )
+
     # Recurring schedules table
     cursor.execute(
         """
@@ -138,6 +158,20 @@ def init_database():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (media_id) REFERENCES media_files (id) ON DELETE CASCADE
         )
+    """
+    )
+
+    # Indexes for recurring_schedules (performance optimization)
+    cursor.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_recurring_schedules_media_id
+        ON recurring_schedules(media_id)
+    """
+    )
+    cursor.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_recurring_schedules_active
+        ON recurring_schedules(is_active)
     """
     )
 

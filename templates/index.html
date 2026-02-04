@@ -8,32 +8,32 @@
 </div>
 
 <!-- Now Playing Widget -->
-<div class="now-playing-widget animate-in" id="nowPlayingWidget">
+<div class="now-playing-widget animate-in" x-data="playerState()" x-init="init()">
     <div class="now-playing-cover" id="coverArt">
         <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 48px; height: 48px; color: white; opacity: 0.9;">
             <path stroke-linecap="round" stroke-linejoin="round" d="M9 9l10.5-3m0 6.553v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 11-.99-3.467l2.31-.66a2.25 2.25 0 001.632-2.163zm0 0V2.25L9 5.25v10.303m0 0v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 01-.99-3.467l2.31-.66A2.25 2.25 0 009 15.553z" />
         </svg>
     </div>
 
-    <h2 class="now-playing-title" id="trackTitle">Çalan parça yok</h2>
-    <p class="now-playing-status" id="trackStatus">Bir dosya seçerek başlayın</p>
+    <h2 class="now-playing-title" x-text="trackTitle">Çalan parça yok</h2>
+    <p class="now-playing-status" x-text="trackStatus">Bir dosya seçerek başlayın</p>
 
     <!-- Player Controls -->
     <div class="player-controls">
-        <button class="control-btn" onclick="stopPlayback()" title="Durdur (Stop)">
+        <button class="control-btn" @click="stop()" title="Durdur (Stop)">
             <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M5.25 7.5A2.25 2.25 0 017.5 5.25h9a2.25 2.25 0 012.25 2.25v9a2.25 2.25 0 01-2.25 2.25h-9a2.25 2.25 0 01-2.25-2.25v-9z" />
             </svg>
         </button>
         <!-- Only show Play button (mpg123 doesn't support Pause) -->
         <div id="playBtnContainer">
-            <button class="control-btn control-btn-play" onclick="startPlayback()" id="playBtn" title="Oynat">
+            <button class="control-btn control-btn-play" @click="play()" id="playBtn" title="Oynat">
                 <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971l-11.54 6.347a1.125 1.125 0 01-1.667-.985V5.653z" />
                 </svg>
             </button>
         </div>
-        <button class="control-btn" onclick="skipToNext()" title="Sonraki Şarkı">
+        <button class="control-btn" @click="next()" title="Sonraki Şarkı">
             <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M3 8.688c0-.864.933-1.405 1.683-.977l7.108 4.062a1.125 1.125 0 010 1.953l-7.108 4.062A1.125 1.125 0 013 16.81V8.688zM12.75 8.688c0-.864.933-1.405 1.683-.977l7.108 4.062a1.125 1.125 0 010 1.953l-7.108 4.062a1.125 1.125 0 01-1.683-.977V8.688z" />
             </svg>
@@ -42,11 +42,11 @@
 
     <!-- Progress Bar -->
     <div class="progress-bar">
-        <div class="progress-fill" id="progressFill" style="width: 0%;"></div>
+        <div class="progress-fill" :style="`width: ${progress}%`"></div>
     </div>
     <div class="progress-time">
-        <span id="currentTime">0:00</span>
-        <span id="totalTime">0:00</span>
+        <span x-text="currentTime">0:00</span>
+        <span x-text="totalTime">0:00</span>
     </div>
 
     <!-- Volume -->
@@ -65,7 +65,7 @@
 </div>
 
 <!-- Arka Plan Müzik Bölümü -->
-<div class="card animate-in" style="margin-top: 24px;">
+<div class="card animate-in" style="margin-top: 24px;" x-data="{ showSongList: false }">
     <div class="card-header">
         <h3 class="card-title">🎵 Arka Plan Müzik</h3>
         <span class="badge" id="playlistBadge">Pasif</span>
@@ -102,7 +102,7 @@
         </button>
 
         <!-- Genişletilebilir Liste -->
-        <div id="songListContainer" style="display: none; margin-top: 12px;">
+        <div id="songListContainer" x-show="showSongList" x-transition style="margin-top: 12px;">
             <div id="songList"
                 style="max-height: 400px; overflow-y: auto; background: var(--bg-input); border-radius: 8px; padding: 8px;">
                 <!-- Şarkılar buraya yüklenecek -->
@@ -147,6 +147,51 @@
 
 {% block extra_js %}
 <script>
+    // Alpine.js Player Component
+    function playerState() {
+        return {
+            // Reactive state
+            trackTitle: 'Çalan parça yok',
+            trackStatus: 'Bir dosya seçerek başlayın',
+            isPlaying: false,
+            progress: 0,
+            currentTime: '0:00',
+            totalTime: '0:00',
+            volume: 80,
+
+            init() {
+                console.log('Alpine.js player initialized');
+            },
+
+            async stop() {
+                try {
+                    await fetch('/api/stop', { method: 'POST' });
+                    console.log('Stopped playback');
+                } catch (error) {
+                    console.error('Error stopping:', error);
+                }
+            },
+
+            async play() {
+                try {
+                    await fetch('/api/playlist/play', { method: 'POST' });
+                    console.log('Started playback');
+                } catch (error) {
+                    console.error('Error playing:', error);
+                }
+            },
+
+            async next() {
+                try {
+                    await fetch('/api/playlist/next', { method: 'POST' });
+                    console.log('Skipped to next track');
+                } catch (error) {
+                    console.error('Error skipping:', error);
+                }
+            }
+        }
+    }
+
     let isPlaying = false;
     let currentMediaId = null;
     let playStartedAt = 0;  // Unix timestamp ms when playback started
@@ -178,7 +223,7 @@
     // Start timer for smooth progress updates
     function startProgressTimer() {
         if (timerInterval) clearInterval(timerInterval);
-        timerInterval = setInterval(updateProgressDisplay, 500);  // Update every 500ms
+        timerInterval = setInterval(updateProgressDisplay, 1000);  // Update every 1s (optimized for performance)
     }
 
     // Stop timer
@@ -431,8 +476,8 @@
         return `${mins}:${secs.toString().padStart(2, '0')}`;
     }
 
-    // Update state every 2 seconds
-    setInterval(updatePlayerState, 2000);
+    // Update state every 3 seconds (optimized for performance)
+    setInterval(updatePlayerState, 3000);
     updatePlayerState();
 
     // ============ ŞARKI LİSTESİ FONKSİYONLARI ============
