@@ -132,22 +132,28 @@ def main():
     # Import and run web panel
     from web_panel import app
 
-    try:
-        from waitress import serve
+    dev_reload = os.environ.get("ANNOUNCEFLOW_DEV_RELOAD") == "1"
 
-        # Optimized configuration for Pi 4 production
-        serve(
-            app,
-            host="0.0.0.0",
-            port=5001,
-            threads=16,
-            connection_limit=200,
-            channel_timeout=10,
-            _quiet=True,
-        )
-    except ImportError:
-        logger.warning("Waitress bulunamadı, Flask development server kullanılıyor...")
-        app.run(host="0.0.0.0", port=5001, debug=False)
+    if dev_reload:
+        logger.warning("Dev auto-reload açık (ANNOUNCEFLOW_DEV_RELOAD=1).")
+        app.run(host="0.0.0.0", port=5001, debug=True, use_reloader=True)
+    else:
+        try:
+            from waitress import serve
+
+            # Optimized configuration for Pi 4 production
+            serve(
+                app,
+                host="0.0.0.0",
+                port=5001,
+                threads=16,
+                connection_limit=200,
+                channel_timeout=10,
+                _quiet=True,
+            )
+        except ImportError:
+            logger.warning("Waitress bulunamadı, Flask development server kullanılıyor...")
+            app.run(host="0.0.0.0", port=5001, debug=False)
 
 
 if __name__ == "__main__":

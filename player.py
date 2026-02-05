@@ -118,7 +118,7 @@ class AudioPlayer:
         # Persist to database
         db.save_playlist_state(index=0, active=True)
 
-        return self.play(self._playlist[0])
+        return self.play(self._playlist[0], preserve_playlist=True)
 
     def play_next(self) -> bool:
         """Play the next track in the playlist."""
@@ -154,7 +154,7 @@ class AudioPlayer:
                 "total": len(self._playlist),
             },
         )
-        return self.play(self._playlist[next_index])
+        return self.play(self._playlist[next_index], preserve_playlist=True)
 
     def stop_playlist(self):
         """Stop the playlist and clear it."""
@@ -178,7 +178,9 @@ class AudioPlayer:
             else None,
         }
 
-    def play(self, file_path: str, start_position: float = 0.0) -> bool:
+    def play(
+        self, file_path: str, start_position: float = 0.0, preserve_playlist: bool = False
+    ) -> bool:
         """
         Play an audio file.
 
@@ -199,7 +201,10 @@ class AudioPlayer:
             return False
 
         # Stop any current playback
-        self.stop()
+        if preserve_playlist:
+            self._stop_playback_only()
+        else:
+            self.stop()
 
         with self._lock:
             try:
@@ -276,6 +281,29 @@ class AudioPlayer:
         self._start_monitor_pygame()
 
         return True
+
+    def _stop_playback_only(self) -> None:
+        """Stop playback without touching playlist state."""
+        with self._lock:
+            self.is_playing = False
+            self.is_paused = False
+            self.current_file = None
+            self._position = 0.0
+            self._started_at = 0.0
+            self._stop_event.set()
+
+        if AUDIO_BACKEND == "mpg123" and self._process:
+            try:
+                self._process.kill()
+                self._process.wait(timeout=0.5)
+            except Exception as e:
+                logger.debug(f"Process kill ignored: {e}")
+            finally:
+                self._process = None
+        elif AUDIO_BACKEND == "pygame":
+            import pygame
+
+            pygame.mixer.music.stop()
 
     def stop(self) -> bool:
         """Stop playback safely."""
