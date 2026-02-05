@@ -67,26 +67,39 @@
 <!-- Arka Plan Müzik Bölümü -->
 <div class="card animate-in" style="margin-top: 24px;" x-data="{ showSongList: false }">
     <div class="card-header">
-        <h3 class="card-title">🎵 Arka Plan Müzik</h3>
-        <span class="badge" id="playlistBadge">Pasif</span>
+        <h3 class="card-title" style="display: flex; align-items: center; gap: 8px;">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                style="width: 20px; height: 20px; color: var(--text-secondary);">
+                <path stroke-linecap="round" stroke-linejoin="round"
+                    d="M9 9l10.5-3m0 6.553v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 11-.99-3.467l2.31-.66a2.25 2.25 0 001.632-2.163zm0 0V2.25L9 5.25v10.303m0 0v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 11-.99-3.467l2.31-.66A2.25 2.25 0 009 15.553z" />
+            </svg>
+            Arka Plan Müzik
+        </h3>
+        <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+            <a href="/library" class="btn btn-outline btn-sm">
+                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                    style="width: 18px; height: 18px;">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                </svg>
+                Müzik Ekle
+            </a>
+            <button type="button" class="btn btn-outline btn-sm"
+                @click="showSongList = !showSongList; if (showSongList) loadSongList()" id="songListToggle">
+                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                    style="width: 18px; height: 18px;">
+                    <path stroke-linecap="round" stroke-linejoin="round"
+                        d="M8.25 6.75h11.25M8.25 12h11.25M8.25 17.25h11.25M4.5 6.75h.008v.008H4.5V6.75zm0 5.25h.008v.008H4.5V12zm0 5.25h.008v.008H4.5v-.008z" />
+                </svg>
+                Şarkı Listesi (<span id="songCount">0</span>)
+                <span x-text="showSongList ? '▾' : '▸'"></span>
+            </button>
+        </div>
     </div>
 
     <p style="color: var(--text-muted); margin-bottom: 16px;">
-        Kütüphanedeki tüm müzikler sırayla ve loop olarak çalınır. Anons geldiğinde müzik otomatik durur, anons bitince
-        devam eder.
+        Müzikler sırayla ve loop olarak çalınır. Planlı duraklamalarda (ezan, mesai dışı vb.) otomatik durur ve sonra
+        kaldığı yerden sürer.
     </p>
-
-    <div style="display: flex; gap: 12px; flex-wrap: wrap;">
-        <button class="btn btn-success" onclick="startPlayback()">
-            ▶️ Müzikleri Başlat
-        </button>
-        <button class="btn btn-danger" onclick="stopPlaylist()">
-            ⏹️ Durdur
-        </button>
-        <a href="/library" class="btn btn-outline">
-            ➕ Müzik Ekle
-        </a>
-    </div>
 
     <div id="playlistStatus"
         style="margin-top: 16px; padding: 12px; background: var(--bg-input); border-radius: 8px; display: none;">
@@ -95,18 +108,12 @@
         <span id="playlistProgress" style="margin-left: 12px; color: var(--primary);">-</span>
     </div>
 
-    <!-- Şarkı Listesi Toggle -->
-    <div style="margin-top: 16px; border-top: 1px solid var(--border-color); padding-top: 16px;">
-        <button type="button" class="btn btn-outline" onclick="toggleSongList()" id="songListToggle">
-            📋 Şarkı Listesini Göster (<span id="songCount">0</span>)
-        </button>
-
-        <!-- Genişletilebilir Liste -->
-        <div id="songListContainer" x-show="showSongList" x-transition style="margin-top: 12px;">
-            <div id="songList"
-                style="max-height: 400px; overflow-y: auto; background: var(--bg-input); border-radius: 8px; padding: 8px;">
-                <!-- Şarkılar buraya yüklenecek -->
-            </div>
+    <!-- Genişletilebilir Liste -->
+    <div id="songListContainer" x-show="showSongList" x-transition
+        style="margin-top: 16px; border-top: 1px solid var(--border-color); padding-top: 16px; display: none;">
+        <div id="songList"
+            style="max-height: 400px; overflow-y: auto; background: var(--bg-input); border-radius: 8px; padding: 8px;">
+            <!-- Şarkılar buraya yüklenecek -->
         </div>
     </div>
 </div>
@@ -114,8 +121,21 @@
 <!-- Recent Plays -->
 <div class="card animate-in" style="margin-top: 24px;">
     <div class="card-header">
-        <h3 class="card-title">📋 Yaklaşan Planlar</h3>
-        <a href="/schedules/one-time" class="btn btn-outline btn-sm">Tümünü Gör</a>
+        <h3 class="card-title" style="display: flex; align-items: center; gap: 8px;">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                style="width: 20px; height: 20px; color: var(--text-secondary);">
+                <path stroke-linecap="round" stroke-linejoin="round"
+                    d="M8.25 6.75h7.5m-7.5 3h7.5m-7.5 3h4.5M6 3.75h.75A2.25 2.25 0 019 6v.75h6V6A2.25 2.25 0 0117.25 3.75H18A2.25 2.25 0 0120.25 6v12A2.25 2.25 0 0118 20.25H6A2.25 2.25 0 013.75 18V6A2.25 2.25 0 016 3.75z" />
+            </svg>
+            Yaklaşan Planlar
+        </h3>
+        <a href="/schedules/one-time" class="btn btn-outline btn-sm">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                style="width: 16px; height: 16px;">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" />
+            </svg>
+            Tümünü Gör
+        </a>
     </div>
 
     {% if upcoming_schedules %}
@@ -296,21 +316,6 @@
         }
     }
 
-    async function startPlayback() {
-        // Start ALL music files in library as playlist (loop mode)
-        try {
-            const response = await fetch('/api/playlist/start-all', { method: 'POST' });
-            if (response.ok) {
-                updatePlayerState();
-            } else {
-                const data = await response.json();
-                alert(data.error || 'Müzik başlatılamadı');
-            }
-        } catch (error) {
-            console.error('Error starting playlist:', error);
-        }
-    }
-
     async function stopPlayback() {
         try {
             await fetch('/api/stop', { method: 'POST' });
@@ -396,15 +401,6 @@
         }
     }
 
-    async function stopPlaylist() {
-        try {
-            await fetch('/api/playlist/stop', { method: 'POST' });
-            updatePlayerState();
-        } catch (error) {
-            console.error('Error stopping playlist:', error);
-        }
-    }
-
     // Update playlist status in updatePlayerState
     const originalUpdatePlayerState = updatePlayerState;
     updatePlayerState = async function () {
@@ -446,14 +442,11 @@
             volumeValue.textContent = (data.volume ?? 80) + '%';
 
             // Update playlist status
-            const playlistBadge = document.getElementById('playlistBadge');
             const playlistStatus = document.getElementById('playlistStatus');
             const playlistCurrentTrack = document.getElementById('playlistCurrentTrack');
             const playlistProgress = document.getElementById('playlistProgress');
 
             if (data.playlist && data.playlist.active) {
-                playlistBadge.textContent = 'Aktif';
-                playlistBadge.classList.add('badge-success');
                 playlistStatus.style.display = 'block';
 
                 if (data.filename) {
@@ -461,8 +454,6 @@
                 }
                 playlistProgress.textContent = `(${data.playlist.current_index + 1}/${data.playlist.tracks})`;
             } else {
-                playlistBadge.textContent = 'Pasif';
-                playlistBadge.classList.remove('badge-success');
                 playlistStatus.style.display = 'none';
             }
         } catch (error) {
@@ -489,23 +480,7 @@
         return div.innerHTML;
     }
 
-    let songListVisible = false;
     let musicFiles = [];
-
-    function toggleSongList() {
-        const container = document.getElementById('songListContainer');
-        const btn = document.getElementById('songListToggle');
-        songListVisible = !songListVisible;
-
-        if (songListVisible) {
-            container.style.display = 'block';
-            btn.innerHTML = `📋 Şarkı Listesini Gizle (<span id="songCount">${musicFiles.length}</span>)`;
-            loadSongList();
-        } else {
-            container.style.display = 'none';
-            btn.innerHTML = `📋 Şarkı Listesini Göster (<span id="songCount">${musicFiles.length}</span>)`;
-        }
-    }
 
     async function loadSongList() {
         try {
@@ -528,9 +503,26 @@
         }
 
         const currentId = currentMediaId;
+        const iconPlay = `
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                style="width: 16px; height: 16px; color: var(--primary);">
+                <path stroke-linecap="round" stroke-linejoin="round"
+                    d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971l-11.54 6.347a1.125 1.125 0 01-1.667-.985V5.653z" />
+            </svg>
+        `;
+        const iconMusic = `
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                style="width: 16px; height: 16px; color: var(--text-muted);">
+                <path stroke-linecap="round" stroke-linejoin="round"
+                    d="M9 9l10.5-3m0 6.553v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 11-.99-3.467l2.31-.66a2.25 2.25 0 001.632-2.163zm0 0V2.25L9 5.25v10.303m0 0v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 11-.99-3.467l2.31-.66A2.25 2.25 0 009 15.553z" />
+            </svg>
+        `;
         container.innerHTML = musicFiles.map(file => `
             <div style="padding: 8px 12px; border-bottom: 1px solid var(--border-color); ${file.id === currentId && isPlaying ? 'background: rgba(46, 204, 113, 0.15); border-left: 3px solid var(--primary);' : ''}">
-                ${file.id === currentId && isPlaying ? '▶️' : '🎵'} ${escapeHtml(file.filename)}
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    ${file.id === currentId && isPlaying ? iconPlay : iconMusic}
+                    <span>${escapeHtml(file.filename)}</span>
+                </div>
             </div>
         `).join('');
     }
