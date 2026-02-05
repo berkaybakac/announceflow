@@ -124,6 +124,23 @@ def _format_media_files(files):
     return formatted
 
 
+def _is_time_within_configured_hours(
+    time_obj, enabled: bool, start_str: str, end_str: str
+) -> bool:
+    """Check if a time falls within configured working hours, including overnight."""
+    if not enabled:
+        return True
+    try:
+        st = datetime.strptime(start_str, "%H:%M").time()
+        en = datetime.strptime(end_str, "%H:%M").time()
+        if st <= en:
+            return st <= time_obj <= en
+        # Overnight window (e.g. 22:00 -> 06:00)
+        return time_obj >= st or time_obj <= en
+    except Exception:
+        return True
+
+
 # ============ PAGE ROUTES ============
 
 
@@ -139,16 +156,6 @@ def index():
     work_start = config.get("working_hours_start", "09:00")
     work_end = config.get("working_hours_end", "22:00")
 
-    def _within_schedule_hours(dt_obj):
-        if not working_hours_enabled:
-            return True
-        try:
-            st = datetime.strptime(work_start, "%H:%M").time()
-            en = datetime.strptime(work_end, "%H:%M").time()
-            return st <= dt_obj.time() <= en
-        except Exception:
-            return True
-
     for s in upcoming_formatted:
         blocked = False
         if working_hours_enabled:
@@ -158,7 +165,9 @@ def index():
                     scheduled_dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S")
                 except ValueError:
                     scheduled_dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M")
-                blocked = not _within_schedule_hours(scheduled_dt)
+                blocked = not _is_time_within_configured_hours(
+                    scheduled_dt.time(), working_hours_enabled, work_start, work_end
+                )
             except Exception:
                 blocked = False
         s["blocked_outside_hours"] = blocked
@@ -182,16 +191,6 @@ def one_time_schedules():
     work_start = config.get("working_hours_start", "09:00")
     work_end = config.get("working_hours_end", "22:00")
 
-    def _within_schedule_hours(dt_obj):
-        if not working_hours_enabled:
-            return True
-        try:
-            st = datetime.strptime(work_start, "%H:%M").time()
-            en = datetime.strptime(work_end, "%H:%M").time()
-            return st <= dt_obj.time() <= en
-        except Exception:
-            return True
-
     for s in schedules_formatted:
         blocked = False
         if working_hours_enabled:
@@ -201,7 +200,9 @@ def one_time_schedules():
                     scheduled_dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S")
                 except ValueError:
                     scheduled_dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M")
-                blocked = not _within_schedule_hours(scheduled_dt)
+                blocked = not _is_time_within_configured_hours(
+                    scheduled_dt.time(), working_hours_enabled, work_start, work_end
+                )
             except Exception:
                 blocked = False
         s["blocked_outside_hours"] = blocked

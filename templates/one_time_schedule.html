@@ -106,14 +106,14 @@
                 <td>
                     {% if schedule.status == 'pending' %}
                         {% if schedule.blocked_outside_hours %}
-                        <span class="badge badge-warning">Mesai Dışı (Bekletildi)</span>
+                        <span class="badge badge-warning status-badge">Mesai Dışı (Bekletildi)</span>
                         {% else %}
-                        <span class="badge badge-warning">⏳ Bekliyor</span>
+                        <span class="badge badge-warning status-badge">⏳ Bekliyor</span>
                         {% endif %}
                     {% elif schedule.status == 'played' %}
-                    <span class="badge badge-success">✅ Çalındı</span>
+                    <span class="badge badge-success status-badge">✅ Çalındı</span>
                     {% else %}
-                    <span class="badge badge-danger">❌ İptal</span>
+                    <span class="badge badge-danger status-badge">❌ İptal</span>
                     {% endif %}
                 </td>
                 <td>
@@ -175,14 +175,14 @@
                 <td>
                     {% if schedule.status == 'pending' %}
                         {% if schedule.blocked_outside_hours %}
-                        <span class="badge badge-warning">Mesai Dışı (Bekletildi)</span>
+                        <span class="badge badge-warning status-badge">Mesai Dışı (Bekletildi)</span>
                         {% else %}
-                        <span class="badge badge-warning">⏳ Bekliyor</span>
+                        <span class="badge badge-warning status-badge">⏳ Bekliyor</span>
                         {% endif %}
                     {% elif schedule.status == 'played' %}
-                    <span class="badge badge-success">✅ Çalındı</span>
+                    <span class="badge badge-success status-badge">✅ Çalındı</span>
                     {% else %}
-                    <span class="badge badge-danger">❌ İptal</span>
+                    <span class="badge badge-danger status-badge">❌ İptal</span>
                     {% endif %}
                 </td>
                 <td>
@@ -295,7 +295,10 @@
             const curr = ch * 60 + cm;
             const s = sh * 60 + sm;
             const e = eh * 60 + em;
-            return curr < s || curr > e;
+            const withinRange = s <= e
+                ? (curr >= s && curr <= e)
+                : (curr >= s || curr <= e); // Overnight window
+            return !withinRange;
         } catch (e) {
             return false;
         }

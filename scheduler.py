@@ -16,6 +16,14 @@ from services.config_service import load_config
 logger = logging.getLogger(__name__)
 
 
+def _is_time_within_window(curr_time, start_time, end_time) -> bool:
+    """Check if a time is within a range, including overnight windows."""
+    if start_time <= end_time:
+        return start_time <= curr_time <= end_time
+    # Overnight window, e.g. 22:00 -> 06:00
+    return curr_time >= start_time or curr_time <= end_time
+
+
 def is_within_working_hours(config: dict) -> bool:
     """Check if current time is within working hours."""
     if not config.get("working_hours_enabled", False):
@@ -33,7 +41,7 @@ def is_within_working_hours(config: dict) -> bool:
         start = datetime.strptime(start_str, "%H:%M").time()
         end = datetime.strptime(end_str, "%H:%M").time()
 
-        return start <= curr <= end
+        return _is_time_within_window(curr, start, end)
     except Exception as e:
         logger.error(f"Working hours check error: {e}")
         return True  # On error, allow playback
@@ -79,6 +87,7 @@ class Scheduler:
         self._restore_in_progress = (
             False  # Idempotency: prevent multiple simultaneous restores
         )
+        self._restore_target_state: Optional[dict] = None
         # Config caching to reduce disk I/O
         self._config_cache: Optional[dict] = None
         self._config_cache_time: float = 0
@@ -437,60 +446,90 @@ class Scheduler:
             else:
                 logger.info("Interrupting current playback for scheduled music")
             player.stop()
+            if playlist_was_active and playlist_files:
+                # stop() marks playlist inactive in DB; restore intent for post-scheduled resume
+                db.save_playlist_state(
+                    playlist=playlist_files,
+                    index=playlist_index,
+                    loop=playlist_loop,
+                    active=True,
+                )
 
-        success = player.play(filepath)
+        success = player.play(filepath, preserve_playlist=playlist_was_active)
 
         if success and playlist_was_active and playlist_files:
-            # Idempotency: don't start another restore if one is already in progress
+            restore_state = {
+                "playlist": list(playlist_files),
+                "index": playlist_index,
+                "loop": playlist_loop,
+                "active": True,
+            }
+
+            # Keep latest restore target; if a restore worker is already running,
+            # it will consume this updated state after current playback ends.
             should_start_restore = False
             with self._restore_lock:
+                self._restore_target_state = restore_state
                 if not self._restore_in_progress:
                     self._restore_in_progress = True
                     should_start_restore = True
                 else:
-                    logger.info("Restore already in progress, skipping duplicate")
+                    logger.info("Restore already in progress, updated restore target")
 
             if should_start_restore:
                 # Wait for scheduled playback to finish, then restore playlist
                 def restore_playlist():
                     try:
-                        # Wait for current playback to finish
-                        while player.is_playing:
-                            time.sleep(0.5)
+                        while True:
+                            # Wait for current playback to finish
+                            while player.is_playing:
+                                time.sleep(0.5)
 
-                        if not db.get_playlist_state().get("active", False):
-                            return
+                            with self._restore_lock:
+                                state = self._restore_target_state
+                                self._restore_target_state = None
 
-                        resume_config = self._get_cached_config()
-                        if not is_within_working_hours(resume_config):
-                            if self._working_hours_pause_state is None:
+                            if not state:
+                                break
+
+                            if not db.get_playlist_state().get("active", False):
+                                break
+
+                            playlist = state.get("playlist") or []
+                            index = state.get("index", -1)
+                            loop = state.get("loop", True)
+                            if not playlist:
+                                break
+
+                            resume_config = self._get_cached_config()
+                            if not is_within_working_hours(resume_config):
                                 self._working_hours_pause_state = {
-                                    "playlist": list(playlist_files),
-                                    "index": playlist_index,
-                                    "loop": playlist_loop,
+                                    "playlist": list(playlist),
+                                    "index": index,
+                                    "loop": loop,
                                     "active": True,
                                 }
-                            return
+                                break
 
-                        logger.info(
-                            f"Scheduled media finished - resuming playlist from index {playlist_index + 1}"
-                        )
-                        player._playlist = playlist_files
-                        player._playlist_loop = playlist_loop
-                        # Resume from NEXT track (user requested this behavior)
-                        next_idx = (playlist_index + 1) % len(playlist_files)
-                        player._playlist_index = (
-                            next_idx - 1
-                        )  # Will be incremented by play_next
-                        player._playlist_active = True
-                        # Sync to DB before playing
-                        db.save_playlist_state(
-                            playlist=playlist_files,
-                            index=next_idx - 1,
-                            loop=playlist_loop,
-                            active=True,
-                        )
-                        player.play_next()
+                            logger.info(
+                                f"Scheduled media finished - resuming playlist from index {index + 1}"
+                            )
+                            player._playlist = playlist
+                            player._playlist_loop = loop
+                            # Resume from NEXT track (user requested this behavior)
+                            next_idx = (index + 1) % len(playlist)
+                            player._playlist_index = (
+                                next_idx - 1
+                            )  # Will be incremented by play_next
+                            player._playlist_active = True
+                            # Sync to DB before playing
+                            db.save_playlist_state(
+                                playlist=playlist,
+                                index=next_idx - 1,
+                                loop=loop,
+                                active=True,
+                            )
+                            player.play_next()
                     except Exception as e:
                         logger.error(f"Restore playlist thread error: {e}")
                     finally:
@@ -519,17 +558,23 @@ class Scheduler:
             curr = datetime.strptime(current, "%H:%M").time()
             st = datetime.strptime(start, "%H:%M").time()
             en = datetime.strptime(end, "%H:%M").time()
-            return st <= curr <= en
+            return _is_time_within_window(curr, st, en)
         except ValueError:
             return False
 
     def _is_interval_point(self, current: str, start: str, interval: int) -> bool:
         """Check if current time is at a valid interval point from start."""
         try:
-            curr = datetime.strptime(current, "%H:%M")
-            st = datetime.strptime(start, "%H:%M")
-            diff_minutes = (curr - st).total_seconds() / 60
-            return diff_minutes >= 0 and diff_minutes % interval < 1
+            curr_time = datetime.strptime(current, "%H:%M").time()
+            start_time = datetime.strptime(start, "%H:%M").time()
+
+            curr_minutes = curr_time.hour * 60 + curr_time.minute
+            start_minutes = start_time.hour * 60 + start_time.minute
+
+            # Wrap across midnight for overnight schedules (e.g. 22:00 -> 06:00).
+            # For same-day windows this remains equivalent to simple subtraction.
+            diff_minutes = (curr_minutes - start_minutes) % (24 * 60)
+            return diff_minutes % interval == 0
         except ValueError:
             return False
 
