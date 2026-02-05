@@ -76,12 +76,100 @@ class AudioPlayer:
         self._playlist_index: int = -1  # Current track index
         self._playlist_loop: bool = True  # Loop playlist when reaching end
         self._playlist_active: bool = False  # Whether playlist mode is on
+        self._alsa_device_candidates: list = []
+        self._alsa_card_candidates: list = []
+
+        if platform.system() == "Linux":
+            self._alsa_device_candidates = self._build_alsa_device_candidates()
+            self._alsa_card_candidates = self._build_alsa_card_candidates()
 
         # Initialize pygame if that's our backend
         if AUDIO_BACKEND == "pygame":
             import pygame
 
             pygame.mixer.music.set_volume(self._volume / 100.0)
+
+    def _build_alsa_device_candidates(self) -> list:
+        """Build ALSA device candidates for mpg123 playback."""
+        candidates = []
+
+        env_device = os.environ.get("ANNOUNCEFLOW_ALSA_DEVICE", "").strip()
+        env_card = os.environ.get("ANNOUNCEFLOW_ALSA_CARD", "").strip()
+
+        if env_device:
+            candidates.append(env_device)
+
+        if env_card:
+            if env_card.startswith(("plughw:", "hw:")):
+                if env_card.startswith("hw:"):
+                    card_part = env_card.split(":", 1)[1]
+                    candidates.append(f"plughw:{card_part}")
+                else:
+                    candidates.append(env_card)
+            else:
+                card_part = env_card if "," in env_card else f"{env_card},0"
+                candidates.append(f"plughw:{card_part}")
+
+        # Keep existing default preference first, then safe fallbacks
+        candidates.extend(["plughw:2,0", "plughw:0,0", "default"])
+
+        deduped = []
+        for item in candidates:
+            if item and item not in deduped:
+                deduped.append(item)
+        return deduped
+
+    def _build_alsa_card_candidates(self) -> list:
+        """Build ALSA card candidates for amixer volume control."""
+        candidates = []
+        env_card = os.environ.get("ANNOUNCEFLOW_ALSA_CARD", "").strip()
+
+        if env_card:
+            if env_card.startswith(("plughw:", "hw:")):
+                # Convert hw:2,0 -> 2
+                tail = env_card.split(":", 1)[1]
+                card_idx = tail.split(",", 1)[0]
+                if card_idx:
+                    candidates.append(card_idx)
+            else:
+                candidates.append(env_card)
+
+        # Preserve current default card first, then common alternatives
+        candidates.extend(["2", "0", "1"])
+
+        deduped = []
+        for item in candidates:
+            if item and item not in deduped:
+                deduped.append(item)
+        return deduped
+
+    def _run_amixer_for_control(self, control: str, value_args: list) -> bool:
+        """Try amixer with candidate cards for a given control."""
+        if platform.system() != "Linux":
+            return True
+
+        for card in self._alsa_card_candidates:
+            result = subprocess.run(
+                ["amixer", "-c", card, "set", control, *value_args],
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode == 0:
+                return True
+
+        # Fallback: let amixer choose default card
+        result = subprocess.run(
+            ["amixer", "set", control, *value_args],
+            capture_output=True,
+            text=True,
+        )
+        return result.returncode == 0
+
+    def _set_hardware_volume(self, value_args: list) -> bool:
+        """Set hardware volume trying PCM first, then Master."""
+        return self._run_amixer_for_control(
+            "PCM", value_args
+        ) or self._run_amixer_for_control("Master", value_args)
 
     def on_track_end(self):
         """Internal track end handler - advances playlist or calls user callback."""
@@ -224,17 +312,47 @@ class AudioPlayer:
         try:
             # Start mpg123 process with FIXED max scale (32768)
             # Volume is controlled SOLELY by ALSA amixer to avoid double-volume curve
-            args = ["mpg123", "-q", "--scale", "32768"]
+            base_args = ["mpg123", "-q", "--scale", "32768"]
 
-            # Only add hardware device arg on Linux/Pi for headphone jack forcing
+            attempts = []
             if platform.system() == "Linux":
-                args.extend(["-a", "plughw:2,0"])
+                attempts.extend(self._alsa_device_candidates)
+            attempts.append(None)  # Final fallback: let mpg123 pick default output
 
-            args.append(file_path)
+            self._process = None
+            tried_keys = set()
 
-            self._process = subprocess.Popen(
-                args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
-            )
+            for device in attempts:
+                key = device or "__default__"
+                if key in tried_keys:
+                    continue
+                tried_keys.add(key)
+
+                args = list(base_args)
+                if device:
+                    args.extend(["-a", device])
+                args.append(file_path)
+
+                proc = subprocess.Popen(
+                    args, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                )
+
+                # Invalid ALSA device/card usually exits immediately; fallback to next candidate
+                time.sleep(0.12)
+                if proc.poll() is None:
+                    self._process = proc
+                    if device:
+                        logger.info(f"Using ALSA device: {device}")
+                    break
+
+                try:
+                    proc.wait(timeout=0.1)
+                except Exception:
+                    pass
+
+            if self._process is None:
+                logger.error("mpg123 could not start with any ALSA device candidate")
+                return False
 
             self.current_file = file_path
             self.is_playing = True
@@ -400,11 +518,7 @@ class AudioPlayer:
 
                 if volume < 10:
                     # Mute for 0-9%
-                    result = subprocess.run(
-                        ["amixer", "-c", "2", "set", "PCM", "mute"],
-                        capture_output=True,
-                        text=True,
-                    )
+                    success = self._set_hardware_volume(["mute"])
                     logger.info(f"Volume set to: {volume}% (muted, below threshold)")
                     log_volume(
                         "change", {"ui_volume": volume, "hw_volume": 0, "muted": True}
@@ -413,11 +527,7 @@ class AudioPlayer:
                     # Calibration: hw = 70 + sqrt((ui-10)/90) * 30
                     # UI 10% → HW 70%, UI 50% → HW 90%, UI 100% → HW 100%
                     hw_volume = int(round(70 + math.sqrt((volume - 10) / 90.0) * 30))
-                    result = subprocess.run(
-                        ["amixer", "-c", "2", "set", "PCM", f"{hw_volume}%", "unmute"],
-                        capture_output=True,
-                        text=True,
-                    )
+                    success = self._set_hardware_volume([f"{hw_volume}%", "unmute"])
                     logger.info(
                         f"Volume set to: {volume}% (HW calibrated: {hw_volume}%)"
                     )
@@ -426,10 +536,8 @@ class AudioPlayer:
                         {"ui_volume": volume, "hw_volume": hw_volume, "muted": False},
                     )
 
-                if result.returncode != 0:
-                    logger.warning(
-                        f"amixer failed (code {result.returncode}): {result.stderr}"
-                    )
+                if not success:
+                    logger.warning("amixer failed for all card/control candidates")
             except (subprocess.SubprocessError, OSError) as e:
                 logger.warning(f"Failed to set hardware volume: {e}")
 

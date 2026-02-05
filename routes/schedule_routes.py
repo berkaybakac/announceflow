@@ -31,14 +31,24 @@ def api_add_one_time():
     if not all([media_id, date, time]):
         return _flash_redirect("Tüm alanları doldurun", "error", "one_time_schedules")
 
-    scheduled_dt = datetime.strptime(f"{date} {time}", "%Y-%m-%d %H:%M")
+    try:
+        media_id_int = int(media_id)
+    except (ValueError, TypeError):
+        return _flash_redirect("Geçersiz dosya seçimi", "error", "one_time_schedules")
+
+    try:
+        scheduled_dt = datetime.strptime(f"{date} {time}", "%Y-%m-%d %H:%M")
+    except ValueError:
+        return _flash_redirect(
+            "Geçersiz tarih/saat formatı", "error", "one_time_schedules"
+        )
 
     if scheduled_dt <= datetime.now():
         return _flash_redirect(
             "Geçmiş bir tarih seçemezsiniz", "error", "one_time_schedules"
         )
 
-    db.add_one_time_schedule(int(media_id), scheduled_dt, reason)
+    db.add_one_time_schedule(media_id_int, scheduled_dt, reason)
     return _flash_redirect("Plan başarıyla eklendi!", "success", "one_time_schedules")
 
 
@@ -76,6 +86,11 @@ def api_add_recurring():
             "Dosya ve günler gerekli", "error", "recurring_schedules"
         )
 
+    try:
+        media_id_int = int(media_id)
+    except (ValueError, TypeError):
+        return _flash_redirect("Geçersiz dosya seçimi", "error", "recurring_schedules")
+
     if schedule_type == "specific":
         times_str = request.form.get("specific_times", "")
         times = [t.strip() for t in times_str.split(",") if t.strip()]
@@ -95,12 +110,19 @@ def api_add_recurring():
             )
 
         db.add_recurring_schedule(
-            int(media_id), days, times[0], specific_times=times  # First time as start
+            media_id_int, days, times[0], specific_times=times  # First time as start
         )
     else:
         start_time = request.form.get("start_time", "09:00")
         end_time = request.form.get("end_time", "18:00")
-        interval = int(request.form.get("interval_minutes", 60))
+        interval_raw = request.form.get("interval_minutes", "60")
+
+        try:
+            interval = int(interval_raw)
+        except (ValueError, TypeError):
+            return _flash_redirect(
+                "Zaman aralığı sayı olmalıdır", "error", "recurring_schedules"
+            )
 
         # Validate time formats
         if not validate_time_format(start_time) or not validate_time_format(end_time):
@@ -116,7 +138,7 @@ def api_add_recurring():
                 "Zaman aralığı en az 1 dakika olmalıdır", "error", "recurring_schedules"
             )
 
-        db.add_recurring_schedule(int(media_id), days, start_time, end_time, interval)
+        db.add_recurring_schedule(media_id_int, days, start_time, end_time, interval)
 
     return _flash_redirect(
         "Tekrarlı plan oluşturuldu!", "success", "recurring_schedules"
