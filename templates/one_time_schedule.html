@@ -18,7 +18,10 @@
         <h3 class="card-title">➕ Yeni Plan Ekle</h3>
     </div>
 
-    <form action="/api/schedules/one-time" method="POST">
+    <form action="/api/schedules/one-time" method="POST" id="oneTimeForm"
+        data-working-hours-enabled="{{ 'true' if working_hours_enabled else 'false' }}"
+        data-working-start="{{ working_hours_start }}"
+        data-working-end="{{ working_hours_end }}">
         <div style="display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 16px; align-items: end;">
             <div class="form-group" style="margin: 0;">
                 <label class="form-label">Dosya</label>
@@ -53,6 +56,12 @@
                 <label class="form-label">Neden/Açıklama</label>
                 <input type="text" class="form-input" name="reason" placeholder="Örn: Cumhuriyet bayramı anonsu">
             </div>
+        </div>
+
+        <div id="workingHoursWarning"
+            style="display: none; margin-top: 12px; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 10px; background: rgba(245, 158, 11, 0.08); color: var(--warning); font-size: 0.95rem;">
+            <span style="font-weight: 600;">Mesai Dışı:</span>
+            <span>Seçilen saat mesai dışı. Plan oluşturulsa bile bu saatte çalıştırılmaz.</span>
         </div>
 
         <button type="submit" class="btn btn-primary" style="margin-top: 16px;">
@@ -96,7 +105,11 @@
                 <td style="color: var(--text-muted);">{{ schedule.reason or '-' }}</td>
                 <td>
                     {% if schedule.status == 'pending' %}
-                    <span class="badge badge-warning">⏳ Bekliyor</span>
+                        {% if schedule.blocked_outside_hours %}
+                        <span class="badge badge-warning">Mesai Dışı (Bekletildi)</span>
+                        {% else %}
+                        <span class="badge badge-warning">⏳ Bekliyor</span>
+                        {% endif %}
                     {% elif schedule.status == 'played' %}
                     <span class="badge badge-success">✅ Çalındı</span>
                     {% else %}
@@ -161,7 +174,11 @@
                 <td style="color: var(--text-muted);">{{ schedule.reason or '-' }}</td>
                 <td>
                     {% if schedule.status == 'pending' %}
-                    <span class="badge badge-warning">⏳ Bekliyor</span>
+                        {% if schedule.blocked_outside_hours %}
+                        <span class="badge badge-warning">Mesai Dışı (Bekletildi)</span>
+                        {% else %}
+                        <span class="badge badge-warning">⏳ Bekliyor</span>
+                        {% endif %}
                     {% elif schedule.status == 'played' %}
                     <span class="badge badge-success">✅ Çalındı</span>
                     {% else %}
@@ -204,7 +221,8 @@
             altFormat: "d.m.Y",
             dateFormat: "Y-m-d",
             minDate: "today",
-            defaultDate: "today"
+            defaultDate: "today",
+            onChange: updateWorkingHoursWarning
         });
 
         // Time Picker (24h)
@@ -219,8 +237,82 @@
             time_24hr: true,
             defaultDate: defaultTime,
             minuteIncrement: 1,
-            allowInput: true // Allow typing time manually
+            allowInput: true, // Allow typing time manually
+            onChange: updateWorkingHoursWarning,
+            onValueUpdate: updateWorkingHoursWarning
         });
+    });
+
+    let workingHoursWarningTimer = null;
+
+    function updateWorkingHoursWarning() {
+        const form = document.getElementById('oneTimeForm');
+        if (!form) return;
+
+        const enabled = form.dataset.workingHoursEnabled === 'true';
+        const warning = document.getElementById('workingHoursWarning');
+        const timeInput = document.getElementById('timeInput');
+
+        if (!warning || !timeInput) return;
+        if (!enabled) {
+            warning.style.display = 'none';
+            return;
+        }
+
+        const timeValue = timeInput.value;
+        if (!timeValue || timeValue.length < 4) {
+            warning.style.display = 'none';
+            return;
+        }
+
+        const start = form.dataset.workingStart;
+        const end = form.dataset.workingEnd;
+
+        const shouldShow = isTimeOutsideRange(timeValue, start, end);
+        if (!shouldShow) {
+            warning.style.display = 'none';
+            if (workingHoursWarningTimer) {
+                clearTimeout(workingHoursWarningTimer);
+                workingHoursWarningTimer = null;
+            }
+            return;
+        }
+
+        warning.style.display = 'flex';
+        if (workingHoursWarningTimer) {
+            clearTimeout(workingHoursWarningTimer);
+        }
+        workingHoursWarningTimer = setTimeout(() => {
+            warning.style.display = 'none';
+        }, 5000);
+    }
+
+    function isTimeOutsideRange(current, start, end) {
+        try {
+            const [ch, cm] = current.split(':').map(Number);
+            const [sh, sm] = start.split(':').map(Number);
+            const [eh, em] = end.split(':').map(Number);
+            const curr = ch * 60 + cm;
+            const s = sh * 60 + sm;
+            const e = eh * 60 + em;
+            return curr < s || curr > e;
+        } catch (e) {
+            return false;
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        const dateInput = document.getElementById('dateInput');
+        const timeInput = document.getElementById('timeInput');
+        if (dateInput) {
+            dateInput.addEventListener('change', updateWorkingHoursWarning);
+        }
+        if (timeInput) {
+            timeInput.addEventListener('change', updateWorkingHoursWarning);
+            timeInput.addEventListener('blur', updateWorkingHoursWarning);
+            timeInput.addEventListener('input', updateWorkingHoursWarning);
+        }
+        updateWorkingHoursWarning();
     });
 </script>
 {% endblock %}

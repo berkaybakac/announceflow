@@ -4,10 +4,18 @@ API endpoints for player control.
 """
 from flask import Blueprint, jsonify, request
 import database as db
+from services.config_service import load_config
+from scheduler import is_within_working_hours
 from player import get_player
 from scheduler import get_scheduler
 from logger import log_web
-from utils.helpers import login_required, _json_success, _json_error, _get_media_or_404
+from utils.helpers import (
+    login_required,
+    _json_success,
+    _json_error,
+    _get_media_or_404,
+    _reject_if_outside_working_hours,
+)
 
 
 player_bp = Blueprint("player", __name__)
@@ -39,6 +47,10 @@ def api_health():
 @login_required
 def api_play():
     """Play a media file."""
+    blocked = _reject_if_outside_working_hours()
+    if blocked:
+        return blocked
+
     data = request.get_json() or {}
     media_id = data.get("media_id")
 
@@ -50,7 +62,8 @@ def api_play():
         return error
 
     player = get_player()
-    success = player.play(media["filepath"])
+    playlist_was_active = player._playlist_active and len(player._playlist) > 0
+    success = player.play(media["filepath"], preserve_playlist=playlist_was_active)
 
     if success:
         db.update_playback_state(
@@ -69,6 +82,37 @@ def api_stop():
     success = player.stop()
     db.update_playback_state(current_media_id=0, is_playing=False, position_seconds=0)
     log_web("stop", {})
+    return _json_success({"success": success})
+
+
+@player_bp.route("/api/stop-preview", methods=["POST"])
+@login_required
+def api_stop_preview():
+    """Stop preview playback without breaking playlist loop."""
+    player = get_player()
+    config = load_config()
+    resume_allowed = is_within_working_hours(config)
+
+    playlist_was_active = player._playlist_active and len(player._playlist) > 0
+    if not resume_allowed and playlist_was_active:
+        scheduler = get_scheduler()
+        if scheduler._working_hours_pause_state is None:
+            scheduler._working_hours_pause_state = {
+                "playlist": list(player._playlist),
+                "index": player._playlist_index,
+                "loop": player._playlist_loop,
+                "active": True,
+            }
+        player._playlist_active = False
+        db.save_playlist_state(
+            playlist=list(player._playlist),
+            index=player._playlist_index,
+            loop=player._playlist_loop,
+            active=True,
+        )
+
+    success = player.stop_preview(resume_allowed=resume_allowed)
+    log_web("stop_preview", {"resume_allowed": resume_allowed})
     return _json_success({"success": success})
 
 

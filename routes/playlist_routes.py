@@ -5,7 +5,12 @@ API endpoints for playlist management.
 from flask import Blueprint, request
 import database as db
 from player import get_player
-from utils.helpers import login_required, _json_success, _json_error
+from utils.helpers import (
+    login_required,
+    _json_success,
+    _json_error,
+    _reject_if_outside_working_hours,
+)
 
 
 playlist_bp = Blueprint("playlist", __name__)
@@ -42,6 +47,10 @@ def api_playlist_set():
 @login_required
 def api_playlist_play():
     """Start playing the playlist."""
+    blocked = _reject_if_outside_working_hours()
+    if blocked:
+        return blocked
+
     player = get_player()
     success = player.play_playlist()
 
@@ -55,6 +64,10 @@ def api_playlist_play():
 @login_required
 def api_playlist_next():
     """Skip to next track in playlist."""
+    blocked = _reject_if_outside_working_hours()
+    if blocked:
+        return blocked
+
     player = get_player()
     success = player.play_next()
     return _json_success({"success": success})
@@ -74,6 +87,10 @@ def api_playlist_stop():
 @login_required
 def api_playlist_start_all():
     """Start playlist with ALL music files in library (loop mode)."""
+    blocked = _reject_if_outside_working_hours()
+    if blocked:
+        return blocked
+
     # Get all music files from library
     music_files = db.get_all_media_files("music")
 

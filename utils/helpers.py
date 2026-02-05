@@ -5,6 +5,14 @@ Reusable helper functions for routes.
 import functools
 from flask import jsonify, flash, redirect, url_for, session
 import database as db
+from services.config_service import load_config
+from scheduler import is_within_working_hours
+
+
+WORKING_HOURS_BLOCK_MESSAGE = (
+    "Mesai saatleri dışında işlem yapılamaz. "
+    "Ayarlar'dan mesai saatlerini pasif yaparsanız işlemi yapabilirsiniz."
+)
 
 
 def login_required(f):
@@ -49,3 +57,11 @@ def _get_media_or_404(media_id):
     if not media:
         return None, _json_error("Media not found", 404)
     return media, None
+
+
+def _reject_if_outside_working_hours():
+    """Return error response if outside working hours, otherwise None."""
+    config = load_config()
+    if not is_within_working_hours(config):
+        return _json_error(WORKING_HOURS_BLOCK_MESSAGE, 403)
+    return None

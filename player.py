@@ -305,6 +305,30 @@ class AudioPlayer:
 
             pygame.mixer.music.stop()
 
+    def stop_preview(self, resume_allowed: bool = True) -> bool:
+        """Stop preview playback without disabling the playlist."""
+        playlist_was_active = self._playlist_active and len(self._playlist) > 0
+        playlist_files = list(self._playlist) if playlist_was_active else []
+        playlist_index = self._playlist_index
+        playlist_loop = self._playlist_loop
+
+        self._stop_playback_only()
+
+        if resume_allowed and playlist_was_active and playlist_files:
+            next_idx = (playlist_index + 1) % len(playlist_files)
+            self._playlist = playlist_files
+            self._playlist_loop = playlist_loop
+            self._playlist_index = next_idx - 1  # Will be incremented by play_next
+            self._playlist_active = True
+            db.save_playlist_state(
+                playlist=playlist_files,
+                index=next_idx - 1,
+                loop=playlist_loop,
+                active=True,
+            )
+            self.play_next()
+        return True
+
     def stop(self) -> bool:
         """Stop playback safely."""
         # 1. Update state FIRST to prevent UI race conditions

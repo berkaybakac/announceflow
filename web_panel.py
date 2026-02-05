@@ -134,6 +134,34 @@ def index():
     media_files = db.get_all_media_files()
     upcoming = db.get_pending_one_time_schedules()
     upcoming_formatted = _format_schedules(upcoming)
+    config = load_config()
+    working_hours_enabled = config.get("working_hours_enabled", False)
+    work_start = config.get("working_hours_start", "09:00")
+    work_end = config.get("working_hours_end", "22:00")
+
+    def _within_schedule_hours(dt_obj):
+        if not working_hours_enabled:
+            return True
+        try:
+            st = datetime.strptime(work_start, "%H:%M").time()
+            en = datetime.strptime(work_end, "%H:%M").time()
+            return st <= dt_obj.time() <= en
+        except Exception:
+            return True
+
+    for s in upcoming_formatted:
+        blocked = False
+        if working_hours_enabled:
+            try:
+                dt_str = s.get("scheduled_datetime", "").replace("T", " ")
+                try:
+                    scheduled_dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S")
+                except ValueError:
+                    scheduled_dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M")
+                blocked = not _within_schedule_hours(scheduled_dt)
+            except Exception:
+                blocked = False
+        s["blocked_outside_hours"] = blocked
     return render_template(
         "index.html",
         active_page="now-playing",
@@ -149,11 +177,42 @@ def one_time_schedules():
     media_files = db.get_all_media_files()
     schedules = db.get_all_one_time_schedules()
     schedules_formatted = _format_schedules(schedules)
+    config = load_config()
+    working_hours_enabled = config.get("working_hours_enabled", False)
+    work_start = config.get("working_hours_start", "09:00")
+    work_end = config.get("working_hours_end", "22:00")
+
+    def _within_schedule_hours(dt_obj):
+        if not working_hours_enabled:
+            return True
+        try:
+            st = datetime.strptime(work_start, "%H:%M").time()
+            en = datetime.strptime(work_end, "%H:%M").time()
+            return st <= dt_obj.time() <= en
+        except Exception:
+            return True
+
+    for s in schedules_formatted:
+        blocked = False
+        if working_hours_enabled:
+            try:
+                dt_str = s.get("scheduled_datetime", "").replace("T", " ")
+                try:
+                    scheduled_dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S")
+                except ValueError:
+                    scheduled_dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M")
+                blocked = not _within_schedule_hours(scheduled_dt)
+            except Exception:
+                blocked = False
+        s["blocked_outside_hours"] = blocked
     return render_template(
         "one_time_schedule.html",
         active_page="one-time",
         media_files=media_files,
         schedules=schedules_formatted,
+        working_hours_enabled=working_hours_enabled,
+        working_hours_start=work_start,
+        working_hours_end=work_end,
     )
 
 
