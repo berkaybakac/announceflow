@@ -118,8 +118,8 @@
                     </td>
                     <td style="color: var(--text-muted);">{{ file.created_at_formatted }}</td>
                     <td>
-                        <button class="btn btn-outline btn-sm" onclick="startMusicPlaylist()">
-                            Müzik Başlat
+                        <button class="btn btn-outline btn-sm" onclick="playFile('{{ file.id }}')">
+                            Dinle
                         </button>
                         <button class="btn btn-outline-danger btn-sm" onclick="stopPlayback()">
                             Dur
@@ -357,41 +357,36 @@
         }
     }
 
-    // Play File
+    // Play File (preview)
     async function playFile(mediaId) {
         try {
             // Play single file (for announcements preview)
-            await fetch('/api/play', {
+            const response = await fetch('/api/play', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ media_id: mediaId })
             });
-        } catch (error) {
-            console.error('Error playing file:', error);
-        }
-    }
-
-    // Start music playlist (loop mode) - for music section only
-    async function startMusicPlaylist() {
-        try {
-            const response = await fetch('/api/playlist/start-all', {
-                method: 'POST'
-            });
-            if (response.ok) {
-                showToast('Müzik listesi başlatıldı (loop mode)', 'success');
+            if (!response.ok) {
+                const data = await response.json().catch(() => ({}));
+                showToast(data.error || 'Çalma başarısız', 'error');
             }
         } catch (error) {
-            console.error('Error starting playlist:', error);
-            showToast('Müzik başlatılamadı', 'error');
+            console.error('Error playing file:', error);
+            showToast('Çalma başarısız', 'error');
         }
     }
 
     // Stop Playback
     async function stopPlayback() {
         try {
-            await fetch('/api/stop', { method: 'POST' });
+            const response = await fetch('/api/stop-preview', { method: 'POST' });
+            if (!response.ok) {
+                const data = await response.json().catch(() => ({}));
+                showToast(data.error || 'Durdurma başarısız', 'error');
+            }
         } catch (error) {
             console.error('Error stopping playback:', error);
+            showToast('Durdurma başarısız', 'error');
         }
     }
 </script>

@@ -13,9 +13,10 @@ from logging.handlers import RotatingFileHandler
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import database as db
-from scheduler import get_scheduler
+from scheduler import get_scheduler, is_within_working_hours
 from player import get_player
 from logger import log_system, log_error
+from services.config_service import load_config
 
 
 def setup_logging():
@@ -80,6 +81,8 @@ def main():
         playlist = playlist_state["playlist"]
         index = playlist_state.get("index", 0)
         loop = playlist_state.get("loop", True)
+        config = load_config()
+        within_hours = is_within_working_hours(config)
 
         # Filter out non-existent files
         valid_playlist = [f for f in playlist if os.path.exists(f)]
@@ -90,19 +93,34 @@ def main():
             )
             player._playlist = valid_playlist
             player._playlist_loop = loop
-            player._playlist_active = True
+            player._playlist_active = within_hours
 
             # Adjust index if files were removed
             if index >= len(valid_playlist):
                 index = 0
             player._playlist_index = index - 1  # Will be incremented by play_next
 
-            # Start playing from saved position
-            player.play_next()
-            logger.info("Playlist otomatik başlatıldı!")
-            log_system(
-                "playlist_restore", {"tracks": len(valid_playlist), "index": index}
-            )
+            if within_hours:
+                # Start playing from saved position
+                player.play_next()
+                logger.info("Playlist otomatik başlatıldı!")
+                log_system(
+                    "playlist_restore", {"tracks": len(valid_playlist), "index": index}
+                )
+            else:
+                # Defer until working hours
+                scheduler = get_scheduler()
+                scheduler._working_hours_pause_state = {
+                    "playlist": list(valid_playlist),
+                    "index": index,
+                    "loop": loop,
+                    "active": True,
+                }
+                logger.info("Mesai dışında: playlist otomatik başlatılmadı.")
+                log_system(
+                    "playlist_restore_deferred",
+                    {"tracks": len(valid_playlist), "index": index},
+                )
         else:
             logger.warning("Kaydedilmiş playlist'teki dosyalar bulunamadı")
             log_error("playlist_restore_failed", {"reason": "files_not_found"})

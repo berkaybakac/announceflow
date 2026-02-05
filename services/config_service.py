@@ -23,7 +23,7 @@ DEFAULTS = {
     "database_path": "announceflow.db",
     "media_folder": "media",
     "web_port": 5001,
-    "scheduler_interval_seconds": 30,
+    "scheduler_interval_seconds": 10,
     "working_hours_enabled": False,
     "working_hours_start": "09:00",
     "working_hours_end": "22:00",

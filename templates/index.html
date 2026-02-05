@@ -152,11 +152,22 @@
             <tr>
                 <td>{{ schedule.filename }}</td>
                 <td>{{ schedule.display_datetime }}</td>
-                <td><span class="badge badge-warning">Bekliyor</span></td>
+                <td>
+                    {% if schedule.blocked_outside_hours %}
+                    <span class="badge badge-warning">Mesai Dışı (Bekletildi)</span>
+                    {% else %}
+                    <span class="badge badge-warning">Bekliyor</span>
+                    {% endif %}
+                </td>
             </tr>
             {% endfor %}
         </tbody>
     </table>
+    {% if upcoming_schedules | selectattr('blocked_outside_hours') | list | length > 0 %}
+    <p style="color: var(--text-muted); margin-top: 10px;">
+        Mesai saatleri dışında planlar yürütülmez.
+    </p>
+    {% endif %}
     {% else %}
     <p style="color: var(--text-muted); text-align: center; padding: 20px;">
         Planlanmış herhangi bir oynatma yok.
@@ -199,19 +210,26 @@
                         console.log('Started loop playback');
                     } else {
                         const data = await response.json().catch(() => ({}));
-                        alert(data.error || 'Loop oynatma başlatılamadı');
+                        showToast(data.error || 'Loop oynatma başlatılamadı', 'error');
                     }
                 } catch (error) {
                     console.error('Error starting loop playback:', error);
+                    showToast('Loop oynatma başlatılamadı', 'error');
                 }
             },
 
             async next() {
                 try {
-                    await fetch('/api/playlist/next', { method: 'POST' });
-                    console.log('Skipped to next track');
+                    const response = await fetch('/api/playlist/next', { method: 'POST' });
+                    if (response.ok) {
+                        console.log('Skipped to next track');
+                    } else {
+                        const data = await response.json().catch(() => ({}));
+                        showToast(data.error || 'Sonraki parça başlatılamadı', 'error');
+                    }
                 } catch (error) {
                     console.error('Error skipping:', error);
+                    showToast('Sonraki parça başlatılamadı', 'error');
                 }
             }
         }
@@ -353,14 +371,20 @@
         }
 
         try {
-            await fetch('/api/play', {
+            const response = await fetch('/api/play', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ media_id: parseInt(mediaId) })
             });
+            if (!response.ok) {
+                const data = await response.json().catch(() => ({}));
+                showToast(data.error || 'Çalma başarısız', 'error');
+                return;
+            }
             updatePlayerState();
         } catch (error) {
             console.error('Error playing:', error);
+            showToast('Çalma başarısız', 'error');
         }
     }
 
@@ -390,19 +414,31 @@
             }
 
             // Then start playing
-            await fetch('/api/playlist/play', { method: 'POST' });
+            const playResult = await fetch('/api/playlist/play', { method: 'POST' });
+            if (!playResult.ok) {
+                const data = await playResult.json().catch(() => ({}));
+                showToast(data.error || 'Playlist başlatılamadı', 'error');
+                return;
+            }
             updatePlayerState();
         } catch (error) {
             console.error('Error starting playlist:', error);
+            showToast('Playlist başlatılamadı', 'error');
         }
     }
 
     async function skipToNext() {
         try {
-            await fetch('/api/playlist/next', { method: 'POST' });
+            const response = await fetch('/api/playlist/next', { method: 'POST' });
+            if (!response.ok) {
+                const data = await response.json().catch(() => ({}));
+                showToast(data.error || 'Sonraki parça başlatılamadı', 'error');
+                return;
+            }
             updatePlayerState();
         } catch (error) {
             console.error('Error skipping:', error);
+            showToast('Sonraki parça başlatılamadı', 'error');
         }
     }
 
