@@ -117,7 +117,7 @@ def init_database():
             media_id INTEGER NOT NULL,
             scheduled_datetime TIMESTAMP NOT NULL,
             reason TEXT,
-            status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'played', 'cancelled', 'overlap')),
+            status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'played', 'cancelled')),
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (media_id) REFERENCES media_files (id) ON DELETE CASCADE
         )
@@ -244,69 +244,6 @@ def _run_migrations():
     except sqlite3.OperationalError:
         cursor.execute("ALTER TABLE recurring_schedules ADD COLUMN reason TEXT")
         conn.commit()
-
-    # Migration: Extend one_time_schedules.status to support 'overlap'
-    try:
-        cursor.execute(
-            "SELECT sql FROM sqlite_master WHERE type='table' AND name='one_time_schedules'"
-        )
-        row = cursor.fetchone()
-        one_time_sql = ((row["sql"] if row else "") or "").lower()
-        if "overlap" not in one_time_sql:
-            cursor.execute(
-                """
-                CREATE TABLE one_time_schedules_new (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    media_id INTEGER NOT NULL,
-                    scheduled_datetime TIMESTAMP NOT NULL,
-                    reason TEXT,
-                    status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'played', 'cancelled', 'overlap')),
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    FOREIGN KEY (media_id) REFERENCES media_files (id) ON DELETE CASCADE
-                )
-                """
-            )
-            cursor.execute(
-                """
-                INSERT INTO one_time_schedules_new
-                    (id, media_id, scheduled_datetime, reason, status, created_at)
-                SELECT
-                    id,
-                    media_id,
-                    scheduled_datetime,
-                    reason,
-                    CASE
-                        WHEN status IN ('pending', 'played', 'cancelled') THEN status
-                        ELSE 'cancelled'
-                    END,
-                    created_at
-                FROM one_time_schedules
-                """
-            )
-            cursor.execute("DROP TABLE one_time_schedules")
-            cursor.execute("ALTER TABLE one_time_schedules_new RENAME TO one_time_schedules")
-            cursor.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_one_time_schedules_media_id
-                ON one_time_schedules(media_id)
-                """
-            )
-            cursor.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_one_time_schedules_status
-                ON one_time_schedules(status)
-                """
-            )
-            cursor.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_one_time_schedules_datetime
-                ON one_time_schedules(scheduled_datetime)
-                """
-            )
-            conn.commit()
-    except sqlite3.OperationalError:
-        # Keep startup resilient on partially migrated systems.
-        pass
 
     conn.close()
 

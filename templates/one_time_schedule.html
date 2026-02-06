@@ -150,8 +150,6 @@
                         {% endif %}
                     {% elif schedule.status == 'played' %}
                     <span class="badge badge-success status-badge">Çalındı</span>
-                    {% elif schedule.status == 'overlap' %}
-                    <span class="badge badge-primary status-badge">Çakıştı</span>
                     {% else %}
                     <span class="badge badge-danger status-badge">İptal</span>
                     {% endif %}
@@ -249,8 +247,6 @@
                         {% endif %}
                     {% elif schedule.status == 'played' %}
                     <span class="badge badge-success status-badge">Çalındı</span>
-                    {% elif schedule.status == 'overlap' %}
-                    <span class="badge badge-primary status-badge">Çakıştı</span>
                     {% else %}
                     <span class="badge badge-danger status-badge">İptal</span>
                     {% endif %}
