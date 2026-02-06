@@ -8,14 +8,24 @@
 
 {% block content %}
 <div class="page-header">
-    <h1 class="page-title">📅 Tek Seferlik Planlama</h1>
+    <h1 class="page-title" style="display: inline-flex; align-items: center; gap: 10px;">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 28px; height: 28px; color: var(--primary);">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
+        </svg>
+        Tek Seferlik Planlama
+    </h1>
     <p class="page-subtitle">Belirli bir tarih ve saatte çalacak planlar oluşturun</p>
 </div>
 
 <!-- Add New Schedule -->
 <div class="card animate-in">
     <div class="card-header">
-        <h3 class="card-title">➕ Yeni Plan Ekle</h3>
+        <h3 class="card-title" style="display: inline-flex; align-items: center; gap: 8px;">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 20px; height: 20px; color: var(--primary);">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+            </svg>
+            Yeni Plan Ekle
+        </h3>
     </div>
 
     <form action="/api/schedules/one-time" method="POST" id="oneTimeForm"
@@ -28,13 +38,13 @@
                 <select class="form-select" name="media_id" required>
                     <option value="">-- Dosya Seçin --</option>
 
-                    <optgroup label="📢 Anonslar">
+                    <optgroup label="Anonslar">
                         {% for file in media_files if file.media_type == 'announcement' %}
                         <option value="{{ file.id }}">{{ file.filename }}</option>
                         {% endfor %}
                     </optgroup>
 
-                    <optgroup label="🎵 Müzikler">
+                    <optgroup label="Müzikler">
                         {% for file in media_files if file.media_type == 'music' %}
                         <option value="{{ file.id }}">{{ file.filename }}</option>
                         {% endfor %}
@@ -64,27 +74,44 @@
             <span>Seçilen saat mesai dışı. Plan oluşturulsa bile bu saatte çalıştırılmaz.</span>
         </div>
 
-        <button type="submit" class="btn btn-primary" style="margin-top: 16px;">
-            ➕ Planla
+        <button type="submit" class="btn btn-primary" style="margin-top: 16px; display: inline-flex; align-items: center; gap: 8px;">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 18px; height: 18px;">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+            </svg>
+            Planla
         </button>
     </form>
 </div>
 
+{% set music_schedules = [] %}
+{% for s in schedules %}
+{% if s.media_type == 'music' or '/music/' in s.filepath %}
+{% set _ = music_schedules.append(s) %}
+{% endif %}
+{% endfor %}
+
 <!-- Scheduled Music -->
 <div class="card animate-in">
     <div class="card-header">
-        <h3 class="card-title">🎵 Planlanan Müzikler</h3>
+        <h3 class="card-title" style="display: inline-flex; align-items: center; gap: 8px;">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 20px; height: 20px; color: var(--primary);">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M9 9l10.5-3m0 6.553v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 11-.99-3.467l2.31-.66a2.25 2.25 0 001.632-2.163zm0 0V2.25L9 5.25v10.303m0 0v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 01-.99-3.467l2.31-.66A2.25 2.25 0 009 15.553z" />
+            </svg>
+            Planlanan Müzikler
+        </h3>
+        {% if music_schedules %}
+        <button type="button" class="btn btn-danger btn-sm" onclick="deleteAllOneTimeSchedules('music')"
+                style="display: inline-flex; align-items: center; gap: 6px;">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 14px; height: 14px;">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084A2.25 2.25 0 015.84 19.673L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0A48.11 48.11 0 017.5 5.393m7.5 0V4.5A2.25 2.25 0 0012.75 2.25h-1.5A2.25 2.25 0 009 4.5v.893m6 0A48.667 48.667 0 009 5.393" />
+            </svg>
+            Hepsini Sil
+        </button>
+        {% endif %}
     </div>
 
-    {% set music_schedules = [] %}
-    {% for s in schedules %}
-    {% if s.media_type == 'music' or '/music/' in s.filepath %}
-    {% set _ = music_schedules.append(s) %}
-    {% endif %}
-    {% endfor %}
-
     {% if music_schedules %}
-    <table class="table">
+    <table class="table" id="musicSchedulesTable">
         <thead>
             <tr>
                 <th>Dosya</th>
@@ -96,9 +123,13 @@
         </thead>
         <tbody>
             {% for schedule in music_schedules %}
-            <tr>
+            <tr data-schedule-id="{{ schedule.id }}">
                 <td>
-                    <span title="Müzik">🎵</span>
+                    <span title="Müzik" style="display: inline-flex; vertical-align: middle; margin-right: 6px;">
+                        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 16px; height: 16px; color: var(--primary);">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M9 9l10.5-3m0 6.553v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 11-.99-3.467l2.31-.66a2.25 2.25 0 001.632-2.163zm0 0V2.25L9 5.25v10.303m0 0v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 01-.99-3.467l2.31-.66A2.25 2.25 0 009 15.553z" />
+                        </svg>
+                    </span>
                     <strong>{{ schedule.filename }}</strong>
                 </td>
                 <td>{{ schedule.display_datetime }}</td>
@@ -108,12 +139,12 @@
                         {% if schedule.blocked_outside_hours %}
                         <span class="badge badge-warning status-badge">Mesai Dışı (Bekletildi)</span>
                         {% else %}
-                        <span class="badge badge-warning status-badge">⏳ Bekliyor</span>
+                        <span class="badge badge-warning status-badge">Bekliyor</span>
                         {% endif %}
                     {% elif schedule.status == 'played' %}
-                    <span class="badge badge-success status-badge">✅ Çalındı</span>
+                    <span class="badge badge-success status-badge">Çalındı</span>
                     {% else %}
-                    <span class="badge badge-danger status-badge">❌ İptal</span>
+                    <span class="badge badge-danger status-badge">İptal</span>
                     {% endif %}
                 </td>
                 <td>
@@ -125,7 +156,10 @@
                     {% endif %}
                     <button class="btn btn-danger btn-sm"
                             onclick="confirmAndDelete('/api/schedules/one-time/{{ schedule.id }}/delete', 'Bu planı', this.closest('tr'))">
-                        🗑️
+                        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 14px; height: 14px;">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084A2.25 2.25 0 015.84 19.673L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0A48.11 48.11 0 017.5 5.393m7.5 0V4.5A2.25 2.25 0 0012.75 2.25h-1.5A2.25 2.25 0 009 4.5v.893m6 0A48.667 48.667 0 009 5.393" />
+                        </svg>
+                        Sil
                     </button>
                 </td>
             </tr>
@@ -139,21 +173,35 @@
     {% endif %}
 </div>
 
+{% set announcement_schedules = [] %}
+{% for s in schedules %}
+{% if s.media_type != 'music' and '/music/' not in s.filepath %}
+{% set _ = announcement_schedules.append(s) %}
+{% endif %}
+{% endfor %}
+
 <!-- Scheduled Announcements -->
 <div class="card animate-in" style="margin-top: 24px;">
     <div class="card-header">
-        <h3 class="card-title">📢 Planlanan Anonslar</h3>
+        <h3 class="card-title" style="display: inline-flex; align-items: center; gap: 8px;">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 20px; height: 20px; color: var(--warning);">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M10.34 15.84c-.688-.06-1.386-.09-2.09-.09H7.5a4.5 4.5 0 110-9h.75c.704 0 1.402-.03 2.09-.09m0 9.18c.253.962.584 1.892.985 2.783.247.55.06 1.21-.463 1.511l-.657.38c-.551.318-1.26.117-1.527-.461a20.845 20.845 0 01-1.44-4.282m3.102.069a18.03 18.03 0 01-.59-4.59c0-1.586.205-3.124.59-4.59m0 9.18a23.848 23.848 0 018.835 2.535M10.34 6.66a23.847 23.847 0 008.835-2.535m0 0A23.74 23.74 0 0018.795 3m.38 1.125a23.91 23.91 0 011.014 5.395m-1.014 8.855c-.118.38-.245.754-.38 1.125m.38-1.125a23.91 23.91 0 001.014-5.395m0-3.46c.495.413.811 1.035.811 1.73 0 .695-.316 1.317-.811 1.73m0-3.46a24.347 24.347 0 010 3.46" />
+            </svg>
+            Planlanan Anonslar
+        </h3>
+        {% if announcement_schedules %}
+        <button type="button" class="btn btn-danger btn-sm" onclick="deleteAllOneTimeSchedules('announcement')"
+                style="display: inline-flex; align-items: center; gap: 6px;">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 14px; height: 14px;">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084A2.25 2.25 0 015.84 19.673L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0A48.11 48.11 0 017.5 5.393m7.5 0V4.5A2.25 2.25 0 0012.75 2.25h-1.5A2.25 2.25 0 009 4.5v.893m6 0A48.667 48.667 0 009 5.393" />
+            </svg>
+            Hepsini Sil
+        </button>
+        {% endif %}
     </div>
 
-    {% set announcement_schedules = [] %}
-    {% for s in schedules %}
-    {% if s.media_type != 'music' and '/music/' not in s.filepath %}
-    {% set _ = announcement_schedules.append(s) %}
-    {% endif %}
-    {% endfor %}
-
     {% if announcement_schedules %}
-    <table class="table">
+    <table class="table" id="announcementSchedulesTable">
         <thead>
             <tr>
                 <th>Dosya</th>
@@ -165,9 +213,13 @@
         </thead>
         <tbody>
             {% for schedule in announcement_schedules %}
-            <tr>
+            <tr data-schedule-id="{{ schedule.id }}">
                 <td>
-                    <span title="Anons">📢</span>
+                    <span title="Anons" style="display: inline-flex; vertical-align: middle; margin-right: 6px;">
+                        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 16px; height: 16px; color: var(--warning);">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M10.34 15.84c-.688-.06-1.386-.09-2.09-.09H7.5a4.5 4.5 0 110-9h.75c.704 0 1.402-.03 2.09-.09m0 9.18c.253.962.584 1.892.985 2.783.247.55.06 1.21-.463 1.511l-.657.38c-.551.318-1.26.117-1.527-.461a20.845 20.845 0 01-1.44-4.282m3.102.069a18.03 18.03 0 01-.59-4.59c0-1.586.205-3.124.59-4.59m0 9.18a23.848 23.848 0 018.835 2.535M10.34 6.66a23.847 23.847 0 008.835-2.535m0 0A23.74 23.74 0 0018.795 3m.38 1.125a23.91 23.91 0 011.014 5.395m-1.014 8.855c-.118.38-.245.754-.38 1.125m.38-1.125a23.91 23.91 0 001.014-5.395m0-3.46c.495.413.811 1.035.811 1.73 0 .695-.316 1.317-.811 1.73m0-3.46a24.347 24.347 0 010 3.46" />
+                        </svg>
+                    </span>
                     <strong>{{ schedule.filename }}</strong>
                 </td>
                 <td>{{ schedule.display_datetime }}</td>
@@ -177,12 +229,12 @@
                         {% if schedule.blocked_outside_hours %}
                         <span class="badge badge-warning status-badge">Mesai Dışı (Bekletildi)</span>
                         {% else %}
-                        <span class="badge badge-warning status-badge">⏳ Bekliyor</span>
+                        <span class="badge badge-warning status-badge">Bekliyor</span>
                         {% endif %}
                     {% elif schedule.status == 'played' %}
-                    <span class="badge badge-success status-badge">✅ Çalındı</span>
+                    <span class="badge badge-success status-badge">Çalındı</span>
                     {% else %}
-                    <span class="badge badge-danger status-badge">❌ İptal</span>
+                    <span class="badge badge-danger status-badge">İptal</span>
                     {% endif %}
                 </td>
                 <td>
@@ -194,7 +246,10 @@
                     {% endif %}
                     <button class="btn btn-danger btn-sm"
                             onclick="confirmAndDelete('/api/schedules/one-time/{{ schedule.id }}/delete', 'Bu planı', this.closest('tr'))">
-                        🗑️
+                        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 14px; height: 14px;">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084A2.25 2.25 0 015.84 19.673L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0A48.11 48.11 0 017.5 5.393m7.5 0V4.5A2.25 2.25 0 0012.75 2.25h-1.5A2.25 2.25 0 009 4.5v.893m6 0A48.667 48.667 0 009 5.393" />
+                        </svg>
+                        Sil
                     </button>
                 </td>
             </tr>
@@ -317,5 +372,42 @@
         }
         updateWorkingHoursWarning();
     });
+
+    async function deleteAllOneTimeSchedules(type) {
+        const tableId = type === 'music' ? 'musicSchedulesTable' : 'announcementSchedulesTable';
+        const rows = document.querySelectorAll(`#${tableId} tbody tr[data-schedule-id]`);
+        const ids = Array.from(rows).map(r => r.getAttribute('data-schedule-id')).filter(Boolean);
+
+        if (ids.length === 0) {
+            return;
+        }
+
+        if (!confirm(`${ids.length} planı toplu olarak silmek istediğinize emin misiniz?`)) {
+            return;
+        }
+
+        let deleted = 0;
+        for (const id of ids) {
+            try {
+                const response = await fetch(`/api/schedules/one-time/${id}/delete`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' }
+                });
+                const data = await response.json().catch(() => ({}));
+                if (response.ok && data.success) {
+                    deleted++;
+                }
+            } catch (error) {
+                console.error('Bulk delete error:', error);
+            }
+        }
+
+        if (deleted > 0) {
+            showToast(`${deleted} plan silindi.`, 'success');
+            window.location.reload();
+        } else {
+            showToast('Planlar silinemedi.', 'error');
+        }
+    }
 </script>
 {% endblock %}

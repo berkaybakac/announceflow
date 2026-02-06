@@ -1,24 +1,132 @@
 {% extends "base.html" %}
 {% block title %}Medya Kütüphanesi - AnnounceFlow{% endblock %}
 
+{% block extra_css %}
+<style>
+    .library-upload-grid {
+        display: grid;
+        grid-template-columns: 1fr 200px auto;
+        gap: 16px;
+        align-items: end;
+    }
+
+    .section-toggle {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 24px;
+        height: 24px;
+        border-radius: 6px;
+        color: var(--text-muted);
+        transition: background-color 0.2s ease, color 0.2s ease;
+    }
+
+    .section-toggle svg {
+        width: 16px;
+        height: 16px;
+        transition: transform 0.2s ease;
+    }
+
+    .section-toggle.open {
+        color: var(--text-primary);
+        background: var(--bg-input);
+    }
+
+    .section-toggle.open svg {
+        transform: rotate(90deg);
+    }
+
+    .library-action-group {
+        display: flex;
+        gap: 8px;
+        flex-wrap: wrap;
+    }
+
+    .library-action-group .btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+    .library-stats-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+        gap: 16px;
+    }
+
+    .file-input-hidden {
+        position: absolute;
+        left: -9999px;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+    }
+
+    .file-picker-row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        min-height: 44px;
+        padding: 8px 10px;
+        border: 1px solid var(--border);
+        border-radius: 10px;
+        background: var(--bg-input);
+    }
+
+    .file-picker-name {
+        color: var(--text-secondary);
+        font-size: 0.95rem;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    @media (max-width: 1024px) {
+        .library-upload-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+</style>
+{% endblock %}
+
 {% block content %}
 <div class="page-header">
-    <h1 class="page-title">Medya Kütüphanesi</h1>
+    <h1 class="page-title" style="display: inline-flex; align-items: center; gap: 10px;">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 28px; height: 28px; color: var(--primary);">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" />
+        </svg>
+        Medya Kütüphanesi
+    </h1>
     <p class="page-subtitle">Müzik ve anons dosyalarınızı yönetin</p>
 </div>
 
-<!-- Upload Section -->
 <div class="card animate-in">
     <div class="card-header">
-        <h3 class="card-title">Dosya Yükle</h3>
+        <h3 class="card-title" style="display: flex; align-items: center; gap: 8px;">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 20px; height: 20px; color: var(--primary);">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 16.5V4.5m0 0l-3.75 3.75M12 4.5l3.75 3.75M3 16.5v1.125A2.625 2.625 0 005.625 20.25h12.75A2.625 2.625 0 0021 17.625V16.5" />
+            </svg>
+            Dosya Yükle
+        </h3>
     </div>
 
     <form action="/api/media/upload" method="POST" enctype="multipart/form-data">
-        <div style="display: grid; grid-template-columns: 1fr 200px auto; gap: 16px; align-items: end;">
+        <div class="library-upload-grid">
             <div class="form-group" style="margin: 0;">
-                <label class="form-label">Dosya Seç (MP3)</label>
-                <input type="file" class="form-input" name="file"
-                    accept=".mp3,.wav,.ogg,.aiff,.aif,.flac,.m4a,.wma,.mp2" required style="padding: 10px;">
+                <label class="form-label" style="display: inline-flex; align-items: center; gap: 6px;">
+                    <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 16px; height: 16px; color: var(--text-secondary);">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+                    </svg>
+                    Dosya Seç (MP3)
+                </label>
+                <input id="mediaFileInput" type="file" class="file-input-hidden" name="file"
+                    accept=".mp3,.wav,.ogg,.aiff,.aif,.flac,.m4a,.wma,.mp2" required>
+                <div class="file-picker-row">
+                    <button type="button" class="btn btn-outline btn-sm" onclick="triggerMediaFileInput()">
+                        Dosya Seç
+                    </button>
+                    <span id="mediaFileName" class="file-picker-name">Dosya seçilmedi</span>
+                </div>
             </div>
 
             <div class="form-group" style="margin: 0;">
@@ -29,59 +137,136 @@
                 </select>
             </div>
 
-            <button type="submit" class="btn btn-success">
+            <button type="submit" class="btn btn-success" style="display: inline-flex; align-items: center; gap: 8px;">
+                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 18px; height: 18px;">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 16.5V4.5m0 0l-3.75 3.75M12 4.5l3.75 3.75M3 16.5v1.125A2.625 2.625 0 005.625 20.25h12.75A2.625 2.625 0 0021 17.625V16.5" />
+                </svg>
                 Yükle
             </button>
         </div>
     </form>
 </div>
 
-<!-- Storage Statistics -->
 <div class="card animate-in">
     <div class="card-header">
-        <h3 class="card-title">Depolama Durumu</h3>
+        <h3 class="card-title" style="display: flex; align-items: center; gap: 8px;">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 20px; height: 20px; color: var(--primary);">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M3 13.5h3v7.5H3v-7.5zm7.5-10.5h3V21h-3V3zm7.5 6h3V21h-3V9z" />
+            </svg>
+            Medya Kapasitesi
+        </h3>
     </div>
 
-    <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px;">
+    <div class="library-stats-grid">
         <div style="text-align: center; padding: 16px; background: var(--bg-input); border-radius: 10px;">
+            <div style="display: flex; justify-content: center; margin-bottom: 6px;">
+                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 22px; height: 22px; color: var(--primary);">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M2.25 12.75V12A2.25 2.25 0 014.5 9.75h15A2.25 2.25 0 0121.75 12v.75m-8.69-6.44l-2.12-2.12a1.5 1.5 0 00-1.061-.44H4.5A2.25 2.25 0 002.25 6v12a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9a2.25 2.25 0 00-2.25-2.25h-5.379a1.5 1.5 0 01-1.06-.44z" />
+                </svg>
+            </div>
             <div style="font-size: 1.5rem; font-weight: 700; color: var(--primary);">{{ total_files }}</div>
             <div style="color: var(--text-muted); font-size: 0.85rem;">Toplam Dosya</div>
         </div>
 
         <div style="text-align: center; padding: 16px; background: var(--bg-input); border-radius: 10px;">
+            <div style="display: flex; justify-content: center; margin-bottom: 6px;">
+                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 22px; height: 22px; color: var(--warning);">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6l4 2m6-2a10 10 0 11-20 0 10 10 0 0120 0z" />
+                </svg>
+            </div>
             <div style="font-size: 1.5rem; font-weight: 700; color: var(--warning);">{{ total_size_mb }} MB</div>
             <div style="color: var(--text-muted); font-size: 0.85rem;">Kullanılan Alan</div>
         </div>
 
         <div style="text-align: center; padding: 16px; background: var(--bg-input); border-radius: 10px;">
-            <div style="font-size: 1.5rem; font-weight: 700; color: var(--success);">{{ total_duration_minutes }} dk
+            <div style="display: flex; justify-content: center; margin-bottom: 6px;">
+                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 22px; height: 22px; color: var(--success);">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6l4 2m6-2a10 10 0 11-20 0 10 10 0 0120 0z" />
+                </svg>
             </div>
+            <div style="font-size: 1.5rem; font-weight: 700; color: var(--success);">{{ total_duration_minutes }} dk</div>
             <div style="color: var(--text-muted); font-size: 0.85rem;">Toplam Süre</div>
         </div>
 
         <div style="text-align: center; padding: 16px; background: var(--bg-input); border-radius: 10px;">
-            <div style="font-size: 1.5rem; font-weight: 700; color: var(--info);">{{ disk_free_mb }} MB</div>
-            <div style="color: var(--text-muted); font-size: 0.85rem;">Boş Alan</div>
+            <div style="display: flex; justify-content: center; margin-bottom: 6px;">
+                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 22px; height: 22px; color: var(--info);">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 7.5A2.25 2.25 0 016 5.25h12A2.25 2.25 0 0120.25 7.5v9A2.25 2.25 0 0118 18.75H6A2.25 2.25 0 013.75 16.5v-9z" />
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M7.5 9.75h9M7.5 14.25h3" />
+                </svg>
+            </div>
+            <div style="font-size: 1.5rem; font-weight: 700; color: var(--info);">{{ disk_free_gb }} GB</div>
+            <div style="color: var(--text-muted); font-size: 0.85rem;">Boş Disk Alanı</div>
+        </div>
+
+        <div style="text-align: center; padding: 16px; background: var(--bg-input); border-radius: 10px;">
+            <div style="display: flex; justify-content: center; margin-bottom: 6px;">
+                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 22px; height: 22px; color: var(--warning);">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 9l10.5-3m0 6.553v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 11-.99-3.467l2.31-.66a2.25 2.25 0 001.632-2.163zm0 0V2.25L9 5.25v10.303m0 0v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 01-.99-3.467l2.31-.66A2.25 2.25 0 009 15.553z" />
+                </svg>
+            </div>
+            <div style="font-size: 1.5rem; font-weight: 700; color: var(--warning);">~{{ estimated_track_capacity }}</div>
+            <div style="color: var(--text-muted); font-size: 0.85rem;">Tahmini Ek Parça</div>
+        </div>
+    </div>
+
+    <div style="margin-top: 16px; color: var(--text-muted); font-size: 0.9rem; display: flex; align-items: flex-start; gap: 8px;">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 18px; height: 18px; color: var(--warning); margin-top: 1px; flex-shrink: 0;">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 3.75L2.25 20.25h19.5L12 3.75z" />
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 9.75v4.5m0 3h.008v.008H12v-.008z" />
+        </svg>
+        <p><strong>Teknik Bilgi:</strong> Tahmini kapasite hesabı, boş diskten 1 GB sistem payı ayrılarak ve ortalama dosya boyutu ({{ average_track_size_mb }} MB) üzerinden yapılır.</p>
+    </div>
+
+    <div style="margin-top: 18px; border-top: 1px solid var(--border); padding-top: 16px;">
+        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 18px; height: 18px; color: var(--primary);">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M3 13.5h3v7.5H3v-7.5zm7.5-10.5h3V21h-3V3zm7.5 6h3V21h-3V9z" />
+            </svg>
+            <strong style="color: var(--text-primary);">Sistem Durumu</strong>
+        </div>
+        <div class="library-stats-grid">
+            <div style="text-align: center; padding: 14px; background: var(--bg-input); border-radius: 10px;">
+                <div style="font-size: 1.4rem; font-weight: 700; color: var(--primary);">{{ total_music_files }}</div>
+                <div style="color: var(--text-muted); font-size: 0.85rem;">Müzik Dosyası</div>
+            </div>
+            <div style="text-align: center; padding: 14px; background: var(--bg-input); border-radius: 10px;">
+                <div style="font-size: 1.4rem; font-weight: 700; color: var(--warning);">{{ total_announcement_files }}</div>
+                <div style="color: var(--text-muted); font-size: 0.85rem;">Anons Dosyası</div>
+            </div>
+            <div style="text-align: center; padding: 14px; background: var(--bg-input); border-radius: 10px;">
+                <div style="font-size: 1.4rem; font-weight: 700; color: var(--success);">{{ total_active_plans }}</div>
+                <div style="color: var(--text-muted); font-size: 0.85rem;">Aktif Plan</div>
+            </div>
         </div>
     </div>
 </div>
 
-<!-- Search Box -->
 <div class="card animate-in">
     <div style="display: flex; gap: 16px; align-items: center;">
-        <input type="text" class="form-input" id="searchInput" placeholder="Dosya ara..." onkeyup="filterFiles()"
-            style="flex: 1;">
+        <div style="position: relative; flex: 1;">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); width: 18px; height: 18px; color: var(--text-muted);">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35m1.35-5.4a7.5 7.5 0 11-15 0 7.5 7.5 0 0115 0z" />
+            </svg>
+            <input type="text" class="form-input" id="searchInput" placeholder="Dosya ara..." onkeyup="filterFiles()" style="padding-left: 38px;">
+        </div>
         <span id="searchResult" style="color: var(--text-muted); font-size: 0.9rem;"></span>
     </div>
 </div>
 
-<!-- Music Files -->
 <div class="card animate-in">
     <div class="card-header" onclick="toggleSection('music')" style="cursor: pointer; user-select: none;">
-        <h3 class="card-title">Müzik Dosyaları</h3>
+        <h3 class="card-title" style="display: flex; align-items: center; gap: 8px;">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 20px; height: 20px; color: var(--primary);">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M9 9l10.5-3m0 6.553v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 11-.99-3.467l2.31-.66a2.25 2.25 0 001.632-2.163zm0 0V2.25L9 5.25v10.303m0 0v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 01-.99-3.467l2.31-.66A2.25 2.25 0 009 15.553z" />
+            </svg>
+            Müzik Dosyaları
+        </h3>
         <div style="display: flex; align-items: center; gap: 12px;">
             <span class="badge badge-primary">{{ music_files|length }} dosya</span>
-            <span id="musicToggle" style="font-size: 1.2rem;">►</span>
+            <span id="musicToggle" class="section-toggle" aria-hidden="true">
+                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5.25l6 6-6 6" /></svg>
+            </span>
         </div>
     </div>
 
@@ -92,8 +277,10 @@
                 <input type="checkbox" id="selectAllMusic" onchange="toggleSelectAll('music')">
                 <span style="color: var(--text-muted);">Tümünü Seç</span>
             </label>
-            <button class="btn btn-danger btn-sm" onclick="deleteSelected('music')" id="deleteSelectedMusic"
-                style="display: none;">
+            <button class="btn btn-danger btn-sm" onclick="deleteSelected('music')" id="deleteSelectedMusic" style="display: none;">
+                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 14px; height: 14px;">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084A2.25 2.25 0 015.84 19.673L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0A48.11 48.11 0 017.5 5.393m7.5 0V4.5A2.25 2.25 0 0012.75 2.25h-1.5A2.25 2.25 0 009 4.5v.893m6 0A48.667 48.667 0 009 5.393" />
+                </svg>
                 Seçilenleri Sil (<span id="musicSelectedCount">0</span>)
             </button>
         </div>
@@ -110,24 +297,31 @@
                 {% for file in music_files %}
                 <tr data-filename="{{ file.filename|lower }}">
                     <td>
-                        <input type="checkbox" class="file-checkbox music-checkbox" value="{{ file.id }}"
-                            onchange="updateDeleteButton('music')">
+                        <input type="checkbox" class="file-checkbox music-checkbox" value="{{ file.id }}" onchange="updateDeleteButton('music')">
                     </td>
-                    <td>
-                        <strong>{{ file.filename }}</strong>
-                    </td>
+                    <td><strong>{{ file.filename }}</strong></td>
                     <td style="color: var(--text-muted);">{{ file.created_at_formatted }}</td>
                     <td>
-                        <button class="btn btn-outline btn-sm" onclick="playFile('{{ file.id }}')">
-                            Dinle
-                        </button>
-                        <button class="btn btn-outline-danger btn-sm" onclick="stopPlayback()">
-                            Dur
-                        </button>
-                        <button class="btn btn-danger btn-sm"
-                                onclick="confirmAndDelete('/api/media/{{ file.id }}/delete', 'Bu dosyayı', this.closest('tr'))">
-                            Sil
-                        </button>
+                        <div class="library-action-group">
+                            <button class="btn btn-outline btn-sm" onclick="playFile('{{ file.id }}')">
+                                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 14px; height: 14px;">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M15.91 11.672a.375.375 0 010 .656l-5.603 3.113a.375.375 0 01-.557-.328V8.887c0-.286.307-.466.557-.327l5.603 3.112z" />
+                                </svg>
+                                Dinle
+                            </button>
+                            <button class="btn btn-outline-danger btn-sm" onclick="stopPlayback()">
+                                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 14px; height: 14px;">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M5.25 7.5A2.25 2.25 0 017.5 5.25h9a2.25 2.25 0 012.25 2.25v9a2.25 2.25 0 01-2.25 2.25h-9a2.25 2.25 0 01-2.25-2.25v-9z" />
+                                </svg>
+                                Dur
+                            </button>
+                            <button class="btn btn-danger btn-sm" onclick="confirmAndDelete('/api/media/{{ file.id }}/delete', 'Bu dosyayı', this.closest('tr'))">
+                                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 14px; height: 14px;">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084A2.25 2.25 0 015.84 19.673L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0A48.11 48.11 0 017.5 5.393m7.5 0V4.5A2.25 2.25 0 0012.75 2.25h-1.5A2.25 2.25 0 009 4.5v.893m6 0A48.667 48.667 0 009 5.393" />
+                                </svg>
+                                Sil
+                            </button>
+                        </div>
                     </td>
                 </tr>
                 {% endfor %}
@@ -141,13 +335,19 @@
     </div>
 </div>
 
-<!-- Announcement Files -->
 <div class="card animate-in">
     <div class="card-header" onclick="toggleSection('announcement')" style="cursor: pointer; user-select: none;">
-        <h3 class="card-title">Anons Dosyaları</h3>
+        <h3 class="card-title" style="display: flex; align-items: center; gap: 8px;">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 20px; height: 20px; color: var(--warning);">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M10.34 15.84c-.688-.06-1.386-.09-2.09-.09H7.5a4.5 4.5 0 110-9h.75c.704 0 1.402-.03 2.09-.09m0 9.18c.253.962.584 1.892.985 2.783.247.55.06 1.21-.463 1.511l-.657.38c-.551.318-1.26.117-1.527-.461a20.845 20.845 0 01-1.44-4.282m3.102.069a18.03 18.03 0 01-.59-4.59c0-1.586.205-3.124.59-4.59m0 9.18a23.848 23.848 0 018.835 2.535M10.34 6.66a23.847 23.847 0 008.835-2.535m0 0A23.74 23.74 0 0018.795 3m.38 1.125a23.91 23.91 0 011.014 5.395m-1.014 8.855c-.118.38-.245.754-.38 1.125m.38-1.125a23.91 23.91 0 001.014-5.395m0-3.46c.495.413.811 1.035.811 1.73 0 .695-.316 1.317-.811 1.73m0-3.46a24.347 24.347 0 010 3.46" />
+            </svg>
+            Anons Dosyaları
+        </h3>
         <div style="display: flex; align-items: center; gap: 12px;">
             <span class="badge badge-warning">{{ announcement_files|length }} dosya</span>
-            <span id="announcementToggle" style="font-size: 1.2rem;">►</span>
+            <span id="announcementToggle" class="section-toggle" aria-hidden="true">
+                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5.25l6 6-6 6" /></svg>
+            </span>
         </div>
     </div>
 
@@ -158,8 +358,10 @@
                 <input type="checkbox" id="selectAllAnnouncement" onchange="toggleSelectAll('announcement')">
                 <span style="color: var(--text-muted);">Tümünü Seç</span>
             </label>
-            <button class="btn btn-danger btn-sm" onclick="deleteSelected('announcement')"
-                id="deleteSelectedAnnouncement" style="display: none;">
+            <button class="btn btn-danger btn-sm" onclick="deleteSelected('announcement')" id="deleteSelectedAnnouncement" style="display: none;">
+                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 14px; height: 14px;">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084A2.25 2.25 0 015.84 19.673L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0A48.11 48.11 0 017.5 5.393m7.5 0V4.5A2.25 2.25 0 0012.75 2.25h-1.5A2.25 2.25 0 009 4.5v.893m6 0A48.667 48.667 0 009 5.393" />
+                </svg>
                 Seçilenleri Sil (<span id="announcementSelectedCount">0</span>)
             </button>
         </div>
@@ -176,24 +378,31 @@
                 {% for file in announcement_files %}
                 <tr data-filename="{{ file.filename|lower }}">
                     <td>
-                        <input type="checkbox" class="file-checkbox announcement-checkbox" value="{{ file.id }}"
-                            onchange="updateDeleteButton('announcement')">
+                        <input type="checkbox" class="file-checkbox announcement-checkbox" value="{{ file.id }}" onchange="updateDeleteButton('announcement')">
                     </td>
-                    <td>
-                        <strong>{{ file.filename }}</strong>
-                    </td>
+                    <td><strong>{{ file.filename }}</strong></td>
                     <td style="color: var(--text-muted);">{{ file.created_at_formatted }}</td>
                     <td>
-                        <button class="btn btn-outline btn-sm" onclick="playFile('{{ file.id }}')">
-                            Çal
-                        </button>
-                        <button class="btn btn-outline-danger btn-sm" onclick="stopPlayback()">
-                            Dur
-                        </button>
-                        <button class="btn btn-danger btn-sm"
-                                onclick="confirmAndDelete('/api/media/{{ file.id }}/delete', 'Bu dosyayı', this.closest('tr'))">
-                            Sil
-                        </button>
+                        <div class="library-action-group">
+                            <button class="btn btn-outline btn-sm" onclick="playFile('{{ file.id }}')">
+                                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 14px; height: 14px;">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M15.91 11.672a.375.375 0 010 .656l-5.603 3.113a.375.375 0 01-.557-.328V8.887c0-.286.307-.466.557-.327l5.603 3.112z" />
+                                </svg>
+                                Çal
+                            </button>
+                            <button class="btn btn-outline-danger btn-sm" onclick="stopPlayback()">
+                                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 14px; height: 14px;">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M5.25 7.5A2.25 2.25 0 017.5 5.25h9a2.25 2.25 0 012.25 2.25v9a2.25 2.25 0 01-2.25 2.25h-9a2.25 2.25 0 01-2.25-2.25v-9z" />
+                                </svg>
+                                Dur
+                            </button>
+                            <button class="btn btn-danger btn-sm" onclick="confirmAndDelete('/api/media/{{ file.id }}/delete', 'Bu dosyayı', this.closest('tr'))">
+                                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 14px; height: 14px;">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084A2.25 2.25 0 015.84 19.673L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0A48.11 48.11 0 017.5 5.393m7.5 0V4.5A2.25 2.25 0 0012.75 2.25h-1.5A2.25 2.25 0 009 4.5v.893m6 0A48.667 48.667 0 009 5.393" />
+                                </svg>
+                                Sil
+                            </button>
+                        </div>
                     </td>
                 </tr>
                 {% endfor %}
@@ -210,41 +419,58 @@
 
 {% block extra_js %}
 <script>
-    // Section Toggle with Persistence
-    function toggleSection(type) {
-        const section = document.getElementById(type + 'Section');
-        const toggle = document.getElementById(type + 'Toggle');
-
-        if (section.style.display === 'none') {
-            section.style.display = 'block';
-            toggle.textContent = '▼';
-            localStorage.setItem('section_' + type, 'open');
-        } else {
-            section.style.display = 'none';
-            toggle.textContent = '►';
-            localStorage.setItem('section_' + type, 'closed');
+    function triggerMediaFileInput() {
+        const input = document.getElementById('mediaFileInput');
+        if (input) {
+            input.click();
         }
     }
 
-    // Initialize sections from localStorage
+    function updateSelectedFileName() {
+        const input = document.getElementById('mediaFileInput');
+        const label = document.getElementById('mediaFileName');
+        if (!input || !label) {
+            return;
+        }
+        if (!input.files || input.files.length === 0) {
+            label.textContent = 'Dosya seçilmedi';
+            return;
+        }
+        label.textContent = input.files[0].name;
+    }
+
+    function setSectionOpen(type, isOpen, persist = true) {
+        const section = document.getElementById(type + 'Section');
+        const toggle = document.getElementById(type + 'Toggle');
+
+        if (!section || !toggle) return;
+
+        section.style.display = isOpen ? 'block' : 'none';
+        toggle.classList.toggle('open', isOpen);
+
+        if (persist) {
+            localStorage.setItem('section_' + type, isOpen ? 'open' : 'closed');
+        }
+    }
+
+    function toggleSection(type) {
+        const section = document.getElementById(type + 'Section');
+        const isOpen = section.style.display !== 'none';
+        setSectionOpen(type, !isOpen, true);
+    }
+
     document.addEventListener('DOMContentLoaded', function () {
         ['music', 'announcement'].forEach(type => {
             const state = localStorage.getItem('section_' + type);
-            const section = document.getElementById(type + 'Section');
-            const toggle = document.getElementById(type + 'Toggle');
-
-            if (state === 'open') {
-                section.style.display = 'block';
-                toggle.textContent = '▼';
-            } else {
-                // Default is closed (already set in HTML style="display: none")
-                section.style.display = 'none';
-                toggle.textContent = '►';
-            }
+            setSectionOpen(type, state === 'open', false);
         });
+        const fileInput = document.getElementById('mediaFileInput');
+        if (fileInput) {
+            fileInput.addEventListener('change', updateSelectedFileName);
+        }
+        updateSelectedFileName();
     });
 
-    // Search/Filter (Smart Expansion)
     function filterFiles() {
         const query = document.getElementById('searchInput').value.toLowerCase().trim();
         let totalVisible = 0;
@@ -263,30 +489,13 @@
                 }
             });
 
-            // Smart Logic
-            const section = document.getElementById(type + 'Section');
-            const toggle = document.getElementById(type + 'Toggle');
-
             if (query.length > 0) {
-                // Search Mode: Force open if matches found, close otherwise (to declutter)
-                if (sectionVisibleCount > 0) {
-                    section.style.display = 'block';
-                    toggle.textContent = '▼';
-                } else {
-                    section.style.display = 'none';
-                    toggle.textContent = '►';
-                }
+                setSectionOpen(type, sectionVisibleCount > 0, false);
             } else {
-                // Clear Mode: Restore user preference
                 const savedState = localStorage.getItem('section_' + type);
-                if (savedState === 'open') {
-                    section.style.display = 'block';
-                    toggle.textContent = '▼';
-                } else {
-                    section.style.display = 'none';
-                    toggle.textContent = '►';
-                }
+                setSectionOpen(type, savedState === 'open', false);
             }
+
             return sectionVisibleCount;
         };
 
@@ -301,13 +510,11 @@
         }
     }
 
-    // Select All Toggle
     function toggleSelectAll(type) {
         const selectAll = document.getElementById('selectAll' + type.charAt(0).toUpperCase() + type.slice(1));
         const checkboxes = document.querySelectorAll('.' + type + '-checkbox');
 
         checkboxes.forEach(cb => {
-            // Only select visible rows
             const row = cb.closest('tr');
             if (row && row.style.display !== 'none') {
                 cb.checked = selectAll.checked;
@@ -317,7 +524,6 @@
         updateDeleteButton(type);
     }
 
-    // Update Delete Button
     function updateDeleteButton(type) {
         const checkboxes = document.querySelectorAll('.' + type + '-checkbox:checked');
         const count = checkboxes.length;
@@ -326,20 +532,20 @@
         const countSpan = document.getElementById(type + 'SelectedCount');
 
         if (count > 0) {
-            btn.style.display = 'inline-block';
+            btn.style.display = 'inline-flex';
+            btn.style.alignItems = 'center';
+            btn.style.gap = '6px';
             countSpan.textContent = count;
         } else {
             btn.style.display = 'none';
         }
     }
 
-    // Bulk Delete
     async function deleteSelected(type) {
         const checkboxes = document.querySelectorAll('.' + type + '-checkbox:checked');
         const ids = Array.from(checkboxes).map(cb => cb.value);
 
         if (ids.length === 0) return;
-
         if (!confirm(`${ids.length} dosyayı silmek istediğinize emin misiniz?`)) return;
 
         let deletedCount = 0;
@@ -357,10 +563,8 @@
         }
     }
 
-    // Play File (preview)
     async function playFile(mediaId) {
         try {
-            // Play single file (for announcements preview)
             const response = await fetch('/api/play', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -376,7 +580,6 @@
         }
     }
 
-    // Stop Playback
     async function stopPlayback() {
         try {
             const response = await fetch('/api/stop-preview', { method: 'POST' });

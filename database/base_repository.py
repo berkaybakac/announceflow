@@ -22,5 +22,6 @@ class BaseRepository:
             SQLite connection with Row factory enabled
         """
         conn = sqlite3.connect(self.db_path)
+        conn.execute("PRAGMA foreign_keys = ON")
         conn.row_factory = sqlite3.Row
         return conn

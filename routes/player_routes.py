@@ -2,6 +2,7 @@
 AnnounceFlow - Player Routes
 API endpoints for player control.
 """
+import logging
 from flask import Blueprint, jsonify, request
 import database as db
 from services.config_service import load_config
@@ -19,6 +20,7 @@ from utils.helpers import (
 
 
 player_bp = Blueprint("player", __name__)
+logger = logging.getLogger(__name__)
 
 
 @player_bp.route("/api/health")
@@ -63,6 +65,9 @@ def api_play():
 
     player = get_player()
     playlist_was_active = player._playlist_active and len(player._playlist) > 0
+    logger.info(
+        f"[source] manual play -> {media['filename']} (media_id={media_id})"
+    )
     success = player.play(media["filepath"], preserve_playlist=playlist_was_active)
 
     if success:

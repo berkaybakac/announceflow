@@ -1081,12 +1081,12 @@
                         // Update status badge to cancelled
                         const statusBadge = elementToUpdate.querySelector('.status-badge');
                         if (statusBadge) {
-                            statusBadge.textContent = '❌ İptal';
+                            statusBadge.textContent = 'İptal';
                             statusBadge.className = 'badge badge-danger status-badge';
                         } else {
                             const statusCell = elementToUpdate.querySelector('td:nth-child(4)');
                             if (statusCell) {
-                                statusCell.innerHTML = '<span class="badge badge-danger status-badge">❌ İptal</span>';
+                                statusCell.innerHTML = '<span class="badge badge-danger status-badge">İptal</span>';
                             }
                         }
                         // Disable cancel button

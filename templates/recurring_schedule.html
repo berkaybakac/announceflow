@@ -8,14 +8,24 @@
     <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
     <script src="https://npmcdn.com/flatpickr/dist/l10n/tr.js"></script>
 
-    <h1 class="page-title">🔄 Tekrarlı Planlama</h1>
+    <h1 class="page-title" style="display: inline-flex; align-items: center; gap: 10px;">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 28px; height: 28px; color: var(--primary);">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
+        </svg>
+        Tekrarlı Planlama
+    </h1>
     <p class="page-subtitle">Haftanın belirli günlerinde otomatik çalacak planlar</p>
 </div>
 
 <!-- Add New Recurring Schedule -->
 <div class="card animate-in">
     <div class="card-header">
-        <h3 class="card-title">➕ Yeni Tekrarlı Plan</h3>
+        <h3 class="card-title" style="display: inline-flex; align-items: center; gap: 8px;">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 20px; height: 20px; color: var(--primary);">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+            </svg>
+            Yeni Tekrarlı Plan
+        </h3>
     </div>
 
     <form action="/api/schedules/recurring" method="POST" id="recurringForm">
@@ -24,7 +34,7 @@
             <select class="form-select" name="media_id" required>
                 <option value="">-- Anons Seçin --</option>
                 {% for file in media_files if file.media_type == 'announcement' %}
-                <option value="{{ file.id }}">📢 {{ file.filename }}</option>
+                <option value="{{ file.id }}">{{ file.filename }}</option>
                 {% endfor %}
             </select>
         </div>
@@ -89,8 +99,11 @@
             </div>
         </div>
 
-        <button type="submit" class="btn btn-primary btn-lg" style="margin-top: 16px;">
-            ➕ Tekrarlı Plan Oluştur
+        <button type="submit" class="btn btn-primary btn-lg" style="margin-top: 16px; display: inline-flex; align-items: center; gap: 8px;">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 18px; height: 18px;">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+            </svg>
+            Tekrarlı Plan Oluştur
         </button>
     </form>
 
@@ -113,7 +126,12 @@
 <!-- Active Recurring Announcements -->
 <div class="card animate-in" style="margin-top: 24px;">
     <div class="card-header">
-        <h3 class="card-title">📢 Aktif Tekrarlı Anonslar</h3>
+        <h3 class="card-title" style="display: inline-flex; align-items: center; gap: 8px;">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 20px; height: 20px; color: var(--warning);">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M10.34 15.84c-.688-.06-1.386-.09-2.09-.09H7.5a4.5 4.5 0 110-9h.75c.704 0 1.402-.03 2.09-.09m0 9.18c.253.962.584 1.892.985 2.783.247.55.06 1.21-.463 1.511l-.657.38c-.551.318-1.26.117-1.527-.461a20.845 20.845 0 01-1.44-4.282m3.102.069a18.03 18.03 0 01-.59-4.59c0-1.586.205-3.124.59-4.59m0 9.18a23.848 23.848 0 018.835 2.535M10.34 6.66a23.847 23.847 0 008.835-2.535m0 0A23.74 23.74 0 0018.795 3m.38 1.125a23.91 23.91 0 011.014 5.395m-1.014 8.855c-.118.38-.245.754-.38 1.125m.38-1.125a23.91 23.91 0 001.014-5.395m0-3.46c.495.413.811 1.035.811 1.73 0 .695-.316 1.317-.811 1.73m0-3.46a24.347 24.347 0 010 3.46" />
+            </svg>
+            Aktif Tekrarlı Anonslar
+        </h3>
         {% set announcement_schedules = [] %}
         {% for s in schedules %}
         {% if s.media_type != 'music' and '/music/' not in s.filepath %}
@@ -121,8 +139,11 @@
         {% endif %}
         {% endfor %}
         {% if announcement_schedules %}
-        <button type="button" class="btn btn-danger btn-sm" onclick="confirmDeleteAll()">
-            🗑️ Tümünü Sil
+        <button type="button" class="btn btn-danger btn-sm" onclick="confirmDeleteAll()" style="display: inline-flex; align-items: center; gap: 6px;">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 14px; height: 14px;">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084A2.25 2.25 0 015.84 19.673L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0A48.11 48.11 0 017.5 5.393m7.5 0V4.5A2.25 2.25 0 0012.75 2.25h-1.5A2.25 2.25 0 009 4.5v.893m6 0A48.667 48.667 0 009 5.393" />
+            </svg>
+            Tümünü Sil
         </button>
         {% endif %}
     </div>
@@ -142,7 +163,11 @@
             {% for schedule in announcement_schedules %}
             <tr>
                 <td>
-                    <span title="Anons">📢</span>
+                    <span title="Anons" style="display: inline-flex; vertical-align: middle; margin-right: 6px;">
+                        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 16px; height: 16px; color: var(--warning);">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M10.34 15.84c-.688-.06-1.386-.09-2.09-.09H7.5a4.5 4.5 0 110-9h.75c.704 0 1.402-.03 2.09-.09m0 9.18c.253.962.584 1.892.985 2.783.247.55.06 1.21-.463 1.511l-.657.38c-.551.318-1.26.117-1.527-.461a20.845 20.845 0 01-1.44-4.282m3.102.069a18.03 18.03 0 01-.59-4.59c0-1.586.205-3.124.59-4.59m0 9.18a23.848 23.848 0 018.835 2.535M10.34 6.66a23.847 23.847 0 008.835-2.535m0 0A23.74 23.74 0 0018.795 3m.38 1.125a23.91 23.91 0 011.014 5.395m-1.014 8.855c-.118.38-.245.754-.38 1.125m.38-1.125a23.91 23.91 0 001.014-5.395m0-3.46c.495.413.811 1.035.811 1.73 0 .695-.316 1.317-.811 1.73m0-3.46a24.347 24.347 0 010 3.46" />
+                        </svg>
+                    </span>
                     <strong>{{ schedule.filename }}</strong>
                 </td>
                 <td>
@@ -161,9 +186,9 @@
                 </td>
                 <td>
                     {% if schedule.is_active %}
-                    <span class="badge badge-success">✅ Aktif</span>
+                    <span class="badge badge-success">Aktif</span>
                     {% else %}
-                    <span class="badge badge-danger">⏸️ Pasif</span>
+                    <span class="badge badge-danger">Pasif</span>
                     {% endif %}
                 </td>
                 <td>
@@ -175,7 +200,10 @@
                     </form>
                     <button class="btn btn-danger btn-sm"
                             onclick="confirmAndDelete('/api/schedules/recurring/{{ schedule.id }}/delete', 'Bu planı', this.closest('tr'))">
-                        🗑️
+                        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 14px; height: 14px;">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084A2.25 2.25 0 015.84 19.673L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0A48.11 48.11 0 017.5 5.393m7.5 0V4.5A2.25 2.25 0 0012.75 2.25h-1.5A2.25 2.25 0 009 4.5v.893m6 0A48.667 48.667 0 009 5.393" />
+                        </svg>
+                        Sil
                     </button>
                 </td>
             </tr>
@@ -272,7 +300,7 @@
 
     // Bulk delete confirmation
     function confirmDeleteAll() {
-        if (confirm('⚠️ DİKKAT!\n\nTüm tekrarlı anons planlarını silmek istediğinize emin misiniz?\n\nBu işlem geri alınamaz!')) {
+        if (confirm('Dikkat.\n\nTüm tekrarlı anons planlarını silmek istediğinize emin misiniz?\n\nBu işlem geri alınamaz.')) {
             if (confirm('Son onay: Gerçekten TÜM anons planlarını silmek istiyor musunuz?')) {
                 document.getElementById('bulkDeleteForm').submit();
             }
