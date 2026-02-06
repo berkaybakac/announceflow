@@ -84,7 +84,11 @@ def api_play():
 def api_stop():
     """Stop playback."""
     player = get_player()
+    scheduler = get_scheduler()
+    scheduler.clear_resume_intent()
     success = player.stop()
+    # Manual stop is authoritative: clear persisted playlist intent as well.
+    db.save_playlist_state(playlist=[], index=-1, active=False)
     db.update_playback_state(current_media_id=0, is_playing=False, position_seconds=0)
     log_web("stop", {})
     return _json_success({"success": success})

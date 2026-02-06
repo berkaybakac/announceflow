@@ -5,6 +5,7 @@ API endpoints for media file management (upload, delete).
 import os
 import subprocess
 import tempfile
+import shutil
 from flask import Blueprint, request, redirect, url_for, flash, jsonify
 from werkzeug.utils import secure_filename
 import database as db
@@ -91,6 +92,67 @@ def get_audio_duration(file_path: str) -> int:
     return 0
 
 
+def _remove_file_safely(file_path: str) -> None:
+    """Best-effort file removal helper."""
+    try:
+        if file_path and os.path.exists(file_path):
+            os.remove(file_path)
+    except OSError:
+        pass
+
+
+def has_audio_stream(file_path: str) -> bool:
+    """Return True if ffprobe can detect at least one audio stream."""
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-select_streams",
+                "a:0",
+                "-show_entries",
+                "stream=codec_name",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                file_path,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        return result.returncode == 0 and bool(result.stdout.strip())
+    except Exception:
+        return False
+
+
+def get_primary_audio_codec(file_path: str) -> str:
+    """Return primary audio codec name from ffprobe (e.g., mp3, aac)."""
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-select_streams",
+                "a:0",
+                "-show_entries",
+                "stream=codec_name",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                file_path,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip().lower()
+    except Exception:
+        pass
+    return ""
+
+
 @media_bp.route("/api/media/upload", methods=["POST"])
 @login_required
 def api_media_upload():
@@ -113,64 +175,91 @@ def api_media_upload():
         ext_lower = ext.lower().lstrip(".")
 
         # Check if conversion is needed
-        needs_convert = ext_lower in NEEDS_CONVERSION
+        # Save everything to temp first, then decide direct save vs conversion
+        temp_suffix = ext or ".tmp"
+        with tempfile.NamedTemporaryFile(suffix=temp_suffix, delete=False) as tmp:
+            temp_path = tmp.name
+            file.save(temp_path)
 
-        if needs_convert:
-            # Save to temp file with unique name (avoids collision)
-            temp_suffix = ext  # Keep original extension
-            with tempfile.NamedTemporaryFile(suffix=temp_suffix, delete=False) as tmp:
-                temp_path = tmp.name
-                file.save(temp_path)
+        try:
+            if not has_audio_stream(temp_path):
+                return _flash_redirect(
+                    "Yüklenen dosya bozuk veya ses akışı içermiyor.",
+                    "error",
+                    "library",
+                )
 
-            # Create MP3 filename
-            mp3_filename = f"{base}.mp3"
-            mp3_filepath = os.path.join(MEDIA_FOLDER, subfolder, mp3_filename)
+            codec = get_primary_audio_codec(temp_path)
+            needs_convert = ext_lower in NEEDS_CONVERSION or codec != "mp3"
 
-            # Ensure unique filename
-            counter = 1
-            while os.path.exists(mp3_filepath):
-                mp3_filename = f"{base}_{counter}.mp3"
+            if needs_convert:
+                # Convert to canonical MP3 even when extension is .mp3 but codec is not mp3.
+                mp3_filename = f"{base}.mp3"
                 mp3_filepath = os.path.join(MEDIA_FOLDER, subfolder, mp3_filename)
-                counter += 1
 
-            # Convert to MP3
-            try:
-                if convert_to_mp3(temp_path, mp3_filepath):
-                    # Get duration from converted file
-                    duration = get_audio_duration(mp3_filepath)
-                    db.add_media_file(mp3_filename, mp3_filepath, media_type, duration)
+                # Ensure unique filename
+                counter = 1
+                while os.path.exists(mp3_filepath):
+                    mp3_filename = f"{base}_{counter}.mp3"
+                    mp3_filepath = os.path.join(MEDIA_FOLDER, subfolder, mp3_filename)
+                    counter += 1
+
+                if not convert_to_mp3(temp_path, mp3_filepath):
+                    flash(f"{original_filename} dönüştürülemedi. ffmpeg hatası.", "error")
+                    return redirect(url_for("library"))
+
+                converted_codec = get_primary_audio_codec(mp3_filepath)
+                if converted_codec != "mp3":
+                    try:
+                        os.remove(mp3_filepath)
+                    except OSError:
+                        pass
                     flash(
-                        f"{original_filename} → {mp3_filename} dönüştürüldü ve yüklendi!",
-                        "success",
+                        f"{original_filename} dönüştürüldü ama MP3 doğrulaması başarısız.",
+                        "error",
                     )
-                else:
+                    return redirect(url_for("library"))
+
+                if not has_audio_stream(mp3_filepath):
+                    _remove_file_safely(mp3_filepath)
                     flash(
-                        f"{original_filename} dönüştürülemedi. ffmpeg hatası.", "error"
+                        f"{original_filename} dönüştürüldü ama ses akışı doğrulanamadı.",
+                        "error",
                     )
-            finally:
-                # Always clean up temp file
-                if os.path.exists(temp_path):
-                    os.remove(temp_path)
-        else:
-            # MP3 - save directly
-            filepath = os.path.join(MEDIA_FOLDER, subfolder, original_filename)
+                    return redirect(url_for("library"))
 
-            # Ensure unique filename
-            counter = 1
-            while os.path.exists(filepath):
-                original_filename = f"{base}_{counter}{ext}"
-                filepath = os.path.join(MEDIA_FOLDER, subfolder, original_filename)
-                counter += 1
+                duration = get_audio_duration(mp3_filepath)
+                db.add_media_file(mp3_filename, mp3_filepath, media_type, duration)
+                log_web("upload", {"filename": mp3_filename, "media_type": media_type})
+                flash(
+                    f"{original_filename} → {mp3_filename} dönüştürüldü ve yüklendi!",
+                    "success",
+                )
+            else:
+                # True MP3: keep original file as-is.
+                target_filename = original_filename
+                filepath = os.path.join(MEDIA_FOLDER, subfolder, target_filename)
 
-            file.save(filepath)
-            # Get duration
-            duration = get_audio_duration(filepath)
-            db.add_media_file(original_filename, filepath, media_type, duration)
-            log_web("upload", {"filename": original_filename, "media_type": media_type})
-            flash(f"{original_filename} başarıyla yüklendi!", "success")
+                counter = 1
+                while os.path.exists(filepath):
+                    target_filename = f"{base}_{counter}{ext}"
+                    filepath = os.path.join(MEDIA_FOLDER, subfolder, target_filename)
+                    counter += 1
+
+                shutil.move(temp_path, filepath)
+                temp_path = None
+
+                duration = get_audio_duration(filepath)
+                db.add_media_file(target_filename, filepath, media_type, duration)
+                log_web("upload", {"filename": target_filename, "media_type": media_type})
+                flash(f"{target_filename} başarıyla yüklendi!", "success")
+        finally:
+            if temp_path and os.path.exists(temp_path):
+                os.remove(temp_path)
     else:
         return _flash_redirect(
-            "Geçersiz dosya türü. Kabul edilen: MP3, WAV, OGG, AIFF, FLAC, M4A, WMA, MP2",
+            "Geçersiz dosya türü. Kabul edilen: MP3, WAV, OGG, AIFF, FLAC, M4A, WMA, MP2. "
+            "Uygun formatlar otomatik MP3'e dönüştürülür.",
             "error",
             "library",
         )

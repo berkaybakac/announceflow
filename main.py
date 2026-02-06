@@ -8,6 +8,7 @@ import logging
 import signal
 import time
 import socket
+import json
 from logging.handlers import RotatingFileHandler
 
 # Add current directory to path
@@ -46,6 +47,31 @@ def _is_port_available(port: int) -> bool:
             return False
 
 
+def _load_release_stamp(path: str = "release_stamp.json") -> dict:
+    """Load release metadata generated during deployment."""
+    fallback = {
+        "commit": "unknown",
+        "commit_short": "unknown",
+        "ref": "unknown",
+        "branch": "unknown",
+        "deployed_at_utc": "unknown",
+    }
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            loaded = json.load(f)
+        if not isinstance(loaded, dict):
+            return dict(fallback)
+    except (OSError, json.JSONDecodeError):
+        return dict(fallback)
+
+    release = dict(fallback)
+    for key in fallback:
+        value = loaded.get(key)
+        if isinstance(value, str) and value.strip():
+            release[key] = value.strip()
+    return release
+
+
 def setup_logging():
     """Configure logging with file and console handlers."""
     log_file = "announceflow.log"
@@ -81,10 +107,29 @@ def main():
     logger.info("AnnounceFlow - Planlı Müzik & Anons Sistemi")
     logger.info("=" * 50)
 
+    release = _load_release_stamp()
+    logger.info(
+        "Release stamp: ref=%s commit=%s branch=%s deployed_at=%s",
+        release["ref"],
+        release["commit_short"],
+        release["branch"],
+        release["deployed_at_utc"],
+    )
+
     # Log system boot event
     from player import AUDIO_BACKEND
 
-    log_system("boot", {"version": "1.5.1", "backend": AUDIO_BACKEND})
+    log_system(
+        "boot",
+        {
+            "version": "1.5.1",
+            "backend": AUDIO_BACKEND,
+            "release_ref": release["ref"],
+            "release_commit": release["commit_short"],
+            "release_branch": release["branch"],
+            "deployed_at_utc": release["deployed_at_utc"],
+        },
+    )
 
     # Initialize database
     logger.info("Veritabanı başlatılıyor...")
