@@ -64,8 +64,48 @@ def api_cancel_one_time(schedule_id):
 @login_required
 def api_delete_one_time(schedule_id):
     """Delete a one-time schedule."""
-    db.delete_one_time_schedule(schedule_id)
+    deleted = db.delete_one_time_schedule(schedule_id)
+    if not deleted:
+        return jsonify({"success": False, "message": "Plan bulunamadı"}), 404
     return jsonify({"success": True, "message": "Plan silindi"})
+
+
+@schedule_bp.route("/api/schedules/one-time/delete-batch", methods=["POST"])
+@login_required
+def api_delete_one_time_batch():
+    """Delete multiple one-time schedules by IDs."""
+    data = request.get_json(silent=True) or {}
+    raw_ids = data.get("ids", [])
+
+    if not isinstance(raw_ids, list):
+        return jsonify({"success": False, "message": "Geçersiz istek formatı"}), 400
+
+    schedule_ids = []
+    for item in raw_ids:
+        try:
+            schedule_id = int(item)
+            if schedule_id > 0:
+                schedule_ids.append(schedule_id)
+        except (ValueError, TypeError):
+            continue
+
+    if not schedule_ids:
+        return jsonify({"success": False, "message": "Silinecek plan seçilmedi"}), 400
+
+    unique_ids = sorted(set(schedule_ids))
+    deleted_count = db.delete_one_time_schedules(unique_ids)
+
+    if deleted_count == 0:
+        return jsonify({"success": False, "message": "Silinecek plan bulunamadı"}), 404
+
+    return jsonify(
+        {
+            "success": True,
+            "message": f"{deleted_count} plan silindi",
+            "deleted_count": deleted_count,
+            "requested_count": len(unique_ids),
+        }
+    )
 
 
 @schedule_bp.route("/api/schedules/recurring", methods=["POST"])
@@ -75,6 +115,7 @@ def api_add_recurring():
     media_id = request.form.get("media_id")
     days_json = request.form.get("days_of_week", "[]")
     schedule_type = request.form.get("schedule_type", "specific")
+    reason = request.form.get("reason", "").strip() or None
 
     try:
         days = json.loads(days_json)
@@ -110,7 +151,11 @@ def api_add_recurring():
             )
 
         db.add_recurring_schedule(
-            media_id_int, days, times[0], specific_times=times  # First time as start
+            media_id_int,
+            days,
+            times[0],
+            specific_times=times,  # First time as start
+            reason=reason,
         )
     else:
         start_time = request.form.get("start_time", "09:00")
@@ -138,7 +183,9 @@ def api_add_recurring():
                 "Zaman aralığı en az 1 dakika olmalıdır", "error", "recurring_schedules"
             )
 
-        db.add_recurring_schedule(media_id_int, days, start_time, end_time, interval)
+        db.add_recurring_schedule(
+            media_id_int, days, start_time, end_time, interval, reason=reason
+        )
 
     return _flash_redirect(
         "Tekrarlı plan oluşturuldu!", "success", "recurring_schedules"
@@ -170,8 +217,48 @@ def api_toggle_recurring(schedule_id):
 @login_required
 def api_delete_recurring(schedule_id):
     """Delete a recurring schedule."""
-    db.delete_recurring_schedule(schedule_id)
+    deleted = db.delete_recurring_schedule(schedule_id)
+    if not deleted:
+        return jsonify({"success": False, "message": "Plan bulunamadı"}), 404
     return jsonify({"success": True, "message": "Plan silindi"})
+
+
+@schedule_bp.route("/api/schedules/recurring/delete-batch", methods=["POST"])
+@login_required
+def api_delete_recurring_batch():
+    """Delete multiple recurring schedules by IDs."""
+    data = request.get_json(silent=True) or {}
+    raw_ids = data.get("ids", [])
+
+    if not isinstance(raw_ids, list):
+        return jsonify({"success": False, "message": "Geçersiz istek formatı"}), 400
+
+    schedule_ids = []
+    for item in raw_ids:
+        try:
+            schedule_id = int(item)
+            if schedule_id > 0:
+                schedule_ids.append(schedule_id)
+        except (ValueError, TypeError):
+            continue
+
+    if not schedule_ids:
+        return jsonify({"success": False, "message": "Silinecek plan seçilmedi"}), 400
+
+    unique_ids = sorted(set(schedule_ids))
+    deleted_count = db.delete_recurring_schedules(unique_ids)
+
+    if deleted_count == 0:
+        return jsonify({"success": False, "message": "Silinecek plan bulunamadı"}), 404
+
+    return jsonify(
+        {
+            "success": True,
+            "message": f"{deleted_count} plan silindi",
+            "deleted_count": deleted_count,
+            "requested_count": len(unique_ids),
+        }
+    )
 
 
 @schedule_bp.route(

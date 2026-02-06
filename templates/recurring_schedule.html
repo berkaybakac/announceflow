@@ -1,13 +1,13 @@
 {% extends "base.html" %}
 {% block title %}Tekrarlı Planlama - AnnounceFlow{% endblock %}
 
+{% block extra_css %}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/themes/dark.css">
+{% endblock %}
+
 {% block content %}
 <div class="page-header">
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
-    <link rel="stylesheet" href="https://npmcdn.com/flatpickr/dist/themes/dark.css">
-    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
-    <script src="https://npmcdn.com/flatpickr/dist/l10n/tr.js"></script>
-
     <h1 class="page-title" style="display: inline-flex; align-items: center; gap: 10px;">
         <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 28px; height: 28px; color: var(--primary);">
             <path stroke-linecap="round" stroke-linejoin="round" d="M16.023 9.348h4.992v-.001M2.985 19.644v-4.992m0 0h4.992m-4.993 0l3.181 3.183a8.25 8.25 0 0013.803-3.7M4.031 9.865a8.25 8.25 0 0113.803-3.7l3.181 3.182m0-4.991v4.99" />
@@ -17,7 +17,6 @@
     <p class="page-subtitle">Haftanın belirli günlerinde otomatik çalacak planlar</p>
 </div>
 
-<!-- Add New Recurring Schedule -->
 <div class="card animate-in">
     <div class="card-header">
         <h3 class="card-title" style="display: inline-flex; align-items: center; gap: 8px;">
@@ -30,16 +29,37 @@
 
     <form action="/api/schedules/recurring" method="POST" id="recurringForm">
         <div class="form-group">
-            <label class="form-label">Dosya</label>
-            <select class="form-select" name="media_id" required>
-                <option value="">-- Anons Seçin --</option>
-                {% for file in media_files if file.media_type == 'announcement' %}
-                <option value="{{ file.id }}">{{ file.filename }}</option>
-                {% endfor %}
-            </select>
+            <label class="form-label">Planlama Tipi</label>
+            <div style="display: flex; gap: 16px; flex-wrap: wrap;">
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                    <input type="radio" name="schedule_type" value="specific" checked onchange="toggleScheduleType()">
+                    <span>Belirli Saatler</span>
+                </label>
+                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                    <input type="radio" name="schedule_type" value="interval" onchange="toggleScheduleType()">
+                    <span>Aralıklı (Her X dakikada)</span>
+                </label>
+            </div>
         </div>
 
-        <div class="form-group">
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; align-items: end;">
+            <div class="form-group" style="margin: 0;">
+                <label class="form-label">Dosya</label>
+                <select class="form-select" name="media_id" required>
+                    <option value="">-- Anons Seçin --</option>
+                    {% for file in media_files if file.media_type == 'announcement' %}
+                    <option value="{{ file.id }}">{{ file.filename }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div class="form-group" style="margin: 0;">
+                <label class="form-label">Neden/Açıklama</label>
+                <input type="text" class="form-input" name="reason" placeholder="Örn: Bayram">
+            </div>
+        </div>
+
+        <div class="form-group" style="margin-top: 16px;">
             <label class="form-label">Günler</label>
             <div class="day-selector">
                 <button type="button" class="day-btn" data-day="0">Pzt</button>
@@ -53,21 +73,6 @@
             <input type="hidden" name="days_of_week" id="selectedDays">
         </div>
 
-        <div class="form-group">
-            <label class="form-label">Planlama Tipi</label>
-            <div style="display: flex; gap: 16px;">
-                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-                    <input type="radio" name="schedule_type" value="specific" checked onchange="toggleScheduleType()">
-                    <span>Belirli Saatler</span>
-                </label>
-                <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-                    <input type="radio" name="schedule_type" value="interval" onchange="toggleScheduleType()">
-                    <span>Aralıklı (Her X dakikada)</span>
-                </label>
-            </div>
-        </div>
-
-        <!-- Specific Times -->
         <div id="specificTimesSection">
             <div class="form-group">
                 <label class="form-label">Çalma Saatleri (virgülle ayırın)</label>
@@ -81,7 +86,6 @@
             </div>
         </div>
 
-        <!-- Interval Based -->
         <div id="intervalSection" style="display: none;">
             <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px;">
                 <div class="form-group" style="margin: 0;">
@@ -106,24 +110,15 @@
             Tekrarlı Plan Oluştur
         </button>
     </form>
-
-    <script>
-        document.addEventListener('DOMContentLoaded', function () {
-            flatpickr(".time-picker", {
-                enableTime: true,
-                noCalendar: true,
-                dateFormat: "H:i",
-                time_24hr: true,
-                locale: "tr",
-                minuteIncrement: 1,
-                allowInput: true,
-                disableMobile: "true"
-            });
-        });
-    </script>
 </div>
 
-<!-- Active Recurring Announcements -->
+{% set announcement_schedules = [] %}
+{% for s in schedules %}
+{% if s.media_type != 'music' and '/music/' not in s.filepath %}
+{% set _ = announcement_schedules.append(s) %}
+{% endif %}
+{% endfor %}
+
 <div class="card animate-in" style="margin-top: 24px;">
     <div class="card-header">
         <h3 class="card-title" style="display: inline-flex; align-items: center; gap: 8px;">
@@ -132,36 +127,40 @@
             </svg>
             Aktif Tekrarlı Anonslar
         </h3>
-        {% set announcement_schedules = [] %}
-        {% for s in schedules %}
-        {% if s.media_type != 'music' and '/music/' not in s.filepath %}
-        {% set _ = announcement_schedules.append(s) %}
-        {% endif %}
-        {% endfor %}
-        {% if announcement_schedules %}
-        <button type="button" class="btn btn-danger btn-sm" onclick="confirmDeleteAll()" style="display: inline-flex; align-items: center; gap: 6px;">
-            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 14px; height: 14px;">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084A2.25 2.25 0 015.84 19.673L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0A48.11 48.11 0 017.5 5.393m7.5 0V4.5A2.25 2.25 0 0012.75 2.25h-1.5A2.25 2.25 0 009 4.5v.893m6 0A48.667 48.667 0 009 5.393" />
-            </svg>
-            Tümünü Sil
-        </button>
-        {% endif %}
     </div>
 
     {% if announcement_schedules %}
-    <table class="table">
+    <div style="margin-bottom: 12px; display: flex; gap: 12px; align-items: center;">
+        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+            <input type="checkbox" id="selectAllRecurring" onchange="toggleSelectAllRecurring()">
+            <span style="color: var(--text-muted);">Tümünü Seç</span>
+        </label>
+        <button class="btn btn-danger btn-sm" onclick="deleteSelectedRecurringSchedules()" id="deleteSelectedRecurring" style="display: none;">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 14px; height: 14px;">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084A2.25 2.25 0 015.84 19.673L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0A48.11 48.11 0 017.5 5.393m7.5 0V4.5A2.25 2.25 0 0012.75 2.25h-1.5A2.25 2.25 0 009 4.5v.893m6 0A48.667 48.667 0 009 5.393" />
+            </svg>
+            Seçilenleri Sil (<span id="recurringSelectedCount">0</span>)
+        </button>
+    </div>
+
+    <table class="table" id="recurringSchedulesTable">
         <thead>
             <tr>
+                <th style="width: 40px;"></th>
                 <th>Dosya</th>
                 <th>Günler</th>
                 <th>Zamanlama</th>
+                <th>Neden</th>
                 <th>Durum</th>
                 <th>İşlem</th>
             </tr>
         </thead>
         <tbody>
             {% for schedule in announcement_schedules %}
-            <tr>
+            <tr data-schedule-id="{{ schedule.id }}">
+                <td>
+                    <input type="checkbox" class="recurring-schedule-checkbox" value="{{ schedule.id }}" onchange="updateRecurringDeleteButton()">
+                </td>
                 <td>
                     <span title="Anons" style="display: inline-flex; vertical-align: middle; margin-right: 6px;">
                         <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 16px; height: 16px; color: var(--warning);">
@@ -180,10 +179,10 @@
                     {% if schedule.specific_times %}
                     {{ schedule.specific_times | join(', ') }}
                     {% else %}
-                    {{ schedule.start_time }} - {{ schedule.end_time or '23:59' }} (her {{ schedule.interval_minutes }}
-                    dk)
+                    {{ schedule.start_time }} - {{ schedule.end_time or '23:59' }} (her {{ schedule.interval_minutes }} dk)
                     {% endif %}
                 </td>
+                <td style="color: var(--text-muted);">{{ schedule.reason or '-' }}</td>
                 <td>
                     {% if schedule.is_active %}
                     <span class="badge badge-success">Aktif</span>
@@ -192,8 +191,7 @@
                     {% endif %}
                 </td>
                 <td>
-                    <form action="/api/schedules/recurring/{{ schedule.id }}/toggle" method="POST"
-                        style="display: inline;">
+                    <form action="/api/schedules/recurring/{{ schedule.id }}/toggle" method="POST" style="display: inline;">
                         <button type="submit" class="btn btn-outline btn-sm">
                             {% if schedule.is_active %}Devre Dışı{% else %}Etkinleştir{% endif %}
                         </button>
@@ -216,22 +214,25 @@
     </div>
     {% endif %}
 </div>
-
-<!-- Hidden form for bulk delete -->
-<form id="bulkDeleteForm" action="/api/schedules/recurring/delete-all-announcements" method="POST" style="display: none;">
-</form>
 {% endblock %}
 
 {% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+<script src="https://npmcdn.com/flatpickr/dist/l10n/tr.js"></script>
 <script>
-    // Day selector
     const dayButtons = document.querySelectorAll('.day-btn');
     const selectedDaysInput = document.getElementById('selectedDays');
+    const recurringForm = document.getElementById('recurringForm');
+    const specificTimesInput = document.getElementById('specificTimesInput');
+    const startTimeInput = recurringForm?.querySelector('input[name="start_time"]');
+    const endTimeInput = recurringForm?.querySelector('input[name="end_time"]');
+    const intervalInput = recurringForm?.querySelector('input[name="interval_minutes"]');
+
     let selectedDays = [];
 
     dayButtons.forEach(btn => {
         btn.addEventListener('click', () => {
-            const day = parseInt(btn.dataset.day);
+            const day = parseInt(btn.dataset.day, 10);
 
             if (btn.classList.contains('active')) {
                 btn.classList.remove('active');
@@ -241,12 +242,11 @@
                 selectedDays.push(day);
             }
 
-            selectedDays.sort();
+            selectedDays.sort((a, b) => a - b);
             selectedDaysInput.value = JSON.stringify(selectedDays);
         });
     });
 
-    // Schedule type toggle
     function toggleScheduleType() {
         const scheduleType = document.querySelector('input[name="schedule_type"]:checked').value;
         const specificSection = document.getElementById('specificTimesSection');
@@ -255,32 +255,35 @@
         if (scheduleType === 'specific') {
             specificSection.style.display = 'block';
             intervalSection.style.display = 'none';
+            if (specificTimesInput) specificTimesInput.required = true;
+            if (startTimeInput) startTimeInput.required = false;
+            if (endTimeInput) endTimeInput.required = false;
+            if (intervalInput) intervalInput.required = false;
         } else {
             specificSection.style.display = 'none';
             intervalSection.style.display = 'block';
+            if (specificTimesInput) specificTimesInput.required = false;
+            if (startTimeInput) startTimeInput.required = true;
+            if (endTimeInput) endTimeInput.required = true;
+            if (intervalInput) intervalInput.required = true;
         }
     }
 
-    // Time format validation helper
     function isValidTimeFormat(timeStr) {
         const pattern = /^([01]?[0-9]|2[0-3]):([0-5][0-9])$/;
         return pattern.test(timeStr.trim());
     }
 
-    // Form validation
-    document.getElementById('recurringForm').addEventListener('submit', (e) => {
+    recurringForm.addEventListener('submit', (e) => {
         if (selectedDays.length === 0) {
             e.preventDefault();
             alert('Lütfen en az bir gün seçin');
             return;
         }
 
-        // Validate specific times if that mode is selected
         const scheduleType = document.querySelector('input[name="schedule_type"]:checked').value;
         if (scheduleType === 'specific') {
-            const timesInput = document.getElementById('specificTimesInput');
-            const timesStr = timesInput.value.trim();
-
+            const timesStr = specificTimesInput.value.trim();
             if (!timesStr) {
                 e.preventDefault();
                 alert('Lütfen en az bir saat girin');
@@ -289,7 +292,6 @@
 
             const times = timesStr.split(',').map(t => t.trim()).filter(t => t);
             const invalidTimes = times.filter(t => !isValidTimeFormat(t));
-
             if (invalidTimes.length > 0) {
                 e.preventDefault();
                 alert('Geçersiz saat formatı: ' + invalidTimes.join(', ') + '\n\nDoğru format: Saat:Dakika (örn: 09:00, 12:30)');
@@ -298,13 +300,87 @@
         }
     });
 
-    // Bulk delete confirmation
-    function confirmDeleteAll() {
-        if (confirm('Dikkat.\n\nTüm tekrarlı anons planlarını silmek istediğinize emin misiniz?\n\nBu işlem geri alınamaz.')) {
-            if (confirm('Son onay: Gerçekten TÜM anons planlarını silmek istiyor musunuz?')) {
-                document.getElementById('bulkDeleteForm').submit();
-            }
+    function toggleSelectAllRecurring() {
+        const selectAll = document.getElementById('selectAllRecurring');
+        const checkboxes = document.querySelectorAll('.recurring-schedule-checkbox');
+        checkboxes.forEach(cb => {
+            cb.checked = selectAll.checked;
+        });
+        updateRecurringDeleteButton();
+    }
+
+    function updateRecurringDeleteButton() {
+        const checked = document.querySelectorAll('.recurring-schedule-checkbox:checked').length;
+        const button = document.getElementById('deleteSelectedRecurring');
+        const countSpan = document.getElementById('recurringSelectedCount');
+
+        if (!button || !countSpan) return;
+
+        if (checked > 0) {
+            button.style.display = 'inline-flex';
+            button.style.alignItems = 'center';
+            button.style.gap = '6px';
+            countSpan.textContent = checked;
+        } else {
+            button.style.display = 'none';
+            countSpan.textContent = '0';
         }
     }
+
+    function syncRecurringSelectionUI() {
+        const selectAll = document.getElementById('selectAllRecurring');
+        if (selectAll) {
+            selectAll.checked = false;
+        }
+        updateRecurringDeleteButton();
+    }
+
+    window.afterRowDelete = function () {
+        syncRecurringSelectionUI();
+    };
+
+    async function deleteSelectedRecurringSchedules() {
+        const checkboxes = document.querySelectorAll('.recurring-schedule-checkbox:checked');
+        const ids = Array.from(checkboxes).map(cb => cb.value);
+
+        if (ids.length === 0) return;
+        if (!confirm(`${ids.length} planı silmek istediğinize emin misiniz?`)) return;
+
+        try {
+            const response = await fetch('/api/schedules/recurring/delete-batch', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ids })
+            });
+            const data = await response.json().catch(() => ({}));
+
+            if (response.ok && data.success) {
+                showToast(data.message || `${ids.length} plan silindi`, 'success');
+                window.location.reload();
+                return;
+            }
+
+            showToast(data.message || 'Planlar silinemedi', 'error');
+        } catch (error) {
+            console.error('Recurring batch delete error:', error);
+            showToast('Planlar silinemedi', 'error');
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', function () {
+        flatpickr('.time-picker', {
+            enableTime: true,
+            noCalendar: true,
+            dateFormat: 'H:i',
+            time_24hr: true,
+            locale: 'tr',
+            minuteIncrement: 1,
+            allowInput: true,
+            disableMobile: 'true'
+        });
+
+        toggleScheduleType();
+        updateRecurringDeleteButton();
+    });
 </script>
 {% endblock %}

@@ -541,6 +541,23 @@
         }
     }
 
+    function syncLibrarySelectionUI() {
+        const selectAllMusic = document.getElementById('selectAllMusic');
+        const selectAllAnnouncement = document.getElementById('selectAllAnnouncement');
+        if (selectAllMusic) {
+            selectAllMusic.checked = false;
+        }
+        if (selectAllAnnouncement) {
+            selectAllAnnouncement.checked = false;
+        }
+        updateDeleteButton('music');
+        updateDeleteButton('announcement');
+    }
+
+    window.afterRowDelete = function () {
+        syncLibrarySelectionUI();
+    };
+
     async function deleteSelected(type) {
         const checkboxes = document.querySelectorAll('.' + type + '-checkbox:checked');
         const ids = Array.from(checkboxes).map(cb => cb.value);
@@ -548,18 +565,24 @@
         if (ids.length === 0) return;
         if (!confirm(`${ids.length} dosyayı silmek istediğinize emin misiniz?`)) return;
 
-        let deletedCount = 0;
-        for (const id of ids) {
-            try {
-                const response = await fetch(`/api/media/${id}/delete`, { method: 'POST' });
-                if (response.ok) deletedCount++;
-            } catch (e) {
-                console.error('Delete error:', e);
-            }
-        }
+        try {
+            const response = await fetch('/api/media/delete-batch', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ids })
+            });
+            const data = await response.json().catch(() => ({}));
 
-        if (deletedCount > 0) {
-            location.reload();
+            if (response.ok && data.success) {
+                showToast(data.message || `${ids.length} dosya silindi`, 'success');
+                location.reload();
+                return;
+            }
+
+            showToast(data.message || 'Dosyalar silinemedi', 'error');
+        } catch (e) {
+            console.error('Batch delete error:', e);
+            showToast('Dosyalar silinemedi', 'error');
         }
     }
 
