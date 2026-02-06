@@ -89,10 +89,6 @@ class Scheduler:
             False  # Idempotency: prevent multiple simultaneous restores
         )
         self._restore_target_state: Optional[dict] = None
-        # Track currently playing scheduled media to skip overlapping plans safely
-        self._scheduled_playback_lock = threading.Lock()
-        self._scheduled_playback_in_progress: bool = False
-        self._scheduled_playback_meta: Optional[dict] = None
         # Config caching to reduce disk I/O
         self._config_cache: Optional[dict] = None
         self._config_cache_time: float = 0
@@ -115,16 +111,6 @@ class Scheduler:
         if self._thread:
             self._thread.join(timeout=5)
         logger.info("Scheduler stopped")
-
-    def clear_resume_intent(self):
-        """Clear deferred resume states (used by manual stop flow)."""
-        self._prayer_pause_state = None
-        self._working_hours_pause_state = None
-        with self._restore_lock:
-            self._restore_target_state = None
-        with self._scheduled_playback_lock:
-            self._scheduled_playback_in_progress = False
-            self._scheduled_playback_meta = None
 
     def _get_cached_config(self) -> dict:
         """Get config with TTL caching to reduce disk I/O."""
@@ -168,44 +154,6 @@ class Scheduler:
             "db_active": db_active,
             "memory_active": memory_active,
         }
-
-    def _sync_scheduled_playback_state(self, player) -> None:
-        """Clear stale scheduled-playback marker after source changes/end."""
-        with self._scheduled_playback_lock:
-            if not self._scheduled_playback_in_progress:
-                return
-
-            current_file = getattr(player, "current_file", None)
-            tracked_file = None
-            if self._scheduled_playback_meta:
-                tracked_file = self._scheduled_playback_meta.get("filepath")
-
-            # Scheduled playback is done if player stopped OR source changed.
-            source_changed = bool(
-                current_file and tracked_file and os.path.abspath(current_file) != os.path.abspath(tracked_file)
-            )
-            if (not player.is_playing) or source_changed:
-                self._scheduled_playback_in_progress = False
-                self._scheduled_playback_meta = None
-
-    def _mark_scheduled_playback_start(
-        self, schedule_id: int, source_type: str, filepath: str, is_one_time: bool
-    ) -> None:
-        with self._scheduled_playback_lock:
-            self._scheduled_playback_in_progress = True
-            self._scheduled_playback_meta = {
-                "schedule_id": schedule_id,
-                "source_type": source_type,
-                "is_one_time": bool(is_one_time),
-                "filepath": filepath,
-                "filename": os.path.basename(filepath),
-                "started_at": datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
-            }
-
-    def _is_scheduled_playback_active(self, player) -> bool:
-        self._sync_scheduled_playback_state(player)
-        with self._scheduled_playback_lock:
-            return self._scheduled_playback_in_progress and bool(player.is_playing)
 
     def _handle_prayer_time(self, config: dict, player) -> bool:
         """Handle prayer time check and playlist pause/resume.
@@ -284,11 +232,7 @@ class Scheduler:
                     loop=state["loop"],
                     active=True,
                 )
-                resumed = player.play_next()
-                log_prayer(
-                    "resume_ok" if resumed else "resume_failed",
-                    {"index": state["index"], "tracks": len(state["playlist"])},
-                )
+                player.play_next()
 
         return False  # Continue with rest of loop
 
@@ -369,11 +313,7 @@ class Scheduler:
                         loop=state["loop"],
                         active=True,
                     )
-                    resumed = player.play_next()
-                    log_schedule(
-                        "working_hours_resume_ok" if resumed else "working_hours_resume_failed",
-                        {"index": state["index"], "tracks": len(state["playlist"])},
-                    )
+                    player.play_next()
 
         return outside_working_hours
 
@@ -383,7 +323,6 @@ class Scheduler:
             try:
                 config = self._get_cached_config()
                 player = get_player()
-                self._sync_scheduled_playback_state(player)
 
                 # 1. Prayer time check - highest priority, stops EVERYTHING
                 if self._handle_prayer_time(config, player):
@@ -548,29 +487,6 @@ class Scheduler:
         if not is_within_working_hours(config):
             return
 
-        if self._is_scheduled_playback_active(player):
-            blocked_by = {}
-            with self._scheduled_playback_lock:
-                blocked_by = dict(self._scheduled_playback_meta or {})
-            logger.warning(
-                "Plan overlap detected, skipping: %s (blocked_by=%s)",
-                os.path.basename(filepath),
-                blocked_by.get("filename", "scheduled_media"),
-            )
-            log_schedule(
-                "plan_overlap_skip",
-                {
-                    "schedule_id": schedule_id,
-                    "source_type": source_type,
-                    "filename": os.path.basename(filepath),
-                    "blocked_by_schedule_id": blocked_by.get("schedule_id"),
-                    "blocked_by_file": blocked_by.get("filename"),
-                },
-            )
-            # Keep one-time plans pending during overlap window; scheduler retries
-            # on next tick instead of deciding too early with "overlap".
-            return
-
         # is_announcement is now passed from caller based on media_type from database
         resume_state = self._resolve_playlist_resume_state(player)
         playlist_was_active = resume_state["active"]
@@ -609,13 +525,6 @@ class Scheduler:
             f"[source] {source_type} play -> {os.path.basename(filepath)} (schedule_id={schedule_id})"
         )
         success = player.play(filepath, preserve_playlist=playlist_was_active)
-        if success:
-            self._mark_scheduled_playback_start(
-                schedule_id=schedule_id,
-                source_type=source_type,
-                filepath=filepath,
-                is_one_time=is_one_time,
-            )
 
         if success and playlist_was_active and playlist_files:
             restore_state = {

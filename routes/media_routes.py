@@ -92,15 +92,6 @@ def get_audio_duration(file_path: str) -> int:
     return 0
 
 
-def _remove_file_safely(file_path: str) -> None:
-    """Best-effort file removal helper."""
-    try:
-        if file_path and os.path.exists(file_path):
-            os.remove(file_path)
-    except OSError:
-        pass
-
-
 def has_audio_stream(file_path: str) -> bool:
     """Return True if ffprobe can detect at least one audio stream."""
     try:
@@ -220,14 +211,6 @@ def api_media_upload():
                     )
                     return redirect(url_for("library"))
 
-                if not has_audio_stream(mp3_filepath):
-                    _remove_file_safely(mp3_filepath)
-                    flash(
-                        f"{original_filename} dönüştürüldü ama ses akışı doğrulanamadı.",
-                        "error",
-                    )
-                    return redirect(url_for("library"))
-
                 duration = get_audio_duration(mp3_filepath)
                 db.add_media_file(mp3_filename, mp3_filepath, media_type, duration)
                 log_web("upload", {"filename": mp3_filename, "media_type": media_type})
@@ -258,8 +241,7 @@ def api_media_upload():
                 os.remove(temp_path)
     else:
         return _flash_redirect(
-            "Geçersiz dosya türü. Kabul edilen: MP3, WAV, OGG, AIFF, FLAC, M4A, WMA, MP2. "
-            "Uygun formatlar otomatik MP3'e dönüştürülür.",
+            "Geçersiz dosya türü. Kabul edilen: MP3, WAV, OGG, AIFF, FLAC, M4A, WMA, MP2",
             "error",
             "library",
         )
