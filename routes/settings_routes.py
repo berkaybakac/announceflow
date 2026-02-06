@@ -3,6 +3,7 @@ AnnounceFlow - Settings Routes
 API endpoints for settings management (credentials, working hours, prayer times).
 """
 import logging
+import re
 from flask import Blueprint, request, jsonify
 from services.config_service import load_config, save_config
 from utils.helpers import login_required, _flash_redirect
@@ -11,6 +12,13 @@ from utils.helpers import login_required, _flash_redirect
 settings_bp = Blueprint("settings", __name__)
 
 logger = logging.getLogger(__name__)
+
+
+def _is_valid_hhmm(value: str) -> bool:
+    """Validate HH:MM (24h) format."""
+    if not isinstance(value, str):
+        return False
+    return bool(re.match(r"^([01]\d|2[0-3]):([0-5]\d)$", value))
 
 
 @settings_bp.route("/api/settings/credentials", methods=["POST"])
@@ -60,11 +68,20 @@ def api_get_districts():
 def api_update_working_hours():
     """Update working hours settings."""
     config = load_config()
+    start = request.form.get("working_hours_start", "09:00").strip()
+    end = request.form.get("working_hours_end", "22:00").strip()
+
+    if not _is_valid_hhmm(start) or not _is_valid_hhmm(end):
+        return _flash_redirect(
+            "Saat formatı geçersiz (Doğru format: HH:MM, örn: 09:00)",
+            "error",
+            "settings",
+        )
 
     # Checkbox sends '1' when checked, missing when unchecked
     config["working_hours_enabled"] = "working_hours_enabled" in request.form
-    config["working_hours_start"] = request.form.get("working_hours_start", "09:00")
-    config["working_hours_end"] = request.form.get("working_hours_end", "22:00")
+    config["working_hours_start"] = start
+    config["working_hours_end"] = end
 
     save_config(config)
     return _flash_redirect(

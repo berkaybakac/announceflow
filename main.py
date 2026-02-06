@@ -7,6 +7,7 @@ import sys
 import logging
 import signal
 import time
+import socket
 from logging.handlers import RotatingFileHandler
 
 # Add current directory to path
@@ -17,6 +18,32 @@ from scheduler import get_scheduler, is_within_working_hours
 from player import get_player
 from logger import log_system, log_error
 from services.config_service import load_config
+
+
+def _resolve_web_port(config: dict) -> int:
+    """Resolve web server port from config with safe fallback."""
+    raw = config.get("web_port", 5001)
+    try:
+        port = int(raw)
+        if port < 1 or port > 65535:
+            raise ValueError("out of range")
+        return port
+    except (TypeError, ValueError):
+        logging.getLogger(__name__).warning(
+            f"Invalid web_port={raw!r}; falling back to 5001"
+        )
+        return 5001
+
+
+def _is_port_available(port: int) -> bool:
+    """Return True if localhost port is available for binding."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            sock.bind(("0.0.0.0", port))
+            return True
+        except OSError:
+            return False
 
 
 def setup_logging():
@@ -81,8 +108,8 @@ def main():
         playlist = playlist_state["playlist"]
         index = playlist_state.get("index", 0)
         loop = playlist_state.get("loop", True)
-        config = load_config()
-        within_hours = is_within_working_hours(config)
+        startup_config = load_config()
+        within_hours = is_within_working_hours(startup_config)
 
         # Filter out non-existent files
         valid_playlist = [f for f in playlist if os.path.exists(f)]
@@ -143,8 +170,22 @@ def main():
     signal.signal(signal.SIGTERM, graceful_exit)
 
     # Start web panel
-    logger.info("Web panel başlatılıyor (Port 5001)...")
-    logger.info("Tarayıcıda açın: http://localhost:5001")
+    runtime_config = load_config()
+    web_port = _resolve_web_port(runtime_config)
+    if not _is_port_available(web_port):
+        if web_port != 5001 and _is_port_available(5001):
+            logger.warning(
+                f"Port {web_port} kullanımda; güvenli fallback olarak 5001 seçildi."
+            )
+            web_port = 5001
+        else:
+            logger.error(
+                f"Port {web_port} kullanımda ve fallback portu da uygun değil. Başlatma iptal edildi."
+            )
+            sys.exit(1)
+
+    logger.info(f"Web panel başlatılıyor (Port {web_port})...")
+    logger.info(f"Tarayıcıda açın: http://localhost:{web_port}")
     logger.info("-" * 50)
 
     # Import and run web panel
@@ -154,7 +195,7 @@ def main():
 
     if dev_reload:
         logger.warning("Dev auto-reload açık (ANNOUNCEFLOW_DEV_RELOAD=1).")
-        app.run(host="0.0.0.0", port=5001, debug=True, use_reloader=True)
+        app.run(host="0.0.0.0", port=web_port, debug=True, use_reloader=True)
     else:
         try:
             from waitress import serve
@@ -163,7 +204,7 @@ def main():
             serve(
                 app,
                 host="0.0.0.0",
-                port=5001,
+                port=web_port,
                 threads=16,
                 connection_limit=200,
                 channel_timeout=10,
@@ -171,7 +212,7 @@ def main():
             )
         except ImportError:
             logger.warning("Waitress bulunamadı, Flask development server kullanılıyor...")
-            app.run(host="0.0.0.0", port=5001, debug=False)
+            app.run(host="0.0.0.0", port=web_port, debug=False)
 
 
 if __name__ == "__main__":

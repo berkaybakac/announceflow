@@ -10,15 +10,19 @@ from werkzeug.utils import secure_filename
 import database as db
 from logger import log_web
 from utils.helpers import login_required, _flash_redirect
+from services.config_service import load_config
 
 
 media_bp = Blueprint("media", __name__)
 
 
 # Media constants
-MEDIA_FOLDER = "media"
+MEDIA_FOLDER = str(load_config().get("media_folder", "media")).strip() or "media"
 ALLOWED_EXTENSIONS = {"mp3", "wav", "ogg", "aiff", "aif", "flac", "m4a", "wma", "mp2"}
 NEEDS_CONVERSION = {"wav", "ogg", "aiff", "aif", "flac", "m4a", "wma", "mp2"}
+
+os.makedirs(os.path.join(MEDIA_FOLDER, "music"), exist_ok=True)
+os.makedirs(os.path.join(MEDIA_FOLDER, "announcements"), exist_ok=True)
 
 
 def allowed_file(filename):

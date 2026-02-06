@@ -2,8 +2,63 @@
 """AnnounceFlow API Test Script - Production Readiness Check"""
 import requests
 import sys
+import os
+import json
 
-BASE_URL = "http://localhost:5001"
+
+def _load_local_config() -> dict:
+    try:
+        with open("config.json", "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+_LOCAL_CONFIG = _load_local_config()
+
+
+def _resolve_base_url() -> str:
+    candidates = []
+    for raw in [
+        os.environ.get("ANNOUNCEFLOW_WEB_PORT"),
+        _LOCAL_CONFIG.get("web_port"),
+        5001,
+    ]:
+        try:
+            port = int(raw)
+            if 1 <= port <= 65535 and port not in candidates:
+                candidates.append(port)
+        except (TypeError, ValueError):
+            continue
+
+    if not candidates:
+        candidates = [5001]
+
+    for port in candidates:
+        url = f"http://localhost:{port}"
+        try:
+            r = requests.get(f"{url}/api/health", timeout=2)
+            data = r.json() if r.headers.get("content-type", "").startswith("application/json") else {}
+            if r.status_code == 200 and data.get("status") == "ok":
+                return url
+        except Exception:
+            continue
+
+    return f"http://localhost:{candidates[0]}"
+
+
+def _resolve_credentials() -> tuple[str, str]:
+    username = os.environ.get(
+        "ANNOUNCEFLOW_TEST_USERNAME", _LOCAL_CONFIG.get("admin_username", "admin")
+    )
+    password = os.environ.get(
+        "ANNOUNCEFLOW_TEST_PASSWORD", _LOCAL_CONFIG.get("admin_password", "admin123")
+    )
+    return username, password
+
+
+BASE_URL = _resolve_base_url()
+TEST_USERNAME, TEST_PASSWORD = _resolve_credentials()
 SESSION = requests.Session()
 
 
@@ -24,7 +79,7 @@ def test_login():
     """Login calisiyor mu?"""
     r = SESSION.post(
         f"{BASE_URL}/login",
-        data={"username": "admin", "password": "admin123"},
+        data={"username": TEST_USERNAME, "password": TEST_PASSWORD},
         allow_redirects=False,
         timeout=5,
     )
@@ -140,7 +195,7 @@ if __name__ == "__main__":
             print(f"✗ FAILED: {e}")
             failed += 1
         except requests.exceptions.ConnectionError:
-            print(f"✗ FAILED: Baglanti kurulamadi - uygulama calisiyor mu?")
+            print("✗ FAILED: Baglanti kurulamadi - uygulama calisiyor mu?")
             failed += 1
         except Exception as e:
             print(f"✗ FAILED: {type(e).__name__}: {e}")

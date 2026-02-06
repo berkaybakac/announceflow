@@ -588,11 +588,29 @@ class Scheduler:
 _scheduler_instance: Optional[Scheduler] = None
 
 
+def _resolve_scheduler_interval_seconds() -> int:
+    """Resolve scheduler loop interval from config safely."""
+    config = load_config()
+    raw = config.get("scheduler_interval_seconds", 10)
+    try:
+        value = int(raw)
+        if value < 1:
+            raise ValueError("must be >= 1")
+        return value
+    except (TypeError, ValueError):
+        logger.warning(
+            f"Invalid scheduler_interval_seconds={raw!r}; falling back to 10 seconds"
+        )
+        return 10
+
+
 def get_scheduler() -> Scheduler:
     """Get the singleton scheduler instance."""
     global _scheduler_instance
     if _scheduler_instance is None:
-        _scheduler_instance = Scheduler()
+        _scheduler_instance = Scheduler(
+            check_interval_seconds=_resolve_scheduler_interval_seconds()
+        )
     return _scheduler_instance
 
 

@@ -168,6 +168,20 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
+### Security & Config (Recommended)
+
+```bash
+# Create local config from example
+cp config.example.json config.json
+
+# (Optional but recommended) Create local .env for secret key
+cp .env.example .env
+```
+
+- Update `config.json` admin credentials before first use.
+- `FLASK_SECRET_KEY` tanımlanmazsa uygulama ilk açılışta otomatik üretip kaydeder.
+- Do not commit real `config.json` or `.env` to GitHub.
+
 ### Step 4: Configure Audio Output
 
 ```bash
