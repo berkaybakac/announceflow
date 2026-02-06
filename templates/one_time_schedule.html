@@ -64,7 +64,7 @@
 
             <div class="form-group" style="margin: 0;">
                 <label class="form-label">Neden/Açıklama</label>
-                <input type="text" class="form-input" name="reason" placeholder="Örn: Cumhuriyet bayramı anonsu">
+                <input type="text" class="form-input" name="reason" placeholder="Örn: Bayram">
             </div>
         </div>
 
@@ -99,21 +99,25 @@
             </svg>
             Planlanan Müzikler
         </h3>
-        {% if music_schedules %}
-        <button type="button" class="btn btn-danger btn-sm" onclick="deleteAllOneTimeSchedules('music')"
-                style="display: inline-flex; align-items: center; gap: 6px;">
-            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 14px; height: 14px;">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084A2.25 2.25 0 015.84 19.673L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0A48.11 48.11 0 017.5 5.393m7.5 0V4.5A2.25 2.25 0 0012.75 2.25h-1.5A2.25 2.25 0 009 4.5v.893m6 0A48.667 48.667 0 009 5.393" />
-            </svg>
-            Hepsini Sil
-        </button>
-        {% endif %}
     </div>
 
     {% if music_schedules %}
+    <div style="margin-bottom: 12px; display: flex; gap: 12px; align-items: center;">
+        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+            <input type="checkbox" id="selectAllOneTimeMusic" onchange="toggleSelectAllOneTime('music')">
+            <span style="color: var(--text-muted);">Tümünü Seç</span>
+        </label>
+        <button class="btn btn-danger btn-sm" onclick="deleteSelectedOneTimeSchedules('music')" id="deleteSelectedOneTimeMusic" style="display: none;">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 14px; height: 14px;">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084A2.25 2.25 0 015.84 19.673L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0A48.11 48.11 0 017.5 5.393m7.5 0V4.5A2.25 2.25 0 0012.75 2.25h-1.5A2.25 2.25 0 009 4.5v.893m6 0A48.667 48.667 0 009 5.393" />
+            </svg>
+            Seçilenleri Sil (<span id="musicOneTimeSelectedCount">0</span>)
+        </button>
+    </div>
     <table class="table" id="musicSchedulesTable">
         <thead>
             <tr>
+                <th style="width: 40px;"></th>
                 <th>Dosya</th>
                 <th>Planlanan Zaman</th>
                 <th>Neden</th>
@@ -124,6 +128,9 @@
         <tbody>
             {% for schedule in music_schedules %}
             <tr data-schedule-id="{{ schedule.id }}">
+                <td>
+                    <input type="checkbox" class="one-time-schedule-checkbox music-one-time-schedule-checkbox" value="{{ schedule.id }}" onchange="updateOneTimeDeleteButton('music')">
+                </td>
                 <td>
                     <span title="Müzik" style="display: inline-flex; vertical-align: middle; margin-right: 6px;">
                         <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 16px; height: 16px; color: var(--primary);">
@@ -189,21 +196,25 @@
             </svg>
             Planlanan Anonslar
         </h3>
-        {% if announcement_schedules %}
-        <button type="button" class="btn btn-danger btn-sm" onclick="deleteAllOneTimeSchedules('announcement')"
-                style="display: inline-flex; align-items: center; gap: 6px;">
-            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 14px; height: 14px;">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084A2.25 2.25 0 015.84 19.673L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0A48.11 48.11 0 017.5 5.393m7.5 0V4.5A2.25 2.25 0 0012.75 2.25h-1.5A2.25 2.25 0 009 4.5v.893m6 0A48.667 48.667 0 009 5.393" />
-            </svg>
-            Hepsini Sil
-        </button>
-        {% endif %}
     </div>
 
     {% if announcement_schedules %}
+    <div style="margin-bottom: 12px; display: flex; gap: 12px; align-items: center;">
+        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+            <input type="checkbox" id="selectAllOneTimeAnnouncement" onchange="toggleSelectAllOneTime('announcement')">
+            <span style="color: var(--text-muted);">Tümünü Seç</span>
+        </label>
+        <button class="btn btn-danger btn-sm" onclick="deleteSelectedOneTimeSchedules('announcement')" id="deleteSelectedOneTimeAnnouncement" style="display: none;">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 14px; height: 14px;">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084A2.25 2.25 0 015.84 19.673L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0A48.11 48.11 0 017.5 5.393m7.5 0V4.5A2.25 2.25 0 0012.75 2.25h-1.5A2.25 2.25 0 009 4.5v.893m6 0A48.667 48.667 0 009 5.393" />
+            </svg>
+            Seçilenleri Sil (<span id="announcementOneTimeSelectedCount">0</span>)
+        </button>
+    </div>
     <table class="table" id="announcementSchedulesTable">
         <thead>
             <tr>
+                <th style="width: 40px;"></th>
                 <th>Dosya</th>
                 <th>Planlanan Zaman</th>
                 <th>Neden</th>
@@ -214,6 +225,9 @@
         <tbody>
             {% for schedule in announcement_schedules %}
             <tr data-schedule-id="{{ schedule.id }}">
+                <td>
+                    <input type="checkbox" class="one-time-schedule-checkbox announcement-one-time-schedule-checkbox" value="{{ schedule.id }}" onchange="updateOneTimeDeleteButton('announcement')">
+                </td>
                 <td>
                     <span title="Anons" style="display: inline-flex; vertical-align: middle; margin-right: 6px;">
                         <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 16px; height: 16px; color: var(--warning);">
@@ -373,40 +387,79 @@
         updateWorkingHoursWarning();
     });
 
-    async function deleteAllOneTimeSchedules(type) {
-        const tableId = type === 'music' ? 'musicSchedulesTable' : 'announcementSchedulesTable';
-        const rows = document.querySelectorAll(`#${tableId} tbody tr[data-schedule-id]`);
-        const ids = Array.from(rows).map(r => r.getAttribute('data-schedule-id')).filter(Boolean);
+    function toggleSelectAllOneTime(type) {
+        const selectAll = document.getElementById(
+            type === 'music' ? 'selectAllOneTimeMusic' : 'selectAllOneTimeAnnouncement'
+        );
+        const checkboxes = document.querySelectorAll(`.${type}-one-time-schedule-checkbox`);
+        checkboxes.forEach(cb => {
+            cb.checked = selectAll.checked;
+        });
+        updateOneTimeDeleteButton(type);
+    }
 
-        if (ids.length === 0) {
-            return;
-        }
+    function updateOneTimeDeleteButton(type) {
+        const checked = document.querySelectorAll(`.${type}-one-time-schedule-checkbox:checked`).length;
+        const buttonId = type === 'music' ? 'deleteSelectedOneTimeMusic' : 'deleteSelectedOneTimeAnnouncement';
+        const countId = type === 'music' ? 'musicOneTimeSelectedCount' : 'announcementOneTimeSelectedCount';
+        const button = document.getElementById(buttonId);
+        const countSpan = document.getElementById(countId);
 
-        if (!confirm(`${ids.length} planı toplu olarak silmek istediğinize emin misiniz?`)) {
-            return;
-        }
+        if (!button || !countSpan) return;
 
-        let deleted = 0;
-        for (const id of ids) {
-            try {
-                const response = await fetch(`/api/schedules/one-time/${id}/delete`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' }
-                });
-                const data = await response.json().catch(() => ({}));
-                if (response.ok && data.success) {
-                    deleted++;
-                }
-            } catch (error) {
-                console.error('Bulk delete error:', error);
-            }
-        }
-
-        if (deleted > 0) {
-            showToast(`${deleted} plan silindi.`, 'success');
-            window.location.reload();
+        if (checked > 0) {
+            button.style.display = 'inline-flex';
+            button.style.alignItems = 'center';
+            button.style.gap = '6px';
+            countSpan.textContent = checked;
         } else {
-            showToast('Planlar silinemedi.', 'error');
+            button.style.display = 'none';
+            countSpan.textContent = '0';
+        }
+    }
+
+    function syncOneTimeSelectionUI() {
+        const selectAllMusic = document.getElementById('selectAllOneTimeMusic');
+        const selectAllAnnouncement = document.getElementById('selectAllOneTimeAnnouncement');
+        if (selectAllMusic) {
+            selectAllMusic.checked = false;
+        }
+        if (selectAllAnnouncement) {
+            selectAllAnnouncement.checked = false;
+        }
+        updateOneTimeDeleteButton('music');
+        updateOneTimeDeleteButton('announcement');
+    }
+
+    window.afterRowDelete = function () {
+        syncOneTimeSelectionUI();
+    };
+
+    async function deleteSelectedOneTimeSchedules(type) {
+        const checkboxes = document.querySelectorAll(`.${type}-one-time-schedule-checkbox:checked`);
+        const ids = Array.from(checkboxes).map(cb => cb.value);
+
+        if (ids.length === 0) return;
+        if (!confirm(`${ids.length} planı silmek istediğinize emin misiniz?`)) return;
+
+        try {
+            const response = await fetch('/api/schedules/one-time/delete-batch', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ids })
+            });
+            const data = await response.json().catch(() => ({}));
+
+            if (response.ok && data.success) {
+                showToast(data.message || `${ids.length} plan silindi`, 'success');
+                window.location.reload();
+                return;
+            }
+
+            showToast(data.message || 'Planlar silinemedi', 'error');
+        } catch (error) {
+            console.error('One-time batch delete error:', error);
+            showToast('Planlar silinemedi', 'error');
         }
     }
 </script>

@@ -155,6 +155,7 @@ def init_database():
             end_time TEXT,
             interval_minutes INTEGER DEFAULT 0,
             specific_times TEXT,
+            reason TEXT,
             is_active INTEGER DEFAULT 1,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (media_id) REFERENCES media_files (id) ON DELETE CASCADE
@@ -237,6 +238,13 @@ def _run_migrations():
         )
         conn.commit()
 
+    # Migration: Add 'reason' column to recurring_schedules if it doesn't exist
+    try:
+        cursor.execute("SELECT reason FROM recurring_schedules LIMIT 1")
+    except sqlite3.OperationalError:
+        cursor.execute("ALTER TABLE recurring_schedules ADD COLUMN reason TEXT")
+        conn.commit()
+
     conn.close()
 
 
@@ -299,6 +307,11 @@ def delete_one_time_schedule(schedule_id: int) -> bool:
     return _schedule_repo.delete_one_time_schedule(schedule_id)
 
 
+def delete_one_time_schedules(schedule_ids: List[int]) -> int:
+    """Delete multiple one-time schedules."""
+    return _schedule_repo.delete_one_time_schedules(schedule_ids)
+
+
 # Recurring Schedules (6 functions)
 def add_recurring_schedule(
     media_id: int,
@@ -307,10 +320,17 @@ def add_recurring_schedule(
     end_time: Optional[str] = None,
     interval_minutes: int = 0,
     specific_times: Optional[List[str]] = None,
+    reason: Optional[str] = None,
 ) -> int:
     """Add a recurring schedule."""
     return _schedule_repo.add_recurring_schedule(
-        media_id, days_of_week, start_time, end_time, interval_minutes, specific_times
+        media_id,
+        days_of_week,
+        start_time,
+        end_time,
+        interval_minutes,
+        specific_times,
+        reason,
     )
 
 
@@ -332,6 +352,11 @@ def toggle_recurring_schedule(schedule_id: int, is_active: bool) -> bool:
 def delete_recurring_schedule(schedule_id: int) -> bool:
     """Delete a recurring schedule."""
     return _schedule_repo.delete_recurring_schedule(schedule_id)
+
+
+def delete_recurring_schedules(schedule_ids: List[int]) -> int:
+    """Delete multiple recurring schedules."""
+    return _schedule_repo.delete_recurring_schedules(schedule_ids)
 
 
 def delete_all_recurring_announcements() -> int:

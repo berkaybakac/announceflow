@@ -180,25 +180,100 @@ def api_media_delete(media_id):
     """Delete a media file."""
     media = db.get_media_file(media_id)
 
-    if media:
-        # Delete file from disk
+    if not media:
+        return jsonify({"success": False, "message": "Dosya bulunamadı"}), 404
+
+    # Delete file from disk
+    try:
+        if os.path.exists(media["filepath"]):
+            os.remove(media["filepath"])
+    except OSError:
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "message": "Dosya diskten silinemedi. Daha sonra tekrar deneyin.",
+                }
+            ),
+            500,
+        )
+
+    # Delete from database
+    deleted = db.delete_media_file(media_id)
+    if not deleted:
+        return jsonify({"success": False, "message": "Dosya bulunamadı"}), 404
+
+    log_web("delete", {"media_id": media_id, "filename": media["filename"]})
+    return jsonify({"success": True, "message": "Dosya silindi"})
+
+
+@media_bp.route("/api/media/delete-batch", methods=["POST"])
+@login_required
+def api_media_delete_batch():
+    """Delete multiple media files by IDs."""
+    data = request.get_json(silent=True) or {}
+    raw_ids = data.get("ids", [])
+
+    if not isinstance(raw_ids, list):
+        return jsonify({"success": False, "message": "Geçersiz istek formatı"}), 400
+
+    media_ids = []
+    for item in raw_ids:
+        try:
+            media_id = int(item)
+            if media_id > 0:
+                media_ids.append(media_id)
+        except (ValueError, TypeError):
+            continue
+
+    if not media_ids:
+        return jsonify({"success": False, "message": "Silinecek dosya seçilmedi"}), 400
+
+    unique_ids = sorted(set(media_ids))
+    deleted_count = 0
+    failed_count = 0
+    not_found_count = 0
+
+    for media_id in unique_ids:
+        media = db.get_media_file(media_id)
+        if not media:
+            not_found_count += 1
+            continue
+
         try:
             if os.path.exists(media["filepath"]):
                 os.remove(media["filepath"])
         except OSError:
-            return (
-                jsonify(
-                    {
-                        "success": False,
-                        "message": "Dosya diskten silinemedi. Daha sonra tekrar deneyin.",
-                    }
-                ),
-                500,
-            )
+            failed_count += 1
+            continue
 
-        # Delete from database
-        db.delete_media_file(media_id)
-        log_web("delete", {"media_id": media_id, "filename": media["filename"]})
-        return jsonify({"success": True, "message": "Dosya silindi"})
-    else:
-        return jsonify({"success": False, "message": "Dosya bulunamadı"}), 404
+        if db.delete_media_file(media_id):
+            deleted_count += 1
+            log_web("delete", {"media_id": media_id, "filename": media["filename"]})
+        else:
+            not_found_count += 1
+
+    if deleted_count == 0:
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "message": "Silinecek dosya bulunamadı",
+                    "deleted_count": 0,
+                    "failed_count": failed_count,
+                    "not_found_count": not_found_count,
+                }
+            ),
+            404,
+        )
+
+    return jsonify(
+        {
+            "success": True,
+            "message": f"{deleted_count} dosya silindi",
+            "deleted_count": deleted_count,
+            "failed_count": failed_count,
+            "not_found_count": not_found_count,
+            "requested_count": len(unique_ids),
+        }
+    )

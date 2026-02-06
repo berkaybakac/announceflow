@@ -88,6 +88,23 @@ class ScheduleRepository(BaseRepository):
         conn.close()
         return deleted
 
+    def delete_one_time_schedules(self, schedule_ids: List[int]) -> int:
+        """Delete multiple one-time schedules."""
+        if not schedule_ids:
+            return 0
+
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        placeholders = ",".join("?" for _ in schedule_ids)
+        cursor.execute(
+            f"DELETE FROM one_time_schedules WHERE id IN ({placeholders})",
+            tuple(schedule_ids),
+        )
+        deleted_count = cursor.rowcount
+        conn.commit()
+        conn.close()
+        return deleted_count
+
     # ============ RECURRING SCHEDULES ============
 
     def add_recurring_schedule(
@@ -98,14 +115,15 @@ class ScheduleRepository(BaseRepository):
         end_time: Optional[str] = None,
         interval_minutes: int = 0,
         specific_times: Optional[List[str]] = None,
+        reason: Optional[str] = None,
     ) -> int:
         """Add a recurring schedule."""
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute(
             """
-            INSERT INTO recurring_schedules (media_id, days_of_week, start_time, end_time, interval_minutes, specific_times)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO recurring_schedules (media_id, days_of_week, start_time, end_time, interval_minutes, specific_times, reason)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
         """,
             (
                 media_id,
@@ -114,6 +132,7 @@ class ScheduleRepository(BaseRepository):
                 end_time,
                 interval_minutes,
                 json.dumps(specific_times) if specific_times else None,
+                reason,
             ),
         )
         schedule_id = cursor.lastrowid or 0
@@ -194,6 +213,23 @@ class ScheduleRepository(BaseRepository):
         conn.commit()
         conn.close()
         return deleted
+
+    def delete_recurring_schedules(self, schedule_ids: List[int]) -> int:
+        """Delete multiple recurring schedules."""
+        if not schedule_ids:
+            return 0
+
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        placeholders = ",".join("?" for _ in schedule_ids)
+        cursor.execute(
+            f"DELETE FROM recurring_schedules WHERE id IN ({placeholders})",
+            tuple(schedule_ids),
+        )
+        deleted_count = cursor.rowcount
+        conn.commit()
+        conn.close()
+        return deleted_count
 
     def delete_all_recurring_announcements(self) -> int:
         """Delete all recurring announcement schedules (not music)."""

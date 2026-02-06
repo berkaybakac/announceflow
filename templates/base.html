@@ -1048,7 +1048,12 @@
                     if (elementToRemove) {
                         elementToRemove.style.transition = 'opacity 0.3s ease';
                         elementToRemove.style.opacity = '0';
-                        setTimeout(() => elementToRemove.remove(), 300);
+                        setTimeout(() => {
+                            elementToRemove.remove();
+                            if (typeof window.afterRowDelete === 'function') {
+                                window.afterRowDelete();
+                            }
+                        }, 300);
                     }
                 } else {
                     showToast(data.message || 'İşlem başarısız oldu', 'error');
