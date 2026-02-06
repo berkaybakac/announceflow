@@ -8,168 +8,34 @@
 <script src="https://npmcdn.com/flatpickr/dist/l10n/tr.js"></script>
 
 <div class="page-header">
-    <h1 class="page-title">⚙️ Ayarlar</h1>
+    <h1 class="page-title" style="display: inline-flex; align-items: center; gap: 10px;">
+        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 28px; height: 28px; color: var(--primary);">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M4.5 12a7.5 7.5 0 0012.75 5.303l2.098 2.099a.75.75 0 101.06-1.06l-2.098-2.099A7.5 7.5 0 104.5 12z" />
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 8.25v3.75l2.25 2.25" />
+        </svg>
+        Ayarlar
+    </h1>
     <p class="page-subtitle">Sistem ayarlarını yapılandırın</p>
-</div>
-
-<!-- Volume Control -->
-<div class="card animate-in">
-    <div class="card-header">
-        <h3 class="card-title">🔊 Ses Seviyesi</h3>
-        <span class="badge badge-primary" id="volumeBadge">{{ volume }}%</span>
-    </div>
-
-    <div style="padding: 20px 0;">
-        <div style="display: flex; align-items: center; gap: 20px;">
-            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 24px; height: 24px; color: var(--text-muted); flex-shrink: 0;">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M17.25 9.75L19.5 12m0 0l2.25 2.25M19.5 12l2.25-2.25M19.5 12l-2.25 2.25m-10.5-6l4.72-4.72a.75.75 0 011.28.531V19.94a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.506-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.395C2.806 8.757 3.63 8.25 4.51 8.25H6.75z" />
-            </svg>
-            <input type="range" class="volume-slider" id="mainVolumeSlider" min="0" max="100" value="{{ volume }}"
-                style="flex: 1;" onchange="updateVolume(this.value)">
-            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 24px; height: 24px; color: var(--text-secondary); flex-shrink: 0;">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M19.114 5.636a9 9 0 010 12.728M16.463 8.288a5.25 5.25 0 010 7.424M6.75 8.25l4.72-4.72a.75.75 0 011.28.53v15.88a.75.75 0 01-1.28.53l-4.72-4.72H4.51c-.88 0-1.704-.507-1.938-1.354A9.01 9.01 0 012.25 12c0-.83.112-1.633.322-2.396C2.806 8.756 3.63 8.25 4.51 8.25H6.75z" />
-            </svg>
-        </div>
-
-        <div
-            style="display: flex; justify-content: space-between; margin-top: 12px; color: var(--text-muted); font-size: 0.85rem;">
-            <span>0%</span>
-            <span>50%</span>
-            <span>100%</span>
-        </div>
-        <small style="color: var(--text-muted); margin-top: 8px; display: block; text-align: center;">0-9% = Sessiz |
-            10-100% = Pi4 için kalibre edilmiştir</small>
-    </div>
-
-    <div style="display: flex; gap: 12px; margin-top: 16px;">
-        <button class="btn btn-outline btn-sm" onclick="setQuickVolume(25)">25%</button>
-        <button class="btn btn-outline btn-sm" onclick="setQuickVolume(50)">50%</button>
-        <button class="btn btn-outline btn-sm" onclick="setQuickVolume(75)">75%</button>
-        <button class="btn btn-outline btn-sm" onclick="setQuickVolume(100)">100%</button>
-    </div>
-</div>
-
-<!-- System Status -->
-<div class="card animate-in">
-    <div class="card-header">
-        <h3 class="card-title">📊 Sistem Durumu</h3>
-    </div>
-
-    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px;">
-        <div style="text-align: center; padding: 20px; background: var(--bg-input); border-radius: 12px;">
-            <div style="margin-bottom: 8px; display: flex; justify-content: center;">
-                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 32px; height: 32px; color: var(--primary);">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 9l10.5-3m0 6.553v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 11-.99-3.467l2.31-.66a2.25 2.25 0 001.632-2.163zm0 0V2.25L9 5.25v10.303m0 0v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 01-.99-3.467l2.31-.66A2.25 2.25 0 009 15.553z" />
-                </svg>
-            </div>
-            <div style="font-size: 1.5rem; font-weight: 700; color: var(--primary);">{{ total_music }}</div>
-            <div style="color: var(--text-muted); font-size: 0.9rem;">Müzik Dosyası</div>
-        </div>
-
-        <div style="text-align: center; padding: 20px; background: var(--bg-input); border-radius: 12px;">
-            <div style="margin-bottom: 8px; display: flex; justify-content: center;">
-                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 32px; height: 32px; color: var(--warning);">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M10.34 15.84c-.688-.06-1.386-.09-2.09-.09H7.5a4.5 4.5 0 110-9h.75c.704 0 1.402-.03 2.09-.09m0 9.18c.253.962.584 1.892.985 2.783.247.55.06 1.21-.463 1.511l-.657.38c-.551.318-1.26.117-1.527-.461a20.845 20.845 0 01-1.44-4.282m3.102.069a18.03 18.03 0 01-.59-4.59c0-1.586.205-3.124.59-4.59m0 9.18a23.848 23.848 0 018.835 2.535M10.34 6.66a23.847 23.847 0 008.835-2.535m0 0A23.74 23.74 0 0018.795 3m.38 1.125a23.91 23.91 0 011.014 5.395m-1.014 8.855c-.118.38-.245.754-.38 1.125m.38-1.125a23.91 23.91 0 001.014-5.395m0-3.46c.495.413.811 1.035.811 1.73 0 .695-.316 1.317-.811 1.73m0-3.46a24.347 24.347 0 010 3.46" />
-                </svg>
-            </div>
-            <div style="font-size: 1.5rem; font-weight: 700; color: var(--warning);">{{ total_announcements }}</div>
-            <div style="color: var(--text-muted); font-size: 0.9rem;">Anons Dosyası</div>
-        </div>
-
-        <div style="text-align: center; padding: 20px; background: var(--bg-input); border-radius: 12px;">
-            <div style="margin-bottom: 8px; display: flex; justify-content: center;">
-                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 32px; height: 32px; color: var(--success);">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 012.25-2.25h13.5A2.25 2.25 0 0121 7.5v11.25m-18 0A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75m-18 0v-7.5A2.25 2.25 0 015.25 9h13.5A2.25 2.25 0 0121 11.25v7.5" />
-                </svg>
-            </div>
-            <div style="font-size: 1.5rem; font-weight: 700; color: var(--success);">{{ total_schedules }}</div>
-            <div style="color: var(--text-muted); font-size: 0.9rem;">Aktif Plan</div>
-        </div>
-    </div>
-</div>
-
-<!-- Scheduler Status -->
-<div class="card animate-in">
-    <div class="card-header">
-        <h3 class="card-title">⏰ Zamanlayıcı</h3>
-        <span class="badge badge-success">Çalışıyor</span>
-    </div>
-
-    <div style="color: var(--text-secondary);">
-        <p>Zamanlayıcı her 10 saniyede bir planları kontrol eder ve zamanı gelen dosyaları otomatik çalar.</p>
-
-        <div style="margin-top: 16px; padding: 16px; background: var(--bg-input); border-radius: 10px;">
-            <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
-                <span>Kontrol Aralığı:</span>
-                <strong>10 saniye</strong>
-            </div>
-            <div style="display: flex; justify-content: space-between;">
-                <span>Gecikme Toleransı:</span>
-                <strong>1 dakika</strong>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- System Limits -->
-<div class="card animate-in">
-    <div class="card-header">
-        <h3 class="card-title">📊 Sistem Limitleri</h3>
-    </div>
-
-    <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px;">
-        <div style="text-align: center; padding: 16px; background: var(--bg-input); border-radius: 10px;">
-            <div style="margin-bottom: 4px; display: flex; justify-content: center;">
-                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 24px; height: 24px; color: var(--primary);">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 7.5A2.25 2.25 0 016 5.25h12A2.25 2.25 0 0120.25 7.5v9A2.25 2.25 0 0118 18.75H6A2.25 2.25 0 013.75 16.5v-9z" />
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M7.5 9.75h9M7.5 14.25h3" />
-                </svg>
-            </div>
-            <div style="font-size: 1rem; font-weight: 700; color: var(--primary);">{{ system_stats.disk_free_gb }} GB
-            </div>
-            <div style="color: var(--text-muted); font-size: 0.85rem;">Boş Disk Alanı</div>
-        </div>
-
-        <div style="text-align: center; padding: 16px; background: var(--bg-input); border-radius: 10px;">
-            <div style="margin-bottom: 4px; display: flex; justify-content: center;">
-                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 24px; height: 24px; color: var(--success);">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 3v1.5M4.5 8.25H3m18 0h-1.5M4.5 12H3m18 0h-1.5m-15 3.75H3m18 0h-1.5M8.25 19.5V21M12 3v1.5m0 15V21m3.75-18v1.5m0 15V21m-9-1.5h10.5a2.25 2.25 0 002.25-2.25V6.75a2.25 2.25 0 00-2.25-2.25H6.75A2.25 2.25 0 004.5 6.75v10.5a2.25 2.25 0 002.25 2.25zm.75-12h9v9h-9v-9z" />
-                </svg>
-            </div>
-            <div style="font-size: 1rem; font-weight: 700; color: var(--success);">{{ system_stats.ram_free_mb }} MB
-            </div>
-            <div style="color: var(--text-muted); font-size: 0.85rem;">Boş Bellek (RAM)</div>
-        </div>
-
-        <div style="text-align: center; padding: 16px; background: var(--bg-input); border-radius: 10px;">
-            <div style="margin-bottom: 4px; display: flex; justify-content: center;">
-                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 24px; height: 24px; color: var(--warning);">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 9l10.5-3m0 6.553v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 11-.99-3.467l2.31-.66a2.25 2.25 0 001.632-2.163zm0 0V2.25L9 5.25v10.303m0 0v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 01-.99-3.467l2.31-.66A2.25 2.25 0 009 15.553z" />
-                </svg>
-            </div>
-            <div style="font-size: 1rem; font-weight: 700; color: var(--warning);">~{{ system_stats.estimated_songs }}
-            </div>
-            <div style="color: var(--text-muted); font-size: 0.85rem;">Tahmini Parça Kapasitesi</div>
-        </div>
-    </div>
-
-    <div style="margin-top: 16px; color: var(--text-muted); font-size: 0.9rem;">
-        <p>💡 <strong>Teknik Bilgi:</strong> Sistem kapasitesi cihazınızın anlık durumuna göre hesaplanmıştır. (1 Parça
-            ≈ 5MB olarak varsayılmıştır)</p>
-    </div>
 </div>
 
 <!-- Working Hours Settings -->
 <div class="card animate-in">
     <div class="card-header">
-        <h3 class="card-title">🕐 Çalışma Saatleri (Mesai)</h3>
-        <span class="badge" id="workingHoursBadge">{{ 'Aktif' if working_hours_enabled else 'Pasif' }}</span>
+        <h3 class="card-title" style="display: flex; align-items: center; gap: 8px;">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 20px; height: 20px; color: var(--primary);">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6l4 2m6-2a10 10 0 11-20 0 10 10 0 0120 0z" />
+            </svg>
+            Çalışma Saatleri (Mesai)
+        </h3>
+        <span class="badge {{ 'badge-success' if working_hours_enabled else 'badge-danger' }}" id="workingHoursBadge">
+            {{ 'Aktif' if working_hours_enabled else 'Pasif' }}
+        </span>
     </div>
 
     <form action="/api/settings/working-hours" method="POST">
         <div style="margin-bottom: 16px;">
             <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-                <input type="checkbox" name="working_hours_enabled" value="1" {{ 'checked' if working_hours_enabled
+                <input id="workingHoursToggle" type="checkbox" name="working_hours_enabled" value="1" {{ 'checked' if working_hours_enabled
                     else '' }} style="width: 20px; height: 20px;">
                 <span>Çalışma saatleri dışında sistemi sessizleştir</span>
             </label>
@@ -192,8 +58,12 @@
             </div>
         </div>
 
-        <button type="submit" class="btn btn-primary" style="margin-top: 16px;">
-            💾 Kaydet
+        <button type="submit" class="btn btn-primary" style="margin-top: 16px; display: inline-flex; align-items: center; gap: 8px;">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 18px; height: 18px;">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M17.25 3.75H6.75A2.25 2.25 0 004.5 6v12A2.25 2.25 0 006.75 20.25h10.5A2.25 2.25 0 0019.5 18V6a2.25 2.25 0 00-2.25-2.25z" />
+                <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 3.75v5.25h7.5V3.75M8.25 15h7.5" />
+            </svg>
+            Kaydet
         </button>
     </form>
 
@@ -205,7 +75,7 @@
                 dateFormat: "H:i",
                 time_24hr: true,
                 locale: "tr",
-                disableMobile: "true" // Force native picker on mobile to be avoided if we want strict 24h, but usually flatpickr mobile is better? Actually native mobile might show AM/PM. Let's force flatpickr.
+                disableMobile: "true"
             });
         });
     </script>
@@ -214,14 +84,21 @@
 <!-- Prayer Times Settings -->
 <div class="card animate-in">
     <div class="card-header">
-        <h3 class="card-title">🕌 Ezan Vakitleri</h3>
-        <span class="badge" id="prayerBadge">{{ 'Aktif' if prayer_times_enabled else 'Pasif' }}</span>
+        <h3 class="card-title" style="display: flex; align-items: center; gap: 8px;">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 20px; height: 20px; color: var(--warning);">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M3 20.25h18M4.5 20.25V10.5a1.5 1.5 0 011.5-1.5h12a1.5 1.5 0 011.5 1.5v9.75M9 20.25V12h6v8.25M8.25 9V6.75a3.75 3.75 0 117.5 0V9" />
+            </svg>
+            Ezan Vakitleri
+        </h3>
+        <span class="badge {{ 'badge-success' if prayer_times_enabled else 'badge-danger' }}" id="prayerBadge">
+            {{ 'Aktif' if prayer_times_enabled else 'Pasif' }}
+        </span>
     </div>
 
     <form action="/api/settings/prayer-times" method="POST">
         <div style="margin-bottom: 16px;">
             <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-                <input type="checkbox" name="prayer_times_enabled" value="1" {{ 'checked' if prayer_times_enabled
+                <input id="prayerTimesToggle" type="checkbox" name="prayer_times_enabled" value="1" {{ 'checked' if prayer_times_enabled
                     else '' }} style="width: 20px; height: 20px;">
                 <span>Ezan vakitlerinde sistemi sessizleştir</span>
             </label>
@@ -256,8 +133,12 @@
         </div>
         {% endif %}
 
-        <button type="submit" class="btn btn-primary" style="margin-top: 16px;" onclick="return validatePrayerForm()">
-            💾 Kaydet
+        <button type="submit" class="btn btn-primary" style="margin-top: 16px; display: inline-flex; align-items: center; gap: 8px;" onclick="return validatePrayerForm()">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 18px; height: 18px;">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M17.25 3.75H6.75A2.25 2.25 0 004.5 6v12A2.25 2.25 0 006.75 20.25h10.5A2.25 2.25 0 0019.5 18V6a2.25 2.25 0 00-2.25-2.25z" />
+                <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 3.75v5.25h7.5V3.75M8.25 15h7.5" />
+            </svg>
+            Kaydet
         </button>
     </form>
 </div>
@@ -265,11 +146,15 @@
 <!-- Admin Credentials -->
 <div class="card animate-in">
     <div class="card-header">
-        <h3 class="card-title">🔐 Yönetici Bilgileri</h3>
+        <h3 class="card-title" style="display: flex; align-items: center; gap: 8px;">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 20px; height: 20px; color: var(--primary);">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M16.5 10.5V7.875a4.125 4.125 0 10-8.25 0V10.5m-.75 0h9a2.25 2.25 0 012.25 2.25v6A2.25 2.25 0 0116.5 21h-9a2.25 2.25 0 01-2.25-2.25v-6a2.25 2.25 0 012.25-2.25z" />
+            </svg>
+            Yönetici Bilgileri
+        </h3>
     </div>
 
-    <form action="/api/settings/credentials" method="POST" id="credentialsForm"
-        onsubmit="return validatePasswordForm();">
+    <form action="/api/settings/credentials" method="POST" id="credentialsForm" onsubmit="return validatePasswordForm();">
         <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px;">
             <div class="form-group" style="margin: 0;">
                 <label class="form-label">Kullanıcı Adı</label>
@@ -278,61 +163,100 @@
 
             <div class="form-group" style="margin: 0;">
                 <label class="form-label">Yeni Şifre</label>
-                <input type="password" class="form-input" name="password" id="newPassword"
-                    placeholder="Değiştirmek için doldurun">
+                <input type="password" class="form-input" name="password" id="newPassword" placeholder="Değiştirmek için doldurun">
             </div>
 
             <div class="form-group" style="margin: 0;">
                 <label class="form-label">Şifre Tekrar</label>
-                <input type="password" class="form-input" name="password_confirm" id="confirmPassword"
-                    placeholder="Şifreyi tekrar girin">
+                <input type="password" class="form-input" name="password_confirm" id="confirmPassword" placeholder="Şifreyi tekrar girin">
             </div>
         </div>
 
         <div id="passwordError" style="color: var(--danger); margin-top: 8px; display: none;">
-            ⚠️ Şifreler eşleşmiyor!
+            Şifreler eşleşmiyor.
         </div>
 
-        <button type="submit" class="btn btn-primary" style="margin-top: 16px;">
-            💾 Kaydet
+        <button type="submit" class="btn btn-primary" style="margin-top: 16px; display: inline-flex; align-items: center; gap: 8px;">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 18px; height: 18px;">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M17.25 3.75H6.75A2.25 2.25 0 004.5 6v12A2.25 2.25 0 006.75 20.25h10.5A2.25 2.25 0 0019.5 18V6a2.25 2.25 0 00-2.25-2.25z" />
+                <path stroke-linecap="round" stroke-linejoin="round" d="M8.25 3.75v5.25h7.5V3.75M8.25 15h7.5" />
+            </svg>
+            Kaydet
         </button>
     </form>
+</div>
+
+<!-- Scheduler Status -->
+<div class="card animate-in">
+    <div class="card-header">
+        <h3 class="card-title" style="display: flex; align-items: center; gap: 8px;">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 20px; height: 20px; color: var(--primary);">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6l4 2m6-2a10 10 0 11-20 0 10 10 0 0120 0z" />
+            </svg>
+            Zamanlayıcı
+        </h3>
+        <span class="badge badge-success">Çalışıyor</span>
+    </div>
+
+    <div style="color: var(--text-secondary);">
+        <p>Zamanlayıcı her 10 saniyede bir planları kontrol eder ve zamanı gelen dosyaları otomatik çalar.</p>
+
+        <div style="margin-top: 16px; padding: 16px; background: var(--bg-input); border-radius: 10px;">
+            <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                <span>Kontrol Aralığı:</span>
+                <strong>10 saniye</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between;">
+                <span>Gecikme Toleransı:</span>
+                <strong>1 dakika</strong>
+            </div>
+        </div>
+    </div>
 </div>
 
 <!-- About -->
 <div class="card animate-in">
     <div class="card-header">
-        <h3 class="card-title">ℹ️ Hakkında</h3>
+        <h3 class="card-title" style="display: flex; align-items: center; gap: 8px;">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 20px; height: 20px; color: var(--primary);">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M11.25 10.5h1.5v6h-1.5v-6zm0-3h1.5V9h-1.5V7.5z" />
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 21a9 9 0 100-18 9 9 0 000 18z" />
+            </svg>
+            Hakkında
+        </h3>
     </div>
 
     <div style="text-align: center; padding: 20px; color: var(--text-secondary);">
-        <div style="font-size: 48px; margin-bottom: 16px;">🎵</div>
+        <div style="width: 64px; height: 64px; margin: 0 auto 16px; border-radius: 16px; background: var(--bg-input); display: grid; place-items: center;">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 32px; height: 32px; color: var(--primary);">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M9 9l10.5-3m0 6.553v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 11-.99-3.467l2.31-.66a2.25 2.25 0 001.632-2.163zm0 0V2.25L9 5.25v10.303m0 0v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 01-.99-3.467l2.31-.66A2.25 2.25 0 009 15.553z" />
+            </svg>
+        </div>
         <h4 style="font-size: 1.25rem; margin-bottom: 8px; color: var(--text-primary);">AnnounceFlow</h4>
-        <p>Planlı Müzik & Anons Sistemi</p>
-        <p style="font-size: 0.85rem; margin-top: 16px;">Versiyon v2.2.4</p>
+        <p>Planlı müzik ve anons sistemi</p>
+        <p style="font-size: 0.85rem; margin-top: 16px; color: var(--text-muted);">Sürüm v2.7.0</p>
     </div>
 </div>
 {% endblock %}
 
 {% block extra_js %}
 <script>
-    async function updateVolume(value) {
-        document.getElementById('volumeBadge').textContent = `${value}%`;
-
-        try {
-            await fetch('/api/volume', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ volume: parseInt(value) })
-            });
-        } catch (error) {
-            console.error('Error updating volume:', error);
+    function syncStatusBadge(checkboxId, badgeId) {
+        const checkbox = document.getElementById(checkboxId);
+        const badge = document.getElementById(badgeId);
+        if (!checkbox || !badge) {
+            return;
         }
-    }
 
-    function setQuickVolume(value) {
-        document.getElementById('mainVolumeSlider').value = value;
-        updateVolume(value);
+        const update = () => {
+            const isActive = checkbox.checked;
+            badge.textContent = isActive ? 'Aktif' : 'Pasif';
+            badge.classList.remove('badge-success', 'badge-danger');
+            badge.classList.add(isActive ? 'badge-success' : 'badge-danger');
+        };
+
+        checkbox.addEventListener('change', update);
+        update();
     }
 
     // Prayer times form validation - require district if city is selected
@@ -343,7 +267,7 @@
         const district = districtSelect.value;
 
         if (city && !district) {
-            alert('⚠️ Lütfen bir ilçe seçin. İl seçiliyken ilçe zorunludur.');
+            alert('Lütfen bir ilçe seçin. İl seçiliyken ilçe zorunludur.');
             districtSelect.focus();
             return false;
         }
@@ -366,7 +290,7 @@
 
         // Confirmation if password is being changed
         if (password) {
-            return window.confirm('⚠️ Şifrenizi değiştirmek üzeresiniz!\n\nYeni şifrenizi unutursanız sisteme ve panele erişemezsiniz.\n\nDevam etmek istediğinize emin misiniz?');
+            return window.confirm('Şifrenizi değiştirmek üzeresiniz.\n\nYeni şifrenizi unutursanız sisteme ve panele erişemezsiniz.\n\nDevam etmek istediğinize emin misiniz?');
         }
 
         return true;
@@ -434,9 +358,11 @@
         }
     }
 
-    // Initialize districts on page load
+    // Initialize on page load
     document.addEventListener('DOMContentLoaded', function () {
         updateDistricts();
+        syncStatusBadge('workingHoursToggle', 'workingHoursBadge');
+        syncStatusBadge('prayerTimesToggle', 'prayerBadge');
     });
 </script>
 {% endblock %}

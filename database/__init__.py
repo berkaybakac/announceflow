@@ -82,6 +82,7 @@ def _backfill_durations():
 def get_db_connection():
     """Get database connection with row factory."""
     conn = sqlite3.connect(DATABASE_PATH)
+    conn.execute("PRAGMA foreign_keys = ON")
     conn.row_factory = sqlite3.Row
     return conn
 

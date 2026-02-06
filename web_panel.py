@@ -240,6 +240,11 @@ def library():
 
     music_fmt = _format_media_files(music_files)
     announcements_fmt = _format_media_files(announcement_files)
+    total_music_files = len(music_files)
+    total_announcement_files = len(announcement_files)
+    total_active_plans = len(db.get_pending_one_time_schedules()) + len(
+        db.get_active_recurring_schedules()
+    )
 
     # Calculate storage statistics
     total_files = len(music_files) + len(announcement_files)
@@ -259,73 +264,45 @@ def library():
     total_size_mb = round(total_size_bytes / (1024 * 1024), 1)
     total_duration_minutes = round(total_duration_seconds / 60)
 
-    # Get disk space (media folder)
-    try:
-        import shutil
+    # Capacity metrics (single source of truth: media storage location)
+    disk_free_bytes = 0
+    disk_free_gb = 0.0
+    fallback_track_bytes = 5 * 1024 * 1024  # 5 MB fallback
+    average_track_size_bytes = (
+        int(total_size_bytes / total_files)
+        if total_files > 0 and total_size_bytes > 0
+        else fallback_track_bytes
+    )
+    average_track_size_mb = round(average_track_size_bytes / (1024 * 1024), 1)
 
+    try:
         disk_usage = shutil.disk_usage(MEDIA_FOLDER)
-        disk_free_mb = round(disk_usage.free / (1024 * 1024))
-        disk_total_mb = round(disk_usage.total / (1024 * 1024))
+        disk_free_bytes = disk_usage.free
+        disk_free_gb = round(disk_free_bytes / (1024**3), 1)
     except OSError:
-        disk_free_mb = 0
-        disk_total_mb = 0
+        disk_free_bytes = 0
+        disk_free_gb = 0.0
+
+    # Leave 1GB buffer for system before estimating additional track capacity
+    estimated_track_capacity = int(
+        max(0, disk_free_bytes - (1024**3)) / max(average_track_size_bytes, 1)
+    )
 
     return render_template(
         "library.html",
         active_page="library",
         music_files=music_fmt,
         announcement_files=announcements_fmt,
+        total_music_files=total_music_files,
+        total_announcement_files=total_announcement_files,
+        total_active_plans=total_active_plans,
         total_files=total_files,
         total_size_mb=total_size_mb,
         total_duration_minutes=total_duration_minutes,
-        disk_free_mb=disk_free_mb,
-        disk_total_mb=disk_total_mb,
+        disk_free_gb=disk_free_gb,
+        estimated_track_capacity=estimated_track_capacity,
+        average_track_size_mb=average_track_size_mb,
     )
-
-
-def get_system_stats():
-    """Get system stats (disk and memory) using standard libraries."""
-    stats = {
-        "disk_total_gb": 0.0,
-        "disk_free_gb": 0.0,
-        "disk_percent": 0.0,
-        "ram_total_mb": 0,
-        "ram_free_mb": 0,
-        "estimated_songs": 0,
-    }
-
-    try:
-        # Disk Usage
-        total, used, free = shutil.disk_usage("/")
-        stats["disk_total_gb"] = round(total / (1024**3), 1)
-        stats["disk_free_gb"] = round(free / (1024**3), 1)
-        stats["disk_percent"] = round((used / total) * 100, 1)
-
-        # Estimate song capacity (avg 5MB per song)
-        # Leave 1GB buffer for system
-        available_for_media = max(0, free - (1024**3))
-        stats["estimated_songs"] = int(available_for_media / (5 * 1024 * 1024))
-
-        # RAM Usage (Linux specific)
-        if os.path.exists("/proc/meminfo"):
-            with open("/proc/meminfo", "r") as f:
-                meminfo = {}
-                for line in f:
-                    parts = line.split(":")
-                    if len(parts) == 2:
-                        meminfo[parts[0].strip()] = int(parts[1].strip().split()[0])
-
-            # Total RAM
-            if "MemTotal" in meminfo:
-                stats["ram_total_mb"] = round(meminfo["MemTotal"] / 1024, 0)
-
-            # Available RAM
-            if "MemAvailable" in meminfo:
-                stats["ram_free_mb"] = round(meminfo["MemAvailable"] / 1024, 0)
-    except Exception as e:
-        print(f"Error getting system stats: {e}")
-
-    return stats
 
 
 @app.route("/settings")
@@ -336,17 +313,9 @@ def settings():
     import logging
 
     logger = logging.getLogger(__name__)
-    logger.info("Settings page requested")
+    logger.debug("Settings page requested")
 
     config = load_config()
-    system_stats = get_system_stats()
-
-    # Get statistics (kept simple for compatibility)
-    music_count = len(db.get_all_media_files("music"))
-    announcement_count = len(db.get_all_media_files("announcement"))
-    pending_count = len(db.get_pending_one_time_schedules())
-    active_recurring = len(db.get_active_recurring_schedules())
-
     # Get cities (fast, cached)
     cities = pt.get_cities()
 
@@ -361,9 +330,6 @@ def settings():
         "settings.html",
         active_page="settings",
         volume=get_player().get_volume(),
-        total_music=music_count,
-        total_announcements=announcement_count,
-        total_schedules=pending_count + active_recurring,
         admin_username=config.get("admin_username", "admin"),
         # Working hours settings
         working_hours_enabled=config.get("working_hours_enabled", False),
@@ -373,7 +339,6 @@ def settings():
         prayer_times_enabled=config.get("prayer_times_enabled", False),
         prayer_times_city=config.get("prayer_times_city", ""),
         prayer_times_district=config.get("prayer_times_district", ""),
-        system_stats=system_stats,
         cities=cities,
         districts_json="{}",  # Now loaded via AJAX
         next_prayer=next_prayer,

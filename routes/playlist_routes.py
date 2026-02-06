@@ -2,6 +2,7 @@
 AnnounceFlow - Playlist Routes
 API endpoints for playlist management.
 """
+import logging
 from flask import Blueprint, request
 import database as db
 from player import get_player
@@ -14,6 +15,7 @@ from utils.helpers import (
 
 
 playlist_bp = Blueprint("playlist", __name__)
+logger = logging.getLogger(__name__)
 
 
 @playlist_bp.route("/api/playlist/set", methods=["POST"])
@@ -52,6 +54,7 @@ def api_playlist_play():
         return blocked
 
     player = get_player()
+    logger.info("[source] manual play -> playlist current track")
     success = player.play_playlist()
 
     if success:
@@ -69,6 +72,7 @@ def api_playlist_next():
         return blocked
 
     player = get_player()
+    logger.info("[source] manual play -> playlist next track")
     success = player.play_next()
     return _json_success({"success": success})
 
@@ -103,6 +107,7 @@ def api_playlist_start_all():
     # Set playlist and start playing (loop=True)
     player = get_player()
     player.set_playlist(file_paths, loop=True)
+    logger.info(f"[source] manual play -> playlist start-all (tracks={len(file_paths)})")
     success = player.play_playlist()
 
     if success:

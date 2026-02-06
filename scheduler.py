@@ -3,6 +3,7 @@ AnnounceFlow - Scheduler Service
 Handles one-time and recurring schedule checking and triggering.
 """
 import logging
+import os
 import threading
 import time
 from datetime import datetime
@@ -428,6 +429,7 @@ class Scheduler:
         """Trigger media playback with announcement priority."""
         player = get_player()
         config = self._get_cached_config()
+        source_type = "one-time" if is_one_time else "recurring"
 
         if not is_within_working_hours(config):
             return
@@ -455,6 +457,9 @@ class Scheduler:
                     active=True,
                 )
 
+        logger.info(
+            f"[source] {source_type} play -> {os.path.basename(filepath)} (schedule_id={schedule_id})"
+        )
         success = player.play(filepath, preserve_playlist=playlist_was_active)
 
         if success and playlist_was_active and playlist_files:

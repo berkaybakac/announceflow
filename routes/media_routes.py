@@ -182,8 +182,19 @@ def api_media_delete(media_id):
 
     if media:
         # Delete file from disk
-        if os.path.exists(media["filepath"]):
-            os.remove(media["filepath"])
+        try:
+            if os.path.exists(media["filepath"]):
+                os.remove(media["filepath"])
+        except OSError:
+            return (
+                jsonify(
+                    {
+                        "success": False,
+                        "message": "Dosya diskten silinemedi. Daha sonra tekrar deneyin.",
+                    }
+                ),
+                500,
+            )
 
         # Delete from database
         db.delete_media_file(media_id)
