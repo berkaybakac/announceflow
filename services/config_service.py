@@ -11,9 +11,13 @@ import os
 import tempfile
 import shutil
 import logging
-from typing import Any
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
+
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_DOTENV_PATH = os.path.join(_PROJECT_ROOT, ".env")
+_DOTENV_LOADED = False
 
 # Default values (fallback if key missing)
 DEFAULTS = {
@@ -50,10 +54,10 @@ class ConfigService:
         if self._initialized:
             return
 
+        load_dotenv_if_present()
+
         # Find config.json relative to project root
-        self._config_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "config.json"
-        )
+        self._config_path = os.path.join(_PROJECT_ROOT, "config.json")
 
         self._config = dict(DEFAULTS)  # Start with defaults
 
@@ -68,7 +72,43 @@ class ConfigService:
         else:
             logger.warning(f"Config not found at {self._config_path}, using defaults")
 
+        self._apply_env_overrides()
+
         self._initialized = True
+
+    def _apply_env_overrides(self):
+        """Apply optional environment variable overrides to runtime config."""
+        env_media_folder = _first_non_empty_env("ANNOUNCEFLOW_MEDIA_FOLDER")
+        if env_media_folder:
+            self._config["media_folder"] = env_media_folder
+
+        env_port = _coerce_int(
+            os.environ.get("ANNOUNCEFLOW_WEB_PORT"), min_value=1, max_value=65535
+        )
+        if env_port is not None:
+            self._config["web_port"] = env_port
+
+        env_scheduler_interval = _coerce_int(
+            os.environ.get("ANNOUNCEFLOW_SCHEDULER_INTERVAL_SECONDS"), min_value=1
+        )
+        if env_scheduler_interval is not None:
+            self._config["scheduler_interval_seconds"] = env_scheduler_interval
+
+        env_secret = _first_non_empty_env("FLASK_SECRET_KEY")
+        if env_secret:
+            self._config["flask_secret_key"] = env_secret
+
+        env_admin_user = _first_non_empty_env(
+            "ANNOUNCEFLOW_ADMIN_USERNAME", "ADMIN_USERNAME"
+        )
+        if env_admin_user:
+            self._config["admin_username"] = env_admin_user
+
+        env_admin_pass = _first_non_empty_env(
+            "ANNOUNCEFLOW_ADMIN_PASSWORD", "ADMIN_PASSWORD"
+        )
+        if env_admin_pass:
+            self._config["admin_password"] = env_admin_pass
 
     def get(self, key: str, default: Any = None) -> Any:
         """Get config value with fallback."""
@@ -144,3 +184,63 @@ def load_config() -> dict:
 def save_config(config_dict: dict) -> bool:
     """Legacy function - saves entire config dict with atomic write."""
     return get_config().update_all(config_dict)
+
+
+def _coerce_int(
+    raw_value: Any, min_value: Optional[int] = None, max_value: Optional[int] = None
+) -> Optional[int]:
+    """Coerce value to int and optionally validate bounds."""
+    if raw_value is None:
+        return None
+    try:
+        value = int(str(raw_value).strip())
+    except (TypeError, ValueError):
+        return None
+    if min_value is not None and value < min_value:
+        return None
+    if max_value is not None and value > max_value:
+        return None
+    return value
+
+
+def _first_non_empty_env(*keys: str) -> str:
+    """Return first non-empty environment variable value for given keys."""
+    for key in keys:
+        value = os.environ.get(key, "")
+        if isinstance(value, str):
+            value = value.strip()
+            if value:
+                return value
+    return ""
+
+
+def load_dotenv_if_present(path: str = _DOTENV_PATH) -> None:
+    """Load key=value pairs from .env once (without overriding real env)."""
+    global _DOTENV_LOADED
+    if _DOTENV_LOADED:
+        return
+
+    if not os.path.exists(path):
+        _DOTENV_LOADED = True
+        return
+
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            for raw_line in f:
+                line = raw_line.strip()
+                if not line or line.startswith("#") or "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                key = key.strip()
+                if not key:
+                    continue
+                value = value.strip()
+                if (value.startswith('"') and value.endswith('"')) or (
+                    value.startswith("'") and value.endswith("'")
+                ):
+                    value = value[1:-1]
+                os.environ.setdefault(key, value)
+    except OSError as e:
+        logger.warning(f".env load failed: {e}")
+
+    _DOTENV_LOADED = True

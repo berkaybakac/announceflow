@@ -7,12 +7,12 @@
 set -e  # Exit on error
 
 # Configuration
-PI_USER="admin"
+PI_USER="${PI_USER:-admin}"
 # Use 1st argument as host if provided, else default
 if [ -n "$1" ] && [ "$1" != "local" ]; then
     PI_HOST="$1"
 else
-    PI_HOST="aflow.local"
+    PI_HOST="${PI_HOST:-aflow.local}"
 fi
 
 DEST_DIR="/home/${PI_USER}/announceflow"
@@ -53,17 +53,25 @@ echo "[2/5] Syncing project files..."
 rsync -avz --progress \
     -e "ssh ${SSH_OPTS}" \
     --exclude '__pycache__' \
-    --exclude 'venv' \
+    --exclude 'venv/' \
+    --exclude '.venv/' \
+    --exclude '.venv*/' \
     --exclude '*.pyc' \
     --exclude '.git' \
     --exclude '.DS_Store' \
+    --exclude '.env' \
+    --exclude 'config.json' \
     --exclude 'agent/build' \
     --exclude 'agent/dist' \
+    --exclude 'logs/' \
     --exclude '*.db' \
     --exclude '*.log' \
-    --exclude '.env' \
     --exclude 'SUNUM_REHBERI.md' \
     ./ ${PI_USER}@${PI_HOST}:${DEST_DIR}/
+
+echo ""
+# If present, protect .env permissions on Pi
+ssh ${SSH_OPTS} ${PI_USER}@${PI_HOST} "if [ -f ${DEST_DIR}/.env ]; then chmod 600 ${DEST_DIR}/.env; fi"
 
 echo ""
 # 2.5 Install system dependencies (mpg123 needed for audio)
@@ -76,7 +84,7 @@ echo "[3/5] Installing Python dependencies on Pi..."
 ssh ${SSH_OPTS} ${PI_USER}@${PI_HOST} "cd ${DEST_DIR} && grep -vE 'pygame|pyinstaller|altgraph|macholib|pefile' requirements.txt > requirements_pi.txt && pip3 install --break-system-packages -r requirements_pi.txt"
 
 echo ""
-echo "[4/5] Creating systemd service file..."
+echo "[4/6] Creating systemd service file..."
 cat > announceflow.service << EOF
 [Unit]
 Description=AnnounceFlow - Scheduled Audio System
@@ -98,10 +106,12 @@ EOF
 scp ${SSH_OPTS} announceflow.service ${PI_USER}@${PI_HOST}:${DEST_DIR}/
 
 echo ""
+echo "[5/6] Installing and reloading systemd service..."
+ssh ${SSH_OPTS} ${PI_USER}@${PI_HOST} "sudo install -m 644 ${DEST_DIR}/${SERVICE_NAME} /etc/systemd/system/${SERVICE_NAME} && sudo systemctl daemon-reload && sudo systemctl enable ${SERVICE_NAME}"
 
 echo ""
-echo "[6/5] Restarting announceflow service..."
-ssh ${SSH_OPTS} ${PI_USER}@${PI_HOST} "sudo systemctl restart announceflow && sudo systemctl status announceflow --no-pager | head -n 10"
+echo "[6/6] Restarting announceflow service..."
+ssh ${SSH_OPTS} ${PI_USER}@${PI_HOST} "sudo systemctl restart ${SERVICE_NAME} && sudo systemctl status ${SERVICE_NAME} --no-pager | head -n 10"
 
 echo ""
 echo "========================================"
@@ -111,4 +121,3 @@ echo ""
 echo "Web panel: http://${PI_HOST}:5001"
 echo ""
 echo "To view logs: tail -f ~/announceflow/announceflow.log"
-

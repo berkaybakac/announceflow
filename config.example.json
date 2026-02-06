@@ -1,0 +1,15 @@
+{
+    "volume": 80,
+    "admin_username": "admin",
+    "admin_password": "CHANGE_ME_STRONG_PASSWORD",
+    "database_path": "announceflow.db",
+    "media_folder": "media",
+    "web_port": 5001,
+    "scheduler_interval_seconds": 10,
+    "working_hours_enabled": false,
+    "working_hours_start": "09:00",
+    "working_hours_end": "22:00",
+    "prayer_times_enabled": false,
+    "prayer_times_city": "Istanbul",
+    "prayer_times_district": "Istanbul"
+}

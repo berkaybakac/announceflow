@@ -125,8 +125,18 @@ def api_stop_preview():
 @login_required
 def api_volume():
     """Set volume level."""
-    data = request.get_json() or {}
-    volume = data.get("volume", 80)
+    data = request.get_json(silent=True) or {}
+    if not isinstance(data, dict):
+        return _json_error("Geçersiz istek gövdesi", 400)
+
+    raw_volume = data.get("volume", 80)
+    try:
+        volume = int(raw_volume)
+    except (TypeError, ValueError):
+        return _json_error("Volume 0-100 arasında sayı olmalı", 400)
+
+    if not 0 <= volume <= 100:
+        return _json_error("Volume 0-100 arasında olmalı", 400)
 
     player = get_player()
     success = player.set_volume(volume)

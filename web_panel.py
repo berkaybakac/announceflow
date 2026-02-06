@@ -3,6 +3,8 @@ AnnounceFlow - Web Panel
 Flask web server with API endpoints for management.
 """
 import os
+import logging
+import secrets
 import re
 import json
 import shutil
@@ -22,21 +24,44 @@ import database as db
 from player import get_player
 from scheduler import get_scheduler
 from logger import log_web
-from services.config_service import load_config
+from services.config_service import load_config, save_config, load_dotenv_if_present
 
 app = Flask(__name__)
+load_dotenv_if_present()
 
-# Security: Read secret key from environment variable
-# In production, set FLASK_SECRET_KEY environment variable
-app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-only-change-in-production")
-if app.secret_key == "dev-only-change-in-production":
-    import logging
+def _resolve_secret_key() -> str:
+    """Resolve Flask secret key from env/config, else auto-generate and persist."""
+    env_key = os.environ.get("FLASK_SECRET_KEY")
+    if env_key:
+        return env_key
+
+    config = load_config()
+    config_key = config.get("flask_secret_key")
+    if isinstance(config_key, str) and len(config_key) >= 16:
+        return config_key
+
+    generated = secrets.token_hex(32)
+    config["flask_secret_key"] = generated
+    if save_config(config):
+        logging.getLogger(__name__).info(
+            "flask_secret_key otomatik üretildi ve config.json içine kaydedildi."
+        )
+    else:
+        logging.getLogger(__name__).warning(
+            "flask_secret_key üretildi ama config.json'a kaydedilemedi; "
+            "bu açılış için geçici key kullanılacak."
+        )
 
     logging.getLogger(__name__).warning(
-        "Using default secret key! Set FLASK_SECRET_KEY environment variable in production."
+        "FLASK_SECRET_KEY ayarlı değil; otomatik üretilen key kullanılıyor."
     )
+    return generated
 
-MEDIA_FOLDER = "media"
+
+app.secret_key = _resolve_secret_key()
+
+_boot_config = load_config()
+MEDIA_FOLDER = str(_boot_config.get("media_folder", "media")).strip() or "media"
 
 # Ensure media directories exist
 os.makedirs(os.path.join(MEDIA_FOLDER, "music"), exist_ok=True)
@@ -384,6 +409,13 @@ if __name__ == "__main__":
     # Initialize volume from config
     config = load_config()
     initial_volume = config.get("volume", 80)
+    try:
+        web_port = int(config.get("web_port", 5001))
+        if web_port < 1 or web_port > 65535:
+            raise ValueError("out of range")
+    except (TypeError, ValueError):
+        web_port = 5001
+
     player = get_player()
     player.set_volume(initial_volume)
     db.update_playback_state(volume=initial_volume)
@@ -395,12 +427,12 @@ if __name__ == "__main__":
     # Run web server
     from waitress import serve
 
-    print("AnnounceFlow Web Panel çalışıyor (Port 5000)...")
+    print(f"AnnounceFlow Web Panel çalışıyor (Port {web_port})...")
     # Increase threads to prevent queue depth warnings
     serve(
         app,
         host="0.0.0.0",
-        port=5000,
+        port=web_port,
         threads=16,
         channel_timeout=10,
         connection_limit=100,
