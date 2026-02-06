@@ -9,17 +9,31 @@ import os
 def build():
     """Build the agent executable."""
     agent_path = os.path.join(os.path.dirname(__file__), "agent.py")
-    
+    config_data = (
+        "agent_config.json;." if os.name == "nt" else "agent_config.json:."
+    )
+
     # PyInstaller command
     cmd = [
-        sys.executable, "-m", "PyInstaller",
-        "--onefile",           # Single executable
-        "--noconsole",         # No console window (GUI app)
+        sys.executable,
+        "-m",
+        "PyInstaller",
+        "--clean",  # Build from a clean state
+        "--onefile",  # Single executable
+        "--noconsole",  # No console window (GUI app)
         "--name", "AnnounceFlowAgent",
-        "--add-data", "agent_config.json;." if os.name == 'nt' else "agent_config.json:.",
+        "--add-data",
+        config_data,
+        # Keyring backend modules are resolved dynamically; include all submodules.
+        "--collect-submodules",
+        "keyring",
+        "--hidden-import",
+        "keyring.backends.Windows",
+        "--hidden-import",
+        "keyring.errors",
         # Uncomment if you have an icon:
         # "--icon", "icon.ico",
-        agent_path
+        agent_path,
     ]
     
     print("Building AnnounceFlow Agent...")
