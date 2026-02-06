@@ -17,13 +17,39 @@ fi
 
 DEST_DIR="/home/${PI_USER}/announceflow"
 SERVICE_NAME="announceflow.service"
+RELEASE_STAMP_FILE="release_stamp.json"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DEPLOYED_AT_UTC="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+
+if git -C "${SCRIPT_DIR}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    RELEASE_COMMIT="$(git -C "${SCRIPT_DIR}" rev-parse HEAD 2>/dev/null || echo unknown)"
+    RELEASE_COMMIT_SHORT="$(git -C "${SCRIPT_DIR}" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+    RELEASE_REF="$(git -C "${SCRIPT_DIR}" describe --tags --always --dirty 2>/dev/null || echo unknown)"
+    RELEASE_BRANCH="$(git -C "${SCRIPT_DIR}" rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
+else
+    RELEASE_COMMIT="unknown"
+    RELEASE_COMMIT_SHORT="unknown"
+    RELEASE_REF="unknown"
+    RELEASE_BRANCH="unknown"
+fi
+
+RELEASE_STAMP_LOCAL="$(mktemp /tmp/announceflow_release_stamp_XXXXXX.json)"
+cat > "${RELEASE_STAMP_LOCAL}" << EOF
+{
+  "commit": "${RELEASE_COMMIT}",
+  "commit_short": "${RELEASE_COMMIT_SHORT}",
+  "ref": "${RELEASE_REF}",
+  "branch": "${RELEASE_BRANCH}",
+  "deployed_at_utc": "${DEPLOYED_AT_UTC}"
+}
+EOF
 
 # SSH Multiplexing to ask for password only once
 SOCKET="/tmp/aflow_ssh_socket_$$"
 SSH_OPTS="-4 -o StrictHostKeyChecking=accept-new -o ControlPath=$SOCKET -o ControlMaster=auto -o ControlPersist=600"
 
 # Cleanup socket on exit
-trap "rm -f $SOCKET" EXIT
+trap "rm -f $SOCKET $RELEASE_STAMP_LOCAL" EXIT
 
 echo "========================================"
 echo " AnnounceFlow - Deployment Script"
@@ -70,6 +96,12 @@ rsync -avz --progress \
     ./ ${PI_USER}@${PI_HOST}:${DEST_DIR}/
 
 echo ""
+# 2.2 Upload release stamp (commit metadata)
+echo "[2.2/5] Uploading release stamp..."
+scp ${SSH_OPTS} "${RELEASE_STAMP_LOCAL}" ${PI_USER}@${PI_HOST}:${DEST_DIR}/${RELEASE_STAMP_FILE}
+ssh ${SSH_OPTS} ${PI_USER}@${PI_HOST} "chmod 644 ${DEST_DIR}/${RELEASE_STAMP_FILE}"
+
+echo ""
 # If present, protect .env permissions on Pi
 ssh ${SSH_OPTS} ${PI_USER}@${PI_HOST} "if [ -f ${DEST_DIR}/.env ]; then chmod 600 ${DEST_DIR}/.env; fi"
 
@@ -114,10 +146,51 @@ echo "[6/6] Restarting announceflow service..."
 ssh ${SSH_OPTS} ${PI_USER}@${PI_HOST} "sudo systemctl restart ${SERVICE_NAME} && sudo systemctl status ${SERVICE_NAME} --no-pager | head -n 10"
 
 echo ""
+# 6.5 Post-deploy health check
+echo "[6.5/6] Running post-deploy health check..."
+ssh ${SSH_OPTS} ${PI_USER}@${PI_HOST} "cd ${DEST_DIR} && /usr/bin/python3 - << 'PY'
+import json
+import time
+import urllib.request
+from urllib.error import URLError, HTTPError
+
+port = 5001
+try:
+    with open('config.json', 'r', encoding='utf-8') as f:
+        raw = json.load(f).get('web_port', 5001)
+    parsed = int(raw)
+    if 1 <= parsed <= 65535:
+        port = parsed
+except Exception:
+    pass
+
+url = f'http://127.0.0.1:{port}/api/health'
+last_error = 'unknown'
+for attempt in range(1, 16):
+    try:
+        with urllib.request.urlopen(url, timeout=3) as response:
+            body = response.read().decode('utf-8', errors='replace')
+            data = json.loads(body)
+            if response.status == 200 and data.get('status') == 'ok':
+                print(f'Health check OK (attempt {attempt}): {url}')
+                print(f'Backend: {data.get(\"player\", {}).get(\"backend\", \"unknown\")}')
+                print(f'Scheduler running: {data.get(\"scheduler\", {}).get(\"running\", False)}')
+                raise SystemExit(0)
+            last_error = f'Unexpected payload/status: status={response.status}, body={body[:160]}'
+    except (URLError, HTTPError, TimeoutError, json.JSONDecodeError) as exc:
+        last_error = str(exc)
+    time.sleep(2)
+
+print(f'Health check FAILED after 15 attempts ({url}): {last_error}')
+raise SystemExit(1)
+PY"
+
+echo ""
 echo "========================================"
 echo " Deployment & Restart Complete!"
 echo "========================================"
 echo ""
 echo "Web panel: http://${PI_HOST}:5001"
+echo "Release stamp: ref=${RELEASE_REF}, commit=${RELEASE_COMMIT_SHORT}, deployed_at=${DEPLOYED_AT_UTC}"
 echo ""
 echo "To view logs: tail -f ~/announceflow/announceflow.log"

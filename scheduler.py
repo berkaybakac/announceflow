@@ -89,6 +89,10 @@ class Scheduler:
             False  # Idempotency: prevent multiple simultaneous restores
         )
         self._restore_target_state: Optional[dict] = None
+        # Track currently playing scheduled media to skip overlapping plans safely
+        self._scheduled_playback_lock = threading.Lock()
+        self._scheduled_playback_in_progress: bool = False
+        self._scheduled_playback_meta: Optional[dict] = None
         # Config caching to reduce disk I/O
         self._config_cache: Optional[dict] = None
         self._config_cache_time: float = 0
@@ -112,6 +116,16 @@ class Scheduler:
             self._thread.join(timeout=5)
         logger.info("Scheduler stopped")
 
+    def clear_resume_intent(self):
+        """Clear deferred resume states (used by manual stop flow)."""
+        self._prayer_pause_state = None
+        self._working_hours_pause_state = None
+        with self._restore_lock:
+            self._restore_target_state = None
+        with self._scheduled_playback_lock:
+            self._scheduled_playback_in_progress = False
+            self._scheduled_playback_meta = None
+
     def _get_cached_config(self) -> dict:
         """Get config with TTL caching to reduce disk I/O."""
         now = time.time()
@@ -123,6 +137,76 @@ class Scheduler:
             self._config_cache_time = now
         return self._config_cache
 
+    def _resolve_playlist_resume_state(self, player) -> dict:
+        """Resolve effective playlist state using both memory and DB intent.
+
+        During scheduled interruptions, ``player.stop()`` intentionally marks
+        ``player._playlist_active`` false to avoid monitor races. The persisted
+        DB flag still carries resume intent, so we merge both sources here.
+        """
+        db_state = db.get_playlist_state()
+        db_playlist = list(db_state.get("playlist") or [])
+        db_index = db_state.get("index", -1)
+        db_loop = db_state.get("loop", True)
+        db_active = bool(db_state.get("active", False))
+
+        memory_playlist = list(player._playlist) if player._playlist else []
+        has_memory_playlist = len(memory_playlist) > 0
+
+        playlist = memory_playlist if has_memory_playlist else db_playlist
+        index = player._playlist_index if has_memory_playlist else db_index
+        loop = player._playlist_loop if has_memory_playlist else db_loop
+
+        memory_active = bool(player._playlist_active and has_memory_playlist)
+        active = bool((memory_active or db_active) and playlist)
+
+        return {
+            "playlist": playlist,
+            "index": -1 if index is None else index,
+            "loop": bool(loop),
+            "active": active,
+            "db_active": db_active,
+            "memory_active": memory_active,
+        }
+
+    def _sync_scheduled_playback_state(self, player) -> None:
+        """Clear stale scheduled-playback marker after source changes/end."""
+        with self._scheduled_playback_lock:
+            if not self._scheduled_playback_in_progress:
+                return
+
+            current_file = getattr(player, "current_file", None)
+            tracked_file = None
+            if self._scheduled_playback_meta:
+                tracked_file = self._scheduled_playback_meta.get("filepath")
+
+            # Scheduled playback is done if player stopped OR source changed.
+            source_changed = bool(
+                current_file and tracked_file and os.path.abspath(current_file) != os.path.abspath(tracked_file)
+            )
+            if (not player.is_playing) or source_changed:
+                self._scheduled_playback_in_progress = False
+                self._scheduled_playback_meta = None
+
+    def _mark_scheduled_playback_start(
+        self, schedule_id: int, source_type: str, filepath: str, is_one_time: bool
+    ) -> None:
+        with self._scheduled_playback_lock:
+            self._scheduled_playback_in_progress = True
+            self._scheduled_playback_meta = {
+                "schedule_id": schedule_id,
+                "source_type": source_type,
+                "is_one_time": bool(is_one_time),
+                "filepath": filepath,
+                "filename": os.path.basename(filepath),
+                "started_at": datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
+            }
+
+    def _is_scheduled_playback_active(self, player) -> bool:
+        self._sync_scheduled_playback_state(player)
+        with self._scheduled_playback_lock:
+            return self._scheduled_playback_in_progress and bool(player.is_playing)
+
     def _handle_prayer_time(self, config: dict, player) -> bool:
         """Handle prayer time check and playlist pause/resume.
 
@@ -132,39 +216,46 @@ class Scheduler:
             return False
 
         if is_prayer_time_active(config):
+            resume_state = self._resolve_playlist_resume_state(player)
+
+            # Save once per prayer window if there is an active loop intent.
+            if self._prayer_pause_state is None and resume_state["active"]:
+                self._prayer_pause_state = {
+                    "playlist": resume_state["playlist"],
+                    "index": resume_state["index"],
+                    "loop": resume_state["loop"],
+                    "active": resume_state["active"],
+                }
+                logger.info(
+                    "Prayer time - saving playlist state "
+                    f"(index={resume_state['index']}, tracks={len(resume_state['playlist'])}, "
+                    f"active={resume_state['active']})"
+                )
+                log_prayer(
+                    "silence_start",
+                    {
+                        "index": resume_state["index"],
+                        "tracks": len(resume_state["playlist"]),
+                    },
+                )
+
+            # Stop only if something is actually playing.
             if player.is_playing or player._playlist_active:
-                # Save playlist state BEFORE stopping (only once)
-                if self._prayer_pause_state is None:
-                    self._prayer_pause_state = {
-                        "playlist": list(player._playlist),
-                        "index": player._playlist_index,
-                        "loop": player._playlist_loop,
-                        "active": player._playlist_active,
-                    }
-                    logger.info(
-                        f"Prayer time - saving playlist state (index={player._playlist_index}, tracks={len(player._playlist)})"
-                    )
-                    log_prayer(
-                        "silence_start",
-                        {
-                            "index": player._playlist_index,
-                            "tracks": len(player._playlist),
-                        },
-                    )
                 # Use stop() instead of stop_playlist() to preserve DB state
                 player.stop()
-                if (
-                    self._prayer_pause_state
-                    and self._prayer_pause_state.get("active")
-                    and self._prayer_pause_state.get("playlist")
-                ):
-                    db.save_playlist_state(
-                        playlist=self._prayer_pause_state["playlist"],
-                        index=self._prayer_pause_state["index"],
-                        loop=self._prayer_pause_state["loop"],
-                        active=True,
-                    )
-                player._playlist_active = False  # Temporarily disable without clearing
+
+            if (
+                self._prayer_pause_state
+                and self._prayer_pause_state.get("active")
+                and self._prayer_pause_state.get("playlist")
+            ):
+                db.save_playlist_state(
+                    playlist=self._prayer_pause_state["playlist"],
+                    index=self._prayer_pause_state["index"],
+                    loop=self._prayer_pause_state["loop"],
+                    active=True,
+                )
+            player._playlist_active = False  # Temporarily disable without clearing
             return True  # Skip rest of loop
 
         # Prayer time ended - restore playlist if we saved state
@@ -174,6 +265,9 @@ class Scheduler:
 
             if state["active"] and state["playlist"]:
                 if not db.get_playlist_state().get("active", False):
+                    logger.info(
+                        "Prayer ended - playlist resume cancelled (DB marked inactive)"
+                    )
                     return False
                 logger.info(
                     f"Prayer ended - restoring playlist (index={state['index']})"
@@ -190,7 +284,11 @@ class Scheduler:
                     loop=state["loop"],
                     active=True,
                 )
-                player.play_next()
+                resumed = player.play_next()
+                log_prayer(
+                    "resume_ok" if resumed else "resume_failed",
+                    {"index": state["index"], "tracks": len(state["playlist"])},
+                )
 
         return False  # Continue with rest of loop
 
@@ -206,39 +304,44 @@ class Scheduler:
                 if self._working_hours_pause_state is None:
                     self._working_hours_pause_state = self._prayer_pause_state
                 self._prayer_pause_state = None
+            resume_state = self._resolve_playlist_resume_state(player)
             # Save playlist state BEFORE stopping (only once)
-            if player._playlist_active or player.is_playing:
-                if self._working_hours_pause_state is None:
-                    self._working_hours_pause_state = {
-                        "playlist": list(player._playlist),
-                        "index": player._playlist_index,
-                        "loop": player._playlist_loop,
-                        "active": player._playlist_active,
-                    }
-                    logger.info(
-                        f"Outside working hours - saving playlist state (index={player._playlist_index}, tracks={len(player._playlist)})"
-                    )
-                    log_schedule(
-                        "working_hours_end",
-                        {
-                            "index": player._playlist_index,
-                            "tracks": len(player._playlist),
-                        },
-                    )
-                # Use stop() instead of stop_playlist() to preserve DB state
+            if self._working_hours_pause_state is None and resume_state["active"]:
+                self._working_hours_pause_state = {
+                    "playlist": resume_state["playlist"],
+                    "index": resume_state["index"],
+                    "loop": resume_state["loop"],
+                    "active": resume_state["active"],
+                }
+                logger.info(
+                    "Outside working hours - saving playlist state "
+                    f"(index={resume_state['index']}, tracks={len(resume_state['playlist'])}, "
+                    f"active={resume_state['active']})"
+                )
+                log_schedule(
+                    "working_hours_end",
+                    {
+                        "index": resume_state["index"],
+                        "tracks": len(resume_state["playlist"]),
+                    },
+                )
+
+            # Use stop() instead of stop_playlist() to preserve DB state
+            if player.is_playing or player._playlist_active:
                 player.stop()
-                if (
-                    self._working_hours_pause_state
-                    and self._working_hours_pause_state.get("active")
-                    and self._working_hours_pause_state.get("playlist")
-                ):
-                    db.save_playlist_state(
-                        playlist=self._working_hours_pause_state["playlist"],
-                        index=self._working_hours_pause_state["index"],
-                        loop=self._working_hours_pause_state["loop"],
-                        active=True,
-                    )
-                player._playlist_active = False  # Temporarily disable without clearing
+
+            if (
+                self._working_hours_pause_state
+                and self._working_hours_pause_state.get("active")
+                and self._working_hours_pause_state.get("playlist")
+            ):
+                db.save_playlist_state(
+                    playlist=self._working_hours_pause_state["playlist"],
+                    index=self._working_hours_pause_state["index"],
+                    loop=self._working_hours_pause_state["loop"],
+                    active=True,
+                )
+            player._playlist_active = False  # Temporarily disable without clearing
         else:
             # Working hours started - restore playlist if we saved state
             if self._working_hours_pause_state is not None:
@@ -247,6 +350,9 @@ class Scheduler:
 
                 if state["active"] and state["playlist"]:
                     if not db.get_playlist_state().get("active", False):
+                        logger.info(
+                            "Working hours started - resume cancelled (DB marked inactive)"
+                        )
                         return outside_working_hours
                     logger.info(
                         f"Working hours started - restoring playlist (index={state['index']})"
@@ -263,7 +369,11 @@ class Scheduler:
                         loop=state["loop"],
                         active=True,
                     )
-                    player.play_next()
+                    resumed = player.play_next()
+                    log_schedule(
+                        "working_hours_resume_ok" if resumed else "working_hours_resume_failed",
+                        {"index": state["index"], "tracks": len(state["playlist"])},
+                    )
 
         return outside_working_hours
 
@@ -273,6 +383,7 @@ class Scheduler:
             try:
                 config = self._get_cached_config()
                 player = get_player()
+                self._sync_scheduled_playback_state(player)
 
                 # 1. Prayer time check - highest priority, stops EVERYTHING
                 if self._handle_prayer_time(config, player):
@@ -391,8 +502,11 @@ class Scheduler:
                             current_time, start_time, interval
                         )
                     else:
-                        elapsed = (now - last_trigger).total_seconds() / 60
-                        if elapsed >= interval - 1:  # 1 minute tolerance
+                        elapsed_seconds = (now - last_trigger).total_seconds()
+                        # Keep tolerance small (scheduler tick scale), not minute scale.
+                        # Minute-scale tolerance causes "2 min" jobs to run every ~1 min.
+                        tolerance_seconds = max(2, int(self.check_interval) + 2)
+                        if elapsed_seconds >= (interval * 60) - tolerance_seconds:
                             should_trigger = True
 
             # Trigger if conditions met
@@ -434,11 +548,45 @@ class Scheduler:
         if not is_within_working_hours(config):
             return
 
+        if self._is_scheduled_playback_active(player):
+            blocked_by = {}
+            with self._scheduled_playback_lock:
+                blocked_by = dict(self._scheduled_playback_meta or {})
+            logger.warning(
+                "Plan overlap detected, skipping: %s (blocked_by=%s)",
+                os.path.basename(filepath),
+                blocked_by.get("filename", "scheduled_media"),
+            )
+            log_schedule(
+                "plan_overlap_skip",
+                {
+                    "schedule_id": schedule_id,
+                    "source_type": source_type,
+                    "filename": os.path.basename(filepath),
+                    "blocked_by_schedule_id": blocked_by.get("schedule_id"),
+                    "blocked_by_file": blocked_by.get("filename"),
+                },
+            )
+            # Keep one-time plans pending during overlap window; scheduler retries
+            # on next tick instead of deciding too early with "overlap".
+            return
+
         # is_announcement is now passed from caller based on media_type from database
-        playlist_was_active = player._playlist_active and len(player._playlist) > 0
-        playlist_files = list(player._playlist) if playlist_was_active else []
-        playlist_index = player._playlist_index
-        playlist_loop = player._playlist_loop
+        resume_state = self._resolve_playlist_resume_state(player)
+        playlist_was_active = resume_state["active"]
+        playlist_files = list(resume_state["playlist"]) if playlist_was_active else []
+        playlist_index = resume_state["index"]
+        playlist_loop = resume_state["loop"]
+
+        # Keep loop intent alive across scheduled interruptions unless user explicitly
+        # pressed Stop.
+        if playlist_was_active and playlist_files:
+            db.save_playlist_state(
+                playlist=playlist_files,
+                index=playlist_index,
+                loop=playlist_loop,
+                active=True,
+            )
 
         if player.is_playing:
             if is_announcement:
@@ -461,6 +609,13 @@ class Scheduler:
             f"[source] {source_type} play -> {os.path.basename(filepath)} (schedule_id={schedule_id})"
         )
         success = player.play(filepath, preserve_playlist=playlist_was_active)
+        if success:
+            self._mark_scheduled_playback_start(
+                schedule_id=schedule_id,
+                source_type=source_type,
+                filepath=filepath,
+                is_one_time=is_one_time,
+            )
 
         if success and playlist_was_active and playlist_files:
             restore_state = {

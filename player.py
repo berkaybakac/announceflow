@@ -69,6 +69,7 @@ class AudioPlayer:
         self._process: Optional[subprocess.Popen] = None
         self._monitor_thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
+        self._playback_session: int = 0
         self._user_on_track_end = on_track_end
 
         # Playlist support
@@ -171,6 +172,97 @@ class AudioPlayer:
             "PCM", value_args
         ) or self._run_amixer_for_control("Master", value_args)
 
+    def _detect_audio_codec(self, file_path: str) -> str:
+        """Detect primary audio codec via ffprobe (best effort)."""
+        try:
+            result = subprocess.run(
+                [
+                    "ffprobe",
+                    "-v",
+                    "error",
+                    "-select_streams",
+                    "a:0",
+                    "-show_entries",
+                    "stream=codec_name",
+                    "-of",
+                    "default=noprint_wrappers=1:nokey=1",
+                    file_path,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=20,
+            )
+            if result.returncode == 0:
+                return result.stdout.strip().lower()
+        except (subprocess.SubprocessError, OSError):
+            pass
+        return ""
+
+    def _ensure_mpg123_compatible(self, file_path: str) -> bool:
+        """
+        Ensure an .mp3 file is actually MP3-coded.
+        Some clients upload AAC/MP4 streams renamed as .mp3; mpg123 cannot decode them.
+        """
+        if AUDIO_BACKEND != "mpg123":
+            return True
+        if platform.system() != "Linux":
+            return True
+        if not file_path.lower().endswith(".mp3"):
+            return True
+
+        codec = self._detect_audio_codec(file_path)
+        if not codec or codec == "mp3":
+            return True
+
+        logger.warning(
+            f"Non-MP3 codec detected in .mp3 file ({codec}), auto-converting: {os.path.basename(file_path)}"
+        )
+        temp_path = f"{file_path}.af_tmp.mp3"
+        try:
+            result = subprocess.run(
+                [
+                    "ffmpeg",
+                    "-y",
+                    "-i",
+                    file_path,
+                    "-acodec",
+                    "libmp3lame",
+                    "-ab",
+                    "192k",
+                    "-ar",
+                    "44100",
+                    temp_path,
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=180,
+            )
+            if result.returncode != 0:
+                logger.error(
+                    f"Auto-conversion failed for incompatible mp3 file: {os.path.basename(file_path)}"
+                )
+                return False
+
+            converted_codec = self._detect_audio_codec(temp_path)
+            if converted_codec != "mp3":
+                logger.error(
+                    f"Auto-conversion produced non-mp3 codec ({converted_codec}) for: {os.path.basename(file_path)}"
+                )
+                return False
+
+            os.replace(temp_path, file_path)
+            logger.info(f"Auto-converted for mpg123 compatibility: {os.path.basename(file_path)}")
+            return True
+        except (subprocess.SubprocessError, OSError) as e:
+            logger.error(f"Auto-conversion error for {os.path.basename(file_path)}: {e}")
+            return False
+        finally:
+            if os.path.exists(temp_path):
+                try:
+                    os.remove(temp_path)
+                except OSError:
+                    pass
+
     def on_track_end(self):
         """Internal track end handler - advances playlist or calls user callback."""
         if self._playlist_active and len(self._playlist) > 0:
@@ -200,49 +292,71 @@ class AudioPlayer:
         if not self._playlist:
             return False
 
-        self._playlist_index = 0
+        self._playlist_index = -1
         self._playlist_active = True
 
         # Persist to database
-        db.save_playlist_state(index=0, active=True)
+        db.save_playlist_state(index=-1, active=True)
 
-        return self.play(self._playlist[0], preserve_playlist=True)
+        return self.play_next()
 
     def play_next(self) -> bool:
         """Play the next track in the playlist."""
         if not self._playlist:
             return False
 
-        next_index = self._playlist_index + 1
+        total_tracks = len(self._playlist)
+        checked = 0
+        cursor = self._playlist_index
 
-        if next_index >= len(self._playlist):
-            if self._playlist_loop:
-                next_index = 0
-            else:
-                self._playlist_active = False
-                db.save_playlist_state(active=False)
-                logger.info("Playlist ended (no loop)")
+        while checked < total_tracks:
+            next_index = cursor + 1
+            if next_index >= total_tracks:
+                if self._playlist_loop:
+                    next_index = 0
+                else:
+                    self._playlist_active = False
+                    db.save_playlist_state(active=False)
+                    logger.info("Playlist ended (no loop)")
+                    log_play(
+                        "playlist_end",
+                        {"reason": "no_loop", "total_tracks": total_tracks},
+                    )
+                    return False
+
+            track_path = self._playlist[next_index]
+            track_name = os.path.basename(track_path)
+
+            if not os.path.exists(track_path):
+                logger.error(f"Playlist track missing on disk, skipping: {track_name}")
+                log_error("playlist_track_missing", {"file": track_name, "index": next_index + 1})
+                cursor = next_index
+                checked += 1
+                continue
+
+            if self.play(track_path, preserve_playlist=True):
+                self._playlist_index = next_index
+                db.save_playlist_state(index=next_index, active=True)
+                logger.info(f"Playing next track: {next_index + 1}/{total_tracks}")
                 log_play(
-                    "playlist_end",
-                    {"reason": "no_loop", "total_tracks": len(self._playlist)},
+                    "track_start",
+                    {"file": track_name, "index": next_index + 1, "total": total_tracks},
                 )
-                return False
+                return True
 
-        self._playlist_index = next_index
+            logger.error(f"Playlist track failed to start, skipping: {track_name}")
+            log_error(
+                "playlist_track_start_failed",
+                {"file": track_name, "index": next_index + 1},
+            )
+            cursor = next_index
+            checked += 1
 
-        # Persist current index to database
-        db.save_playlist_state(index=next_index, active=True)
-
-        logger.info(f"Playing next track: {next_index + 1}/{len(self._playlist)}")
-        log_play(
-            "track_start",
-            {
-                "file": os.path.basename(self._playlist[next_index]),
-                "index": next_index + 1,
-                "total": len(self._playlist),
-            },
-        )
-        return self.play(self._playlist[next_index], preserve_playlist=True)
+        self._playlist_active = False
+        db.save_playlist_state(active=False)
+        logger.error("No playable tracks available in playlist")
+        log_error("playlist_no_playable_tracks", {"total_tracks": total_tracks})
+        return False
 
     def stop_playlist(self):
         """Stop the playlist and clear it."""
@@ -288,6 +402,10 @@ class AudioPlayer:
             logger.error(f"Audio file not found: {file_path}")
             return False
 
+        if not self._ensure_mpg123_compatible(file_path):
+            logger.error(f"Audio file is not mpg123-compatible: {file_path}")
+            return False
+
         # Stop any current playback
         if preserve_playlist:
             self._stop_playback_only()
@@ -295,11 +413,13 @@ class AudioPlayer:
             self.stop()
 
         with self._lock:
+            self._playback_session += 1
+            playback_session = self._playback_session
             try:
                 if AUDIO_BACKEND == "mpg123":
-                    return self._play_mpg123(file_path)
+                    return self._play_mpg123(file_path, playback_session)
                 elif AUDIO_BACKEND == "pygame":
-                    return self._play_pygame(file_path, start_position)
+                    return self._play_pygame(file_path, start_position, playback_session)
                 else:
                     logger.error("No audio backend available")
                     return False
@@ -307,7 +427,7 @@ class AudioPlayer:
                 logger.error(f"Error playing audio: {e}")
                 return False
 
-    def _play_mpg123(self, file_path: str) -> bool:
+    def _play_mpg123(self, file_path: str, playback_session: int) -> bool:
         """Play using mpg123 (Pi optimized)."""
         try:
             # Start mpg123 process with FIXED max scale (32768)
@@ -362,14 +482,16 @@ class AudioPlayer:
             logger.info(f"Playing (mpg123): {os.path.basename(file_path)}")
 
             # Start monitor thread
-            self._start_monitor_mpg123()
+            self._start_monitor_mpg123(self._process, playback_session)
 
             return True
         except Exception as e:
             logger.error(f"mpg123 error: {e}")
             return False
 
-    def _play_pygame(self, file_path: str, start_position: float) -> bool:
+    def _play_pygame(
+        self, file_path: str, start_position: float, playback_session: int
+    ) -> bool:
         """Play using pygame (dev fallback)."""
         import pygame
 
@@ -421,7 +543,7 @@ class AudioPlayer:
         logger.info(f"Playing (pygame): {os.path.basename(file_path)}")
 
         # Start monitor
-        self._start_monitor_pygame()
+        self._start_monitor_pygame(playback_session)
 
         return True
 
@@ -443,6 +565,7 @@ class AudioPlayer:
     def _stop_playback_only(self) -> None:
         """Stop playback without touching playlist state."""
         with self._lock:
+            self._playback_session += 1
             self.is_playing = False
             self.is_paused = False
             self.current_file = None
@@ -491,6 +614,7 @@ class AudioPlayer:
         """Stop playback safely."""
         # 1. Update state FIRST to prevent UI race conditions
         with self._lock:
+            self._playback_session += 1
             self.is_playing = False
             self.is_paused = False
             self.current_file = None
@@ -620,17 +744,31 @@ class AudioPlayer:
         state["playlist"] = self.get_playlist_state()
         return state
 
-    def _start_monitor_mpg123(self):
+    def _start_monitor_mpg123(
+        self, process: Optional[subprocess.Popen], playback_session: int
+    ):
         """Monitor mpg123 process for completion."""
         self._stop_event.clear()
+        if process is None:
+            return
 
         def monitor():
             while not self._stop_event.is_set():
-                if self._process and self._process.poll() is not None:
+                if playback_session != self._playback_session:
+                    break
+
+                if process.poll() is not None:
+                    if playback_session != self._playback_session:
+                        break
+
                     # Process ended
                     with self._lock:
+                        if playback_session != self._playback_session:
+                            break
                         self.is_playing = False
                         self.current_file = None
+                        if self._process is process:
+                            self._process = None
 
                     logger.info("Track ended (mpg123)")
                     log_play("track_end", {"backend": "mpg123"})
@@ -644,7 +782,7 @@ class AudioPlayer:
         self._monitor_thread = threading.Thread(target=monitor, daemon=True)
         self._monitor_thread.start()
 
-    def _start_monitor_pygame(self):
+    def _start_monitor_pygame(self, playback_session: int):
         """Monitor pygame playback for completion."""
         self._stop_event.clear()
 
@@ -652,12 +790,17 @@ class AudioPlayer:
             import pygame
 
             while not self._stop_event.is_set():
+                if playback_session != self._playback_session:
+                    break
+
                 if (
                     not pygame.mixer.music.get_busy()
                     and self.is_playing
                     and not self.is_paused
                 ):
                     with self._lock:
+                        if playback_session != self._playback_session:
+                            break
                         self.is_playing = False
                         self.current_file = None
                         self._position = 0.0
