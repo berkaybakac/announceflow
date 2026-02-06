@@ -373,11 +373,36 @@ class AudioPlayer:
         """Play using pygame (dev fallback)."""
         import pygame
 
+        if not self._ensure_pygame_mixer():
+            logger.error("pygame mixer init failed before playback")
+            return False
+
         if pygame.mixer.music.get_busy():
             pygame.mixer.music.stop()
 
-        pygame.mixer.music.load(file_path)
-        pygame.mixer.music.play(start=start_position)
+        def _start_once() -> bool:
+            pygame.mixer.music.load(file_path)
+            pygame.mixer.music.set_volume(self._volume / 100.0)
+            pygame.mixer.music.play(start=start_position)
+            # Give pygame a short window to flip into busy state.
+            time.sleep(0.08)
+            return pygame.mixer.music.get_busy()
+
+        started = _start_once()
+        if not started:
+            logger.warning(
+                "pygame reported not-busy right after play; retrying mixer init once"
+            )
+            if not self._ensure_pygame_mixer(force_reinit=True):
+                logger.error("pygame mixer re-init failed")
+                return False
+            started = _start_once()
+            if not started:
+                logger.error(
+                    "pygame playback failed to start (no busy state): %s",
+                    os.path.basename(file_path),
+                )
+                return False
 
         self.current_file = file_path
         self.is_playing = True
@@ -399,6 +424,21 @@ class AudioPlayer:
         self._start_monitor_pygame()
 
         return True
+
+    def _ensure_pygame_mixer(self, force_reinit: bool = False) -> bool:
+        """Ensure pygame mixer is initialized and volume is applied."""
+        import pygame
+
+        try:
+            if force_reinit and pygame.mixer.get_init():
+                pygame.mixer.quit()
+            if not pygame.mixer.get_init():
+                pygame.mixer.init()
+            pygame.mixer.music.set_volume(self._volume / 100.0)
+            return True
+        except Exception as e:
+            logger.error(f"Failed to initialize pygame mixer: {e}")
+            return False
 
     def _stop_playback_only(self) -> None:
         """Stop playback without touching playlist state."""
@@ -592,11 +632,12 @@ class AudioPlayer:
                         self.is_playing = False
                         self.current_file = None
 
+                    logger.info("Track ended (mpg123)")
+                    log_play("track_end", {"backend": "mpg123"})
+
                     if self.on_track_end:
                         self.on_track_end()
 
-                    logger.info("Track ended (mpg123)")
-                    log_play("track_end", {"backend": "mpg123"})
                     break
                 time.sleep(0.5)
 
@@ -621,11 +662,12 @@ class AudioPlayer:
                         self.current_file = None
                         self._position = 0.0
 
+                    logger.info("Track ended (pygame)")
+                    log_play("track_end", {"backend": "pygame"})
+
                     if self.on_track_end:
                         self.on_track_end()
 
-                    logger.info("Track ended (pygame)")
-                    log_play("track_end", {"backend": "pygame"})
                     break
                 time.sleep(0.5)
 
