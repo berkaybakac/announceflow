@@ -1002,9 +1002,91 @@
             }, 3000);
         }
 
+        const USER_ACTION_WARNING_MESSAGE =
+            'İşlem beklenenden uzun sürdü. Sayfayı yenileyin; düzelmezse çıkış yapıp tekrar giriş yapın.';
+        const USER_ACTION_WARNING_DEFAULT_MS = 30000;
+        const USER_ACTION_WARNING_UPLOAD_MS = 120000;
+        let activeSlowActionWarnings = 0;
+
+        function showSlowActionNotice(message = USER_ACTION_WARNING_MESSAGE) {
+            let notice = document.getElementById('slowActionNotice');
+            if (!notice) {
+                notice = document.createElement('div');
+                notice.id = 'slowActionNotice';
+                notice.setAttribute('role', 'status');
+                notice.style.position = 'fixed';
+                notice.style.left = '50%';
+                notice.style.bottom = '24px';
+                notice.style.transform = 'translateX(-50%)';
+                notice.style.zIndex = '10000';
+                notice.style.maxWidth = 'min(92vw, 720px)';
+                notice.style.padding = '12px 16px';
+                notice.style.borderRadius = '10px';
+                notice.style.background = 'rgba(245, 158, 11, 0.96)';
+                notice.style.color = '#111827';
+                notice.style.fontWeight = '600';
+                notice.style.boxShadow = '0 10px 25px rgba(0,0,0,0.25)';
+                notice.style.display = 'none';
+                document.body.appendChild(notice);
+            }
+            notice.textContent = message;
+            notice.style.display = 'block';
+        }
+
+        function hideSlowActionNotice() {
+            const notice = document.getElementById('slowActionNotice');
+            if (notice) {
+                notice.style.display = 'none';
+            }
+        }
+
+        function startSlowActionMonitor(timeoutMs = USER_ACTION_WARNING_DEFAULT_MS, message = USER_ACTION_WARNING_MESSAGE) {
+            let shown = false;
+            const timer = setTimeout(() => {
+                shown = true;
+                activeSlowActionWarnings += 1;
+                showSlowActionNotice(message);
+            }, Math.max(1000, Number(timeoutMs) || USER_ACTION_WARNING_DEFAULT_MS));
+
+            return function stopMonitor() {
+                clearTimeout(timer);
+                if (shown) {
+                    activeSlowActionWarnings = Math.max(0, activeSlowActionWarnings - 1);
+                    if (activeSlowActionWarnings === 0) {
+                        hideSlowActionNotice();
+                    }
+                }
+            };
+        }
+
+        async function fetchUserAction(url, options = {}, config = {}) {
+            const timeoutMs = config.timeoutMs || USER_ACTION_WARNING_DEFAULT_MS;
+            const message = config.message || USER_ACTION_WARNING_MESSAGE;
+            const stopMonitor = startSlowActionMonitor(timeoutMs, message);
+            try {
+                return await fetch(url, options);
+            } finally {
+                stopMonitor();
+            }
+        }
+
+        function monitorUserSubmit(formElement, timeoutMs = USER_ACTION_WARNING_UPLOAD_MS, message = USER_ACTION_WARNING_MESSAGE) {
+            if (!formElement || formElement.dataset.slowMonitorBound === '1') {
+                return;
+            }
+            formElement.dataset.slowMonitorBound = '1';
+            formElement.addEventListener('submit', () => {
+                startSlowActionMonitor(timeoutMs, message);
+            });
+        }
+
         async function globalPlayerAction(url, fallbackError) {
             try {
-                const response = await fetch(url, { method: 'POST' });
+                const response = await fetchUserAction(
+                    url,
+                    { method: 'POST' },
+                    { timeoutMs: USER_ACTION_WARNING_DEFAULT_MS }
+                );
                 if (!response.ok) {
                     const data = await response.json().catch(() => ({}));
                     showToast(data.error || fallbackError, 'error');
@@ -1034,12 +1116,16 @@
             }
 
             try {
-                const response = await fetch(url, {
-                    method: 'DELETE',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    }
-                });
+                const response = await fetchUserAction(
+                    url,
+                    {
+                        method: 'DELETE',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        }
+                    },
+                    { timeoutMs: USER_ACTION_WARNING_DEFAULT_MS }
+                );
 
                 const data = await response.json();
 
@@ -1071,12 +1157,16 @@
             }
 
             try {
-                const response = await fetch(url, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    }
-                });
+                const response = await fetchUserAction(
+                    url,
+                    {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        }
+                    },
+                    { timeoutMs: USER_ACTION_WARNING_DEFAULT_MS }
+                );
 
                 const data = await response.json();
 
