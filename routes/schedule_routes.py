@@ -7,10 +7,17 @@ import re
 from datetime import datetime
 from flask import Blueprint, request, redirect, url_for, jsonify
 import database as db
+from services.schedule_conflict_service import (
+    find_conflict_for_one_time,
+    find_conflict_for_recurring,
+    has_self_overlap_for_interval,
+    resolve_duration_seconds,
+)
 from utils.helpers import login_required, _flash_redirect
 
 
 schedule_bp = Blueprint("schedule", __name__)
+SCHEDULE_CONFLICT_MESSAGE = "Seçtiğiniz süreyi kapsayan başka bir plan vardır."
 
 
 def validate_time_format(time_str: str) -> bool:
@@ -46,6 +53,12 @@ def api_add_one_time():
     if scheduled_dt <= datetime.now():
         return _flash_redirect(
             "Geçmiş bir tarih seçemezsiniz", "error", "one_time_schedules"
+        )
+
+    conflict = find_conflict_for_one_time(scheduled_dt, media_id_int)
+    if conflict:
+        return _flash_redirect(
+            SCHEDULE_CONFLICT_MESSAGE, "error", "one_time_schedules"
         )
 
     db.add_one_time_schedule(media_id_int, scheduled_dt, reason)
@@ -150,6 +163,18 @@ def api_add_recurring():
                 "recurring_schedules",
             )
 
+        candidate = {
+            "media_id": media_id_int,
+            "days_of_week": days,
+            "specific_times": times,
+            "schedule_type": "specific",
+        }
+        conflict = find_conflict_for_recurring(candidate)
+        if conflict:
+            return _flash_redirect(
+                SCHEDULE_CONFLICT_MESSAGE, "error", "recurring_schedules"
+            )
+
         db.add_recurring_schedule(
             media_id_int,
             days,
@@ -183,6 +208,26 @@ def api_add_recurring():
                 "Zaman aralığı en az 1 dakika olmalıdır", "error", "recurring_schedules"
             )
 
+        duration_seconds = resolve_duration_seconds(media_id_int)
+        if has_self_overlap_for_interval(duration_seconds, interval):
+            return _flash_redirect(
+                SCHEDULE_CONFLICT_MESSAGE, "error", "recurring_schedules"
+            )
+
+        candidate = {
+            "media_id": media_id_int,
+            "days_of_week": days,
+            "start_time": start_time,
+            "end_time": end_time,
+            "interval_minutes": interval,
+            "schedule_type": "interval",
+        }
+        conflict = find_conflict_for_recurring(candidate)
+        if conflict:
+            return _flash_redirect(
+                SCHEDULE_CONFLICT_MESSAGE, "error", "recurring_schedules"
+            )
+
         db.add_recurring_schedule(
             media_id_int, days, start_time, end_time, interval, reason=reason
         )
@@ -203,6 +248,36 @@ def api_toggle_recurring(schedule_id):
 
     if current:
         new_state = not current["is_active"]
+        if new_state:
+            media_id = int(current["media_id"])
+            is_interval = not bool(current.get("specific_times"))
+            if is_interval:
+                duration_seconds = resolve_duration_seconds(media_id)
+                interval_minutes = int(current.get("interval_minutes") or 0)
+                if has_self_overlap_for_interval(duration_seconds, interval_minutes):
+                    return _flash_redirect(
+                        SCHEDULE_CONFLICT_MESSAGE, "error", "recurring_schedules"
+                    )
+
+            candidate = {
+                "media_id": media_id,
+                "days_of_week": current.get("days_of_week", []),
+                "specific_times": current.get("specific_times"),
+                "start_time": current.get("start_time"),
+                "end_time": current.get("end_time"),
+                "interval_minutes": current.get("interval_minutes", 0),
+                "schedule_type": "specific"
+                if current.get("specific_times")
+                else "interval",
+            }
+            conflict = find_conflict_for_recurring(
+                candidate, exclude_recurring_id=schedule_id
+            )
+            if conflict:
+                return _flash_redirect(
+                    SCHEDULE_CONFLICT_MESSAGE, "error", "recurring_schedules"
+                )
+
         db.toggle_recurring_schedule(schedule_id, new_state)
         return _flash_redirect(
             "Plan durumu güncellendi", "success", "recurring_schedules"
