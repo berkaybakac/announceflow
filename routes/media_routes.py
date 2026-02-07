@@ -6,6 +6,8 @@ import os
 import subprocess
 import tempfile
 import shutil
+import threading
+import time
 from flask import Blueprint, request, redirect, url_for, flash, jsonify
 from werkzeug.utils import secure_filename
 import database as db
@@ -21,14 +23,34 @@ media_bp = Blueprint("media", __name__)
 MEDIA_FOLDER = str(load_config().get("media_folder", "media")).strip() or "media"
 ALLOWED_EXTENSIONS = {"mp3", "wav", "ogg", "aiff", "aif", "flac", "m4a", "wma", "mp2"}
 NEEDS_CONVERSION = {"wav", "ogg", "aiff", "aif", "flac", "m4a", "wma", "mp2"}
+RECENT_UPLOAD_TTL_SECONDS = 15
 
 os.makedirs(os.path.join(MEDIA_FOLDER, "music"), exist_ok=True)
 os.makedirs(os.path.join(MEDIA_FOLDER, "announcements"), exist_ok=True)
+
+_recent_upload_lock = threading.Lock()
+_recent_uploads = {}  # {(filename_lower, media_type, size_bytes): last_seen_ts}
 
 
 def allowed_file(filename):
     """Check if file extension is allowed."""
     return "." in filename and filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+def _is_recent_duplicate_upload(
+    filename: str, media_type: str, file_size: int, ttl_seconds: int = RECENT_UPLOAD_TTL_SECONDS
+) -> bool:
+    """Best-effort dedupe guard for rapid double-submit uploads."""
+    now = time.time()
+    key = (filename.lower(), media_type, int(file_size))
+    with _recent_upload_lock:
+        expired = [k for k, ts in _recent_uploads.items() if (now - ts) > ttl_seconds]
+        for k in expired:
+            _recent_uploads.pop(k, None)
+
+        last_seen = _recent_uploads.get(key)
+        _recent_uploads[key] = now
+        return last_seen is not None and (now - last_seen) <= ttl_seconds
 
 
 def convert_to_mp3(input_path: str, output_path: str) -> bool:
@@ -173,6 +195,14 @@ def api_media_upload():
             file.save(temp_path)
 
         try:
+            temp_size = os.path.getsize(temp_path)
+            if _is_recent_duplicate_upload(original_filename, media_type, temp_size):
+                return _flash_redirect(
+                    "Aynı dosya kısa sürede tekrar gönderildi. Çift tıklama engellendi.",
+                    "warning",
+                    "library",
+                )
+
             if not has_audio_stream(temp_path):
                 return _flash_redirect(
                     "Yüklenen dosya bozuk veya ses akışı içermiyor.",
