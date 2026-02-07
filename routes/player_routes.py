@@ -3,6 +3,9 @@ AnnounceFlow - Player Routes
 API endpoints for player control.
 """
 import logging
+import os
+import threading
+from typing import Optional
 from flask import Blueprint, jsonify, request
 import database as db
 from services.config_service import load_config
@@ -21,6 +24,28 @@ from utils.helpers import (
 
 player_bp = Blueprint("player", __name__)
 logger = logging.getLogger(__name__)
+_preview_lock = threading.Lock()
+_preview_context = {"media_id": None, "playback_session": None}
+
+
+def _set_preview_context(media_id: int, playback_session: Optional[int]) -> None:
+    """Track currently active library preview session."""
+    with _preview_lock:
+        _preview_context["media_id"] = media_id
+        _preview_context["playback_session"] = playback_session
+
+
+def _clear_preview_context() -> None:
+    """Clear tracked library preview session."""
+    with _preview_lock:
+        _preview_context["media_id"] = None
+        _preview_context["playback_session"] = None
+
+
+def _get_preview_context() -> dict:
+    """Get a snapshot of tracked preview session."""
+    with _preview_lock:
+        return dict(_preview_context)
 
 
 @player_bp.route("/api/health")
@@ -55,6 +80,7 @@ def api_play():
 
     data = request.get_json() or {}
     media_id = data.get("media_id")
+    is_library_preview = bool(data.get("library_preview", False))
 
     if not media_id:
         return _json_error("media_id required", 400)
@@ -75,6 +101,14 @@ def api_play():
             current_media_id=media_id, is_playing=True, position_seconds=0
         )
         log_web("play", {"media_id": media_id, "filename": media["filename"]})
+        playback_session = getattr(player, "_playback_session", None)
+        if is_library_preview:
+            _set_preview_context(int(media_id), playback_session)
+        else:
+            _clear_preview_context()
+    else:
+        if is_library_preview:
+            _clear_preview_context()
 
     return _json_success({"success": success})
 
@@ -85,6 +119,7 @@ def api_stop():
     """Stop playback."""
     player = get_player()
     success = player.stop()
+    _clear_preview_context()
     db.update_playback_state(current_media_id=0, is_playing=False, position_seconds=0)
     log_web("stop", {})
     return _json_success({"success": success})
@@ -94,7 +129,42 @@ def api_stop():
 @login_required
 def api_stop_preview():
     """Stop preview playback without breaking playlist loop."""
+    data = request.get_json(silent=True) or {}
+    raw_media_id = data.get("media_id")
+    try:
+        media_id = int(raw_media_id)
+        if media_id <= 0:
+            raise ValueError("must be positive")
+    except (TypeError, ValueError):
+        return _json_error("media_id required", 400)
+
     player = get_player()
+    media, error = _get_media_or_404(media_id)
+    if error:
+        return _json_success({"success": True, "ignored": True, "reason": "media_not_found"})
+
+    preview_ctx = _get_preview_context()
+    current_session = getattr(player, "_playback_session", None)
+    current_path = os.path.abspath(player.current_file) if player.current_file else ""
+    expected_path = os.path.abspath(media["filepath"])
+    is_active_preview_target = (
+        preview_ctx.get("media_id") == media_id
+        and preview_ctx.get("playback_session") == current_session
+        and player.is_playing
+        and current_path == expected_path
+    )
+
+    # Ignore stop requests unless the row belongs to active preview playback.
+    if not is_active_preview_target:
+        log_web(
+            "stop_preview_ignored",
+            {
+                "requested_media_id": media_id,
+                "preview_media_id": preview_ctx.get("media_id"),
+            },
+        )
+        return _json_success({"success": True, "ignored": True})
+
     config = load_config()
     resume_allowed = is_within_working_hours(config)
 
@@ -117,6 +187,7 @@ def api_stop_preview():
         )
 
     success = player.stop_preview(resume_allowed=resume_allowed)
+    _clear_preview_context()
     log_web("stop_preview", {"resume_allowed": resume_allowed})
     return _json_success({"success": success})
 
