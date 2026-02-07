@@ -102,8 +102,13 @@ scp ${SSH_OPTS} "${RELEASE_STAMP_LOCAL}" ${PI_USER}@${PI_HOST}:${DEST_DIR}/${REL
 ssh ${SSH_OPTS} ${PI_USER}@${PI_HOST} "chmod 644 ${DEST_DIR}/${RELEASE_STAMP_FILE}"
 
 echo ""
-# If present, protect .env permissions on Pi
-ssh ${SSH_OPTS} ${PI_USER}@${PI_HOST} "if [ -f ${DEST_DIR}/.env ]; then chmod 600 ${DEST_DIR}/.env; fi"
+# Ensure Flask secret key exists on Pi and protect .env permissions
+ssh ${SSH_OPTS} ${PI_USER}@${PI_HOST} "\
+if [ ! -f ${DEST_DIR}/.env ]; then touch ${DEST_DIR}/.env; fi; \
+if ! grep -q '^FLASK_SECRET_KEY=' ${DEST_DIR}/.env; then \
+  echo \"FLASK_SECRET_KEY=\$(/usr/bin/python3 -c 'import secrets;print(secrets.token_hex(32))')\" >> ${DEST_DIR}/.env; \
+fi; \
+chmod 600 ${DEST_DIR}/.env"
 
 echo ""
 # 2.5 Install system dependencies (mpg123 needed for audio)
