@@ -1,0 +1,18 @@
+[Unit]
+Description=AnnounceFlow Incident Snapshot (Hourly)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/home/admin/announceflow
+Environment=APP_DIR=/home/admin/announceflow
+Environment=BASE_DIR=/home/admin/pi_incidents
+Environment=RETENTION_COUNT=168
+Environment="SINCE_WINDOW=3 hours ago"
+Environment=SERVICE_NAME=announceflow
+ExecStart=/bin/bash /home/admin/announceflow/scripts/pi_incident_snapshot.sh
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7

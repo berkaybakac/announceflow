@@ -1,0 +1,12 @@
+[Unit]
+Description=Run AnnounceFlow Incident Snapshot Every Hour
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+AccuracySec=1min
+RandomizedDelaySec=2min
+Unit=pi-incident-snapshot.service
+
+[Install]
+WantedBy=timers.target

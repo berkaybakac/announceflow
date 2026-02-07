@@ -33,7 +33,11 @@ else
     RELEASE_BRANCH="unknown"
 fi
 
-RELEASE_STAMP_LOCAL="$(mktemp /tmp/announceflow_release_stamp_XXXXXX.json)"
+if RELEASE_STAMP_LOCAL="$(mktemp -t announceflow_release_stamp 2>/dev/null)"; then
+    :
+else
+    RELEASE_STAMP_LOCAL="$(mktemp /tmp/announceflow_release_stamp.XXXXXX)"
+fi
 cat > "${RELEASE_STAMP_LOCAL}" << EOF
 {
   "commit": "${RELEASE_COMMIT}",
