@@ -247,6 +247,12 @@
     let playStartedAt = 0;  // Unix timestamp ms when playback started
     let totalDuration = 0;  // Duration in seconds
     let timerInterval = null;
+    const NOW_PLAYING_POLL_INTERVAL_MS = 3000;
+    const NOW_PLAYING_REQUEST_TIMEOUT_MS = 2500;
+    let nowPlayingPollTimer = null;
+    let nowPlayingPollInFlight = false;
+    let nowPlayingAbortController = null;
+    let nowPlayingPollingEnabled = true;
 
     // Format seconds to M:SS
     function formatTime(seconds) {
@@ -262,7 +268,6 @@
 
         const now = Date.now();
         const elapsed = (now - playStartedAt) / 1000;  // seconds
-        const remaining = Math.max(0, totalDuration - elapsed);
         const progress = Math.min(100, (elapsed / totalDuration) * 100);
 
         document.getElementById('progressFill').style.width = `${progress}%`;
@@ -284,15 +289,51 @@
         }
     }
 
-    // Fetch and update player state
-    async function updatePlayerState() {
+    function clearNowPlayingPollTimer() {
+        if (nowPlayingPollTimer) {
+            clearTimeout(nowPlayingPollTimer);
+            nowPlayingPollTimer = null;
+        }
+    }
+
+    function abortNowPlayingRequest() {
+        if (nowPlayingAbortController) {
+            nowPlayingAbortController.abort();
+            nowPlayingAbortController = null;
+        }
+    }
+
+    async function fetchNowPlayingState(timeoutMs = NOW_PLAYING_REQUEST_TIMEOUT_MS) {
+        const controller = new AbortController();
+        nowPlayingAbortController = controller;
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
         try {
-            const response = await fetch('/api/now-playing');
-            const data = await response.json();
+            const response = await fetch('/api/now-playing', { signal: controller.signal });
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}`);
+            }
+            return await response.json();
+        } finally {
+            clearTimeout(timeoutId);
+            if (nowPlayingAbortController === controller) {
+                nowPlayingAbortController = null;
+            }
+        }
+    }
+
+    // Fetch and update player state (single-flight)
+    async function updatePlayerState() {
+        if (nowPlayingPollInFlight) {
+            return;
+        }
+
+        nowPlayingPollInFlight = true;
+        try {
+            const data = await fetchNowPlayingState();
 
             const titleEl = document.getElementById('trackTitle');
             const statusEl = document.getElementById('trackStatus');
-            const playBtn = document.getElementById('playBtn');
             const playBtnContainer = document.getElementById('playBtnContainer');
             const progressFill = document.getElementById('progressFill');
             const currentTimeEl = document.getElementById('currentTime');
@@ -300,49 +341,120 @@
             const volumeSlider = document.getElementById('volumeSlider');
             const volumeValue = document.getElementById('volumeValue');
 
-            if (data.filename) {
+            if (data.is_playing && data.filename) {
                 titleEl.textContent = data.filename;
-                statusEl.textContent = data.is_playing ? 'Çalıyor... (Stop ile durdurun)' : 'Durduruldu';
+                statusEl.innerHTML = `
+                    <span style="display: inline-flex; align-items: center; gap: 6px;">
+                        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                            style="width: 16px; height: 16px;">
+                            <path stroke-linecap="round" stroke-linejoin="round"
+                                d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971l-11.54 6.347a1.125 1.125 0 01-1.667-.985V5.653z" />
+                        </svg>
+                        Oynatılıyor
+                    </span>
+                `;
+                isPlaying = true;
                 currentMediaId = data.current_media_id;
-                isPlaying = data.is_playing;
 
-                // Hide Play button while playing
-                if (isPlaying) {
+                if (playBtnContainer) {
                     playBtnContainer.style.display = 'none';
-                } else {
-                    playBtnContainer.style.display = 'block';
                 }
 
-                // Update timer data from API
-                if (data.is_playing && data.started_at && data.duration_seconds) {
+                const duration = data.duration_seconds || data.duration || 0;
+                if (duration > 0 && data.started_at) {
                     playStartedAt = data.started_at;  // Unix ms from server
-                    totalDuration = data.duration_seconds;
+                    totalDuration = duration;
                     updateProgressDisplay();
                     startProgressTimer();
                 } else {
                     stopProgressTimer();
-                    if (!data.is_playing) {
-                        progressFill.style.width = '0%';
-                        currentTimeEl.textContent = '0:00';
-                        totalTimeEl.textContent = data.duration_seconds ? formatTime(data.duration_seconds) : '0:00';
-                    }
+                    progressFill.style.width = '0%';
+                    currentTimeEl.textContent = '0:00';
+                    totalTimeEl.textContent = duration > 0 ? formatTime(duration) : '0:00';
+                }
+            } else if (data.filename) {
+                titleEl.textContent = data.filename;
+                statusEl.textContent = 'Durduruldu';
+                isPlaying = false;
+                currentMediaId = data.current_media_id;
+                stopProgressTimer();
+                progressFill.style.width = '0%';
+                currentTimeEl.textContent = '0:00';
+                totalTimeEl.textContent = data.duration_seconds ? formatTime(data.duration_seconds) : '0:00';
+                if (playBtnContainer) {
+                    playBtnContainer.style.display = 'block';
                 }
             } else {
                 titleEl.textContent = 'Çalan parça yok';
                 statusEl.textContent = 'Bir dosya seçerek başlayın';
-                playBtnContainer.style.display = 'none';
                 isPlaying = false;
+                currentMediaId = null;
                 stopProgressTimer();
                 progressFill.style.width = '0%';
                 currentTimeEl.textContent = '0:00';
                 totalTimeEl.textContent = '0:00';
+                if (playBtnContainer) {
+                    playBtnContainer.style.display = 'none';
+                }
             }
 
             volumeSlider.value = data.volume ?? 80;
             volumeValue.textContent = `${data.volume ?? 80}%`;
 
+            const playlistStatus = document.getElementById('playlistStatus');
+            const playlistCurrentTrack = document.getElementById('playlistCurrentTrack');
+            const playlistProgress = document.getElementById('playlistProgress');
+
+            if (data.playlist && data.playlist.active) {
+                playlistStatus.style.display = 'block';
+
+                if (data.filename) {
+                    playlistCurrentTrack.textContent = data.filename;
+                }
+                playlistProgress.textContent = `(${data.playlist.current_index + 1}/${data.playlist.tracks})`;
+            } else {
+                playlistStatus.style.display = 'none';
+            }
         } catch (error) {
-            console.error('Error fetching player state:', error);
+            if (error.name !== 'AbortError') {
+                console.error('Error updating player state:', error);
+            }
+        } finally {
+            nowPlayingPollInFlight = false;
+        }
+    }
+
+    function scheduleNextNowPlayingPoll(delayMs = NOW_PLAYING_POLL_INTERVAL_MS) {
+        clearNowPlayingPollTimer();
+        if (!nowPlayingPollingEnabled || document.visibilityState === 'hidden') {
+            return;
+        }
+        nowPlayingPollTimer = setTimeout(runNowPlayingPoll, delayMs);
+    }
+
+    async function runNowPlayingPoll() {
+        if (!nowPlayingPollingEnabled || document.visibilityState === 'hidden') {
+            return;
+        }
+        await updatePlayerState();
+        scheduleNextNowPlayingPoll();
+    }
+
+    function stopNowPlayingPolling() {
+        nowPlayingPollingEnabled = false;
+        clearNowPlayingPollTimer();
+        abortNowPlayingRequest();
+    }
+
+    function onNowPlayingVisibilityChange() {
+        if (!nowPlayingPollingEnabled) {
+            return;
+        }
+        if (document.visibilityState === 'hidden') {
+            clearNowPlayingPollTimer();
+            abortNowPlayingRequest();
+        } else {
+            runNowPlayingPoll();
         }
     }
 
@@ -449,84 +561,11 @@
         }
     }
 
-    // Update playlist status in updatePlayerState
-    const originalUpdatePlayerState = updatePlayerState;
-    updatePlayerState = async function () {
-        try {
-            const response = await fetch('/api/now-playing');
-            const data = await response.json();
+    document.addEventListener('visibilitychange', onNowPlayingVisibilityChange);
+    window.addEventListener('pagehide', stopNowPlayingPolling);
+    window.addEventListener('beforeunload', stopNowPlayingPolling);
 
-            // Update main player info
-            const titleEl = document.getElementById('trackTitle');
-            const statusEl = document.getElementById('trackStatus');
-            const progressFill = document.getElementById('progressFill');
-            const currentTimeEl = document.getElementById('currentTime');
-            const totalTimeEl = document.getElementById('totalTime');
-            const volumeSlider = document.getElementById('volumeSlider');
-            const volumeValue = document.getElementById('volumeValue');
-
-            if (data.is_playing && data.filename) {
-                titleEl.textContent = data.filename;
-                statusEl.innerHTML = `
-                    <span style="display: inline-flex; align-items: center; gap: 6px;">
-                        <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"
-                            style="width: 16px; height: 16px;">
-                            <path stroke-linecap="round" stroke-linejoin="round"
-                                d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971l-11.54 6.347a1.125 1.125 0 01-1.667-.985V5.653z" />
-                        </svg>
-                        Oynatılıyor
-                    </span>
-                `;
-
-                // Progress calculation
-                const duration = data.duration_seconds || data.duration || 0;
-                if (duration > 0 && data.started_at) {
-                    const elapsed = (Date.now() - data.started_at) / 1000;
-                    const progress = Math.min(100, Math.max(0, (elapsed / duration) * 100));
-                    progressFill.style.width = progress + '%';
-                    currentTimeEl.textContent = formatTime(elapsed);
-                    totalTimeEl.textContent = formatTime(duration);
-                }
-            } else {
-                titleEl.textContent = 'Çalan parça yok';
-                statusEl.textContent = 'Bir dosya seçerek başlayın';
-                progressFill.style.width = '0%';
-                currentTimeEl.textContent = '0:00';
-                totalTimeEl.textContent = '0:00';
-            }
-
-            volumeSlider.value = data.volume ?? 80;
-            volumeValue.textContent = (data.volume ?? 80) + '%';
-
-            // Update playlist status
-            const playlistStatus = document.getElementById('playlistStatus');
-            const playlistCurrentTrack = document.getElementById('playlistCurrentTrack');
-            const playlistProgress = document.getElementById('playlistProgress');
-
-            if (data.playlist && data.playlist.active) {
-                playlistStatus.style.display = 'block';
-
-                if (data.filename) {
-                    playlistCurrentTrack.textContent = data.filename;
-                }
-                playlistProgress.textContent = `(${data.playlist.current_index + 1}/${data.playlist.tracks})`;
-            } else {
-                playlistStatus.style.display = 'none';
-            }
-        } catch (error) {
-            console.error('Error updating player state:', error);
-        }
-    };
-
-    function formatTime(seconds) {
-        const mins = Math.floor(seconds / 60);
-        const secs = Math.floor(seconds % 60);
-        return `${mins}:${secs.toString().padStart(2, '0')}`;
-    }
-
-    // Update state every 3 seconds (optimized for performance)
-    setInterval(updatePlayerState, 3000);
-    updatePlayerState();
+    runNowPlayingPoll();
 
     // ============ ŞARKI LİSTESİ FONKSİYONLARI ============
 
