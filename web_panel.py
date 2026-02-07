@@ -8,6 +8,7 @@ import secrets
 import re
 import json
 import shutil
+import time
 from datetime import datetime, timedelta
 from flask import (
     Flask,
@@ -18,6 +19,7 @@ from flask import (
     flash,
     session,
     jsonify,
+    g,
 )
 
 import database as db
@@ -28,6 +30,8 @@ from services.config_service import load_config, save_config, load_dotenv_if_pre
 
 app = Flask(__name__)
 load_dotenv_if_present()
+SLOW_REQUEST_THRESHOLD_MS = 2000
+logger = logging.getLogger(__name__)
 
 def _resolve_secret_key() -> str:
     """Resolve Flask secret key from env/config, else auto-generate and persist."""
@@ -66,6 +70,30 @@ MEDIA_FOLDER = str(_boot_config.get("media_folder", "media")).strip() or "media"
 # Ensure media directories exist
 os.makedirs(os.path.join(MEDIA_FOLDER, "music"), exist_ok=True)
 os.makedirs(os.path.join(MEDIA_FOLDER, "announcements"), exist_ok=True)
+
+
+@app.before_request
+def _track_request_start_time():
+    """Capture request start for slow request diagnostics."""
+    g._request_started_at = time.perf_counter()
+
+
+@app.after_request
+def _log_slow_request(response):
+    """Log slow requests without changing behavior."""
+    started_at = getattr(g, "_request_started_at", None)
+    if started_at is not None:
+        duration_ms = (time.perf_counter() - started_at) * 1000
+        if duration_ms >= SLOW_REQUEST_THRESHOLD_MS:
+            logger.warning(
+                "SLOW_REQUEST method=%s path=%s endpoint=%s status=%s duration_ms=%.1f",
+                request.method,
+                request.path,
+                request.endpoint or "-",
+                response.status_code,
+                duration_ms,
+            )
+    return response
 
 
 # ============ HELPERS ============
