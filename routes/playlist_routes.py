@@ -72,6 +72,12 @@ def api_playlist_next():
         return blocked
 
     player = get_player()
+    # Guard: "next" should only work while loop/playlist mode is active.
+    # If user previously pressed Stop, keep system stopped.
+    if not player._playlist_active or len(player._playlist) == 0:
+        logger.info("[source] manual next ignored -> playlist inactive")
+        return _json_success({"success": True, "ignored": True, "reason": "playlist_inactive"})
+
     logger.info("[source] manual play -> playlist next track")
     success = player.play_next()
     return _json_success({"success": success})
