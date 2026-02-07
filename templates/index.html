@@ -340,6 +340,9 @@
             const totalTimeEl = document.getElementById('totalTime');
             const volumeSlider = document.getElementById('volumeSlider');
             const volumeValue = document.getElementById('volumeValue');
+            if (playBtnContainer) {
+                playBtnContainer.style.display = 'block';
+            }
 
             if (data.is_playing && data.filename) {
                 titleEl.textContent = data.filename;
@@ -355,10 +358,6 @@
                 `;
                 isPlaying = true;
                 currentMediaId = data.current_media_id;
-
-                if (playBtnContainer) {
-                    playBtnContainer.style.display = 'none';
-                }
 
                 const duration = data.duration_seconds || data.duration || 0;
                 if (duration > 0 && data.started_at) {
@@ -381,9 +380,6 @@
                 progressFill.style.width = '0%';
                 currentTimeEl.textContent = '0:00';
                 totalTimeEl.textContent = data.duration_seconds ? formatTime(data.duration_seconds) : '0:00';
-                if (playBtnContainer) {
-                    playBtnContainer.style.display = 'block';
-                }
             } else {
                 titleEl.textContent = 'Çalan parça yok';
                 statusEl.textContent = 'Bir dosya seçerek başlayın';
@@ -393,9 +389,6 @@
                 progressFill.style.width = '0%';
                 currentTimeEl.textContent = '0:00';
                 totalTimeEl.textContent = '0:00';
-                if (playBtnContainer) {
-                    playBtnContainer.style.display = 'none';
-                }
             }
 
             volumeSlider.value = data.volume ?? 80;
