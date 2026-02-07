@@ -202,17 +202,26 @@ def init_database():
     conn.commit()
     conn.close()
 
-    # Backfill missing duration values
-    _backfill_durations()
-
     # Run migrations
     _run_migrations()
+
+    # Backfill missing duration values
+    _backfill_durations()
 
 
 def _run_migrations():
     """Run database migrations for schema updates."""
     conn = get_db_connection()
     cursor = conn.cursor()
+
+    # Migration: Add duration_seconds column to media_files if it doesn't exist
+    try:
+        cursor.execute("SELECT duration_seconds FROM media_files LIMIT 1")
+    except sqlite3.OperationalError:
+        cursor.execute(
+            "ALTER TABLE media_files ADD COLUMN duration_seconds INTEGER DEFAULT 0"
+        )
+        conn.commit()
 
     # Migration: Add 'reason' column to one_time_schedules if it doesn't exist
     try:
