@@ -464,6 +464,12 @@
             const state = localStorage.getItem('section_' + type);
             setSectionOpen(type, state === 'open', false);
         });
+
+        const uploadForm = document.querySelector('form[action="/api/media/upload"]');
+        if (typeof monitorUserSubmit === 'function') {
+            monitorUserSubmit(uploadForm, 120000);
+        }
+
         const fileInput = document.getElementById('mediaFileInput');
         if (fileInput) {
             fileInput.addEventListener('change', updateSelectedFileName);
@@ -566,11 +572,15 @@
         if (!confirm(`${ids.length} dosyayı silmek istediğinize emin misiniz?`)) return;
 
         try {
-            const response = await fetch('/api/media/delete-batch', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ ids })
-            });
+            const response = await fetchUserAction(
+                '/api/media/delete-batch',
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ids })
+                },
+                { timeoutMs: 30000 }
+            );
             const data = await response.json().catch(() => ({}));
 
             if (response.ok && data.success) {
@@ -588,11 +598,15 @@
 
     async function playFile(mediaId) {
         try {
-            const response = await fetch('/api/play', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ media_id: mediaId, library_preview: true })
-            });
+            const response = await fetchUserAction(
+                '/api/play',
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ media_id: mediaId, library_preview: true })
+                },
+                { timeoutMs: 30000 }
+            );
             if (!response.ok) {
                 const data = await response.json().catch(() => ({}));
                 showToast(data.error || 'Çalma başarısız', 'error');
@@ -605,11 +619,15 @@
 
     async function stopPlayback(mediaId) {
         try {
-            const response = await fetch('/api/stop-preview', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ media_id: parseInt(mediaId, 10) })
-            });
+            const response = await fetchUserAction(
+                '/api/stop-preview',
+                {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ media_id: parseInt(mediaId, 10) })
+                },
+                { timeoutMs: 30000 }
+            );
             if (!response.ok) {
                 const data = await response.json().catch(() => ({}));
                 showToast(data.error || 'Durdurma başarısız', 'error');

@@ -178,6 +178,13 @@
 
 {% block extra_js %}
 <script>
+    function fetchAction(url, options = {}, timeoutMs = 30000) {
+        if (typeof fetchUserAction === 'function') {
+            return fetchUserAction(url, options, { timeoutMs });
+        }
+        return fetch(url, options);
+    }
+
     // Alpine.js Player Component
     function playerState() {
         return {
@@ -196,7 +203,7 @@
 
             async stop() {
                 try {
-                    await fetch('/api/stop', { method: 'POST' });
+                    await fetchAction('/api/stop', { method: 'POST' }, 30000);
                     console.log('Stopped playback');
                 } catch (error) {
                     console.error('Error stopping:', error);
@@ -205,7 +212,7 @@
 
             async play() {
                 try {
-                    const response = await fetch('/api/playlist/start-all', { method: 'POST' });
+                    const response = await fetchAction('/api/playlist/start-all', { method: 'POST' }, 30000);
                     if (response.ok) {
                         console.log('Started loop playback');
                     } else {
@@ -220,7 +227,7 @@
 
             async next() {
                 try {
-                    const response = await fetch('/api/playlist/next', { method: 'POST' });
+                    const response = await fetchAction('/api/playlist/next', { method: 'POST' }, 30000);
                     if (response.ok) {
                         console.log('Skipped to next track');
                     } else {
@@ -341,7 +348,7 @@
 
     async function stopPlayback() {
         try {
-            await fetch('/api/stop', { method: 'POST' });
+            await fetchAction('/api/stop', { method: 'POST' }, 30000);
             updatePlayerState();
         } catch (error) {
             console.error('Error stopping playback:', error);
@@ -351,11 +358,11 @@
     async function setVolume(value) {
         document.getElementById('volumeValue').textContent = `${value}%`;
         try {
-            await fetch('/api/volume', {
+            await fetchAction('/api/volume', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ volume: parseInt(value) })
-            });
+            }, 30000);
         } catch (error) {
             console.error('Error setting volume:', error);
         }
@@ -371,11 +378,11 @@
         }
 
         try {
-            const response = await fetch('/api/play', {
+            const response = await fetchAction('/api/play', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ media_id: parseInt(mediaId) })
-            });
+            }, 30000);
             if (!response.ok) {
                 const data = await response.json().catch(() => ({}));
                 showToast(data.error || 'Çalma başarısız', 'error');
@@ -402,11 +409,11 @@
 
         try {
             // First set the playlist
-            const setResult = await fetch('/api/playlist/set', {
+            const setResult = await fetchAction('/api/playlist/set', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ media_ids: mediaIds, loop: true })
-            });
+            }, 30000);
 
             if (!setResult.ok) {
                 alert('Playlist oluşturulamadı');
@@ -414,7 +421,7 @@
             }
 
             // Then start playing
-            const playResult = await fetch('/api/playlist/play', { method: 'POST' });
+            const playResult = await fetchAction('/api/playlist/play', { method: 'POST' }, 30000);
             if (!playResult.ok) {
                 const data = await playResult.json().catch(() => ({}));
                 showToast(data.error || 'Playlist başlatılamadı', 'error');
@@ -429,7 +436,7 @@
 
     async function skipToNext() {
         try {
-            const response = await fetch('/api/playlist/next', { method: 'POST' });
+            const response = await fetchAction('/api/playlist/next', { method: 'POST' }, 30000);
             if (!response.ok) {
                 const data = await response.json().catch(() => ({}));
                 showToast(data.error || 'Sonraki parça başlatılamadı', 'error');
