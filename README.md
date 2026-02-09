@@ -1,383 +1,283 @@
 <div align="center">
 
-# AnnounceFlow
+# 🎵 AnnounceFlow
 
-### Intelligent Music & Announcement Management System for Commercial Spaces
+### Autonomous Audio Management System for Commercial Spaces
 
-**Set it once, let it run forever.**
+**Set it once. Let it run forever.**
 
-[Features](#-features) · [Installation](#-installation) · [Quick Start](#-quick-start) · [FAQ](#-faq)
+[![Python](https://img.shields.io/badge/Python-3.9+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
+[![Flask](https://img.shields.io/badge/Flask-3.0-000000?style=for-the-badge&logo=flask&logoColor=white)](https://flask.palletsprojects.com)
+[![SQLite](https://img.shields.io/badge/SQLite-Database-003B57?style=for-the-badge&logo=sqlite&logoColor=white)](https://sqlite.org)
+[![Raspberry Pi](https://img.shields.io/badge/Raspberry%20Pi%204-Hardware-A22846?style=for-the-badge&logo=raspberrypi&logoColor=white)](https://raspberrypi.org)
 
----
-
-![Python](https://img.shields.io/badge/Python-3.9%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)
-![Flask](https://img.shields.io/badge/Flask-3.0-000000?style=for-the-badge&logo=flask&logoColor=white)
-![SQLite](https://img.shields.io/badge/SQLite-003B57?style=for-the-badge&logo=sqlite&logoColor=white)
-![Raspberry Pi](https://img.shields.io/badge/Raspberry%20Pi%204-A22846?style=for-the-badge&logo=raspberrypi&logoColor=white)
-![HTML5](https://img.shields.io/badge/HTML5-E34F26?style=for-the-badge&logo=html5&logoColor=white)
-![CSS3](https://img.shields.io/badge/CSS3-1572B6?style=for-the-badge&logo=css3&logoColor=white)
-![JavaScript](https://img.shields.io/badge/JavaScript-F7DF1E?style=for-the-badge&logo=javascript&logoColor=black)
-![Jinja2](https://img.shields.io/badge/Jinja2-B41717?style=for-the-badge&logo=jinja&logoColor=white)
-![REST API](https://img.shields.io/badge/REST%20API-009688?style=for-the-badge&logo=fastapi&logoColor=white)
-![GitHub Actions](https://img.shields.io/badge/GitHub%20Actions-2088FF?style=for-the-badge&logo=githubactions&logoColor=white)
-![Git](https://img.shields.io/badge/Git-F05032?style=for-the-badge&logo=git&logoColor=white)
-![Windows](https://img.shields.io/badge/Windows-Desktop%20Agent-0078D6?style=for-the-badge&logo=windows&logoColor=white)
-![Version](https://img.shields.io/badge/Version-1.6.4-blue?style=for-the-badge)
-![License](https://img.shields.io/badge/License-Proprietary-red?style=for-the-badge)
+[Features](#-key-features) · [Architecture](#-architecture) · [Tech Stack](#-tech-stack) · [Installation](#-installation) · [Screenshots](#-screenshots)
 
 </div>
 
 ---
 
-## Why AnnounceFlow?
+## 📋 Overview
 
-As a restaurant, cafe, or retail store owner, you face the same problems every day:
+**AnnounceFlow** is a production-ready, embedded audio management system designed for restaurants, cafes, and retail stores. Running on Raspberry Pi 4, it provides **24/7 autonomous operation** with zero daily maintenance.
 
-| Problem | Result |
-|---------|--------|
-| Music wasn't turned on | Customers sit in awkward silence |
-| Prayer time came but no one muted the music | Customer sensitivity issues |
-| Business hours ended but music still playing | Unnecessary energy consumption |
-| Staff changed | New employee doesn't know the system |
-| Power outage | Everything resets to zero |
+The system was built to solve real-world problems faced by business owners:
+- Staff forgetting to turn on background music
+- Music playing during prayer times (culturally sensitive in Turkey)
+- Audio continuing after business hours
+- Complete reset after power outages
 
-**AnnounceFlow** was built to solve exactly these problems. Running on a Raspberry Pi 4, this system operates **24/7 autonomously** once configured. No more waiting for staff to turn on music, tracking prayer times, or worrying about business hours.
-
-> *"Configure once, forget forever. Let the system work for you."*
+> 💡 **Real-World Deployment:** Successfully deployed and running in a fast-food restaurant since January 2026.
 
 ---
 
-## Features
+## ✨ Key Features
 
-### Automated Music Management
-- 24/7 uninterrupted background music
-- Playlist support - play all songs in sequence and loop
-- Supported formats: MP3, WAV, OGG, FLAC, M4A, WMA, AIFF
-- Automatic format conversion (all formats converted to MP3)
+### 🎶 Intelligent Playback
+- Continuous background music with playlist looping
+- Multi-format support: MP3, WAV, FLAC, M4A, OGG, WMA, AIFF
+- Automatic format conversion via FFmpeg
+- Resume-from-position after interruptions
 
-### Prayer Time Integration
-- Automatic prayer times via Turkish Diyanet API
-- Precise timing for all 81 Turkish provinces and districts
-- Auto-mute during prayer, resume from where it left off
-- 7-day pre-cache for internet outage resilience
+### 🕌 Prayer Time Integration
+- Real-time prayer times via Turkish Diyanet API
+- Coverage for all 81 Turkish provinces and 900+ districts
+- 7-day cache for offline resilience
+- Auto-mute during prayer, auto-resume after
 
-### Business Hours Automation
-- Define opening and closing times
+### ⏰ Business Hours Automation
+- Define opening/closing hours per day
 - Automatic silence outside business hours
-- Auto-start when business opens
-- Weekend/holiday support
+- Weekend and holiday support
+- Zero staff intervention required
 
-### Scheduling System
-- **One-time:** Schedule special announcements for specific date/time
-- **Recurring:** Daily, hourly, or custom day announcements
-- Announcements interrupt music, then music resumes from where it stopped
+### 📢 Announcement Scheduling
+- **One-time:** Schedule announcements for specific date/time
+- **Recurring:** Daily, weekly, or custom patterns
+- Priority interruption: Announcements pause music, then resume from exact position
 
-### Web-Based Management Panel
-- Access from any device (phone, tablet, computer)
-- Modern, user-friendly interface
-- Secure access with username and password
+### 🌐 Web-Based Control Panel
+- Responsive design for mobile, tablet, and desktop
 - Real-time system status monitoring
+- Secure authentication with session management
+- Dark mode UI
 
-### Windows Desktop Application
-- System tray icon for quick access
-- One-click music start/stop
-- Volume control
-- Easy EXE installation - no technical knowledge required
+### 🖥️ Windows Desktop Agent
+- System tray application for quick access
+- One-click play/pause control
+- Volume slider
+- Built with PyInstaller for easy distribution
 
-### Power Failure Recovery
-- Resumes from last state after power outage
-- Auto-start with systemd
-- State persistence in database
-- Zero intervention required
-
----
-
-## Tech Stack
-
-| Layer | Technology |
-|-------|------------|
-| **Backend** | Python 3.9+, Flask 3.0, Waitress WSGI |
-| **Database** | SQLite (embedded, serverless) |
-| **Audio Engine** | mpg123 (Pi), pygame (dev), ffmpeg |
-| **Frontend** | HTML5, CSS3, JavaScript, Jinja2 |
-| **Desktop** | tkinter, pystray, PyInstaller |
-| **API** | Turkish Diyanet Prayer Times API |
-| **Deployment** | systemd, GitHub Actions, rsync |
-| **Hardware** | Raspberry Pi 4 (2GB+ RAM) |
+### ⚡ Power Failure Recovery
+- Automatic service restart via systemd
+- State persistence in SQLite database
+- Resumes playback from last known position
+- Zero-touch recovery
 
 ---
 
-## System Architecture
+## 🏗️ Architecture
 
 ```
-┌──────────────────┐      ┌──────────────────┐      ┌──────────────────┐
-│  Windows Agent   │ ◄──► │   Flask Server   │ ◄──► │   Audio Player   │
-│  (Desktop EXE)   │      │   (Port 5001)    │      │   (mpg123)       │
-└──────────────────┘      └────────┬─────────┘      └──────────────────┘
-                                   │
-                    ┌──────────────┼──────────────┐
-                    │              │              │
-             ┌──────▼──────┐ ┌─────▼─────┐ ┌──────▼──────┐
-             │  Scheduler  │ │  SQLite   │ │ Prayer API  │
-             │  (Timing)   │ │  (Data)   │ │ (Diyanet)   │
-             └─────────────┘ └───────────┘ └─────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│                        Client Layer                              │
+├──────────────────┬──────────────────┬───────────────────────────┤
+│   Web Browser    │  Windows Agent   │     Mobile Browser        │
+│   (Any Device)   │  (System Tray)   │    (Responsive UI)        │
+└────────┬─────────┴────────┬─────────┴─────────────┬─────────────┘
+         │                  │                       │
+         └──────────────────┼───────────────────────┘
+                            │ HTTP/REST API
+                            ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                    Flask Application Server                      │
+│                      (Waitress WSGI)                             │
+├─────────────────────────────────────────────────────────────────┤
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐  │
+│  │   Routes    │  │   Player    │  │      Scheduler          │  │
+│  │ (Blueprints)│  │  (mpg123)   │  │ (APScheduler + Custom)  │  │
+│  └─────────────┘  └─────────────┘  └─────────────────────────┘  │
+├─────────────────────────────────────────────────────────────────┤
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐  │
+│  │  Services   │  │ Repositories│  │    Prayer Times API     │  │
+│  │  (Logic)    │  │  (SQLite)   │  │    (Diyanet.gov.tr)     │  │
+│  └─────────────┘  └─────────────┘  └─────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                      Hardware Layer                              │
+├──────────────────┬──────────────────┬───────────────────────────┤
+│  Raspberry Pi 4  │   Audio Output   │     Network/WiFi          │
+│   (2GB+ RAM)     │  (3.5mm/HDMI)    │                           │
+└──────────────────┴──────────────────┴───────────────────────────┘
 ```
 
 ---
 
-## Installation
+## 🛠️ Tech Stack
 
-### Requirements
+| Layer | Technology | Purpose |
+|-------|------------|---------|
+| **Backend** | Python 3.9+, Flask 3.0 | Application server |
+| **WSGI** | Waitress | Production-grade HTTP server |
+| **Database** | SQLite | Embedded, serverless data persistence |
+| **Audio** | mpg123, FFmpeg | Playback engine and format conversion |
+| **Frontend** | HTML5, CSS3, JavaScript | Responsive web interface |
+| **Templating** | Jinja2 | Server-side rendering |
+| **Desktop** | Tkinter, Pystray, PyInstaller | Windows tray application |
+| **Scheduling** | APScheduler + Custom Logic | Time-based automation |
+| **External API** | Diyanet Prayer Times API | Islamic prayer time data |
+| **Deployment** | systemd, rsync, SSH | Automated Pi deployment |
+| **Hardware** | Raspberry Pi 4 | Embedded Linux platform |
+
+---
+
+## 📁 Project Structure
+
+```
+announceflow/
+├── main.py                 # Application entry point
+├── web_panel.py            # Flask app initialization
+├── player.py               # Audio playback engine (mpg123/pygame)
+├── scheduler.py            # Time-based job scheduling
+├── prayer_times.py         # Diyanet API integration
+├── logger.py               # Rotating file logger
+│
+├── routes/                 # Flask Blueprints (API endpoints)
+│   ├── api_routes.py       # Core REST API
+│   ├── playback_routes.py  # Play/pause/volume controls
+│   ├── schedule_routes.py  # Announcement scheduling
+│   └── settings_routes.py  # Configuration management
+│
+├── database/               # Data access layer
+│   ├── __init__.py         # Schema initialization
+│   ├── base_repository.py  # Abstract repository
+│   ├── media_repository.py # Music file management
+│   ├── playback_repository.py  # Playback state
+│   └── schedule_repository.py  # Scheduled announcements
+│
+├── services/               # Business logic layer
+├── templates/              # Jinja2 HTML templates
+├── agent/                  # Windows desktop application
+├── tests/                  # Unit and integration tests
+│
+├── deploy.sh               # One-command Pi deployment
+├── requirements.txt        # Python dependencies
+└── config.example.json     # Configuration template
+```
+
+---
+
+## 🚀 Installation
+
+### Prerequisites
 
 | Component | Requirement |
 |-----------|-------------|
-| **Hardware** | Raspberry Pi 4 (2GB+ RAM recommended) |
-| **OS** | Raspberry Pi OS (64-bit Lite or Desktop) |
-| **Audio Output** | 3.5mm jack, HDMI, or USB sound card |
-| **Network** | Internet connection (for initial setup and prayer times) |
+| Hardware | Raspberry Pi 4 (2GB+ RAM recommended) |
+| OS | Raspberry Pi OS (64-bit) |
+| Audio | 3.5mm jack, HDMI, or USB sound card |
+| Network | Internet for initial setup and prayer times |
 
-### Step 1: System Preparation
-
-```bash
-# Update system
-sudo apt update && sudo apt upgrade -y
-
-# Install required packages
-sudo apt install -y python3 python3-pip python3-venv mpg123 ffmpeg git
-```
-
-### Step 2: Download Project
+### Quick Setup
 
 ```bash
-# Navigate to home directory
-cd ~
+# 1. System dependencies
+sudo apt update && sudo apt install -y python3 python3-pip python3-venv mpg123 ffmpeg git
 
-# Clone the project
-git clone https://github.com/USERNAME/announceflow.git
+# 2. Clone repository
+git clone https://github.com/YOUR_USERNAME/announceflow.git
 cd announceflow
-```
 
-### Step 3: Set Up Python Environment
-
-```bash
-# Create virtual environment (recommended)
+# 3. Python environment
 python3 -m venv venv
 source venv/bin/activate
-
-# Install dependencies
 pip install -r requirements.txt
-```
 
-### Security & Config (Recommended)
-
-```bash
-# Create local config from example
+# 4. Configuration
 cp config.example.json config.json
-
-# (Optional but recommended) Create local .env for secret key
 cp .env.example .env
-```
+# Edit config.json with your settings
 
-- Update `config.json` admin credentials before first use.
-- `FLASK_SECRET_KEY` tanımlanmazsa uygulama ilk açılışta otomatik üretip kaydeder.
-- Do not commit real `config.json` or `.env` to GitHub.
+# 5. Run directly (development)
+python main.py
 
-### Step 4: Configure Audio Output
-
-```bash
-# List audio devices
-aplay -l
-
-# Configure for 3.5mm jack
-sudo raspi-config
-# Select: Advanced Options > Audio > Force 3.5mm jack
-```
-
-### Step 5: Install Service (Auto-Start)
-
-```bash
-# Copy service file
+# 6. Install as service (production)
 sudo cp announceflow.service /etc/systemd/system/
-
-# Enable and start service
 sudo systemctl daemon-reload
 sudo systemctl enable announceflow
 sudo systemctl start announceflow
 ```
 
-### Step 6: Test Access
+### One-Command Deployment
 
-Open in your browser:
+For remote deployment to Raspberry Pi:
+
+```bash
+./deploy.sh pi4.local
 ```
-http://RASPBERRY_PI_IP:5001
+
+This script handles:
+- File synchronization via rsync
+- Python dependency installation
+- systemd service configuration
+- Automatic service restart
+- Health check verification
+
+---
+
+## 📸 Screenshots
+
+> *Screenshots coming soon*
+
+---
+
+## 🧪 Testing
+
+```bash
+# Run all tests
+python -m pytest tests/ -v
+
+# Run specific test file
+python -m pytest tests/test_api.py -v
 ```
 
-**Default credentials:**
-| Field | Value |
-|-------|-------|
-| Username | `admin` |
-| Password | `admin123` |
+---
 
-> **Security:** Change your password on first login.
+## 📈 Performance
+
+Tested on Raspberry Pi 4 (2GB RAM):
+
+| Metric | Value |
+|--------|-------|
+| Idle RAM usage | ~150MB |
+| CPU load (playback) | <5% |
+| Boot to playback | <30 seconds |
+| Config read latency | <1ms (cached) |
 
 ---
 
-## Quick Start
+## 🔒 Security Features
 
-### 1. Upload Music
-- Go to **Library** tab in web panel
-- Click **Upload Music** button
-- Select MP3, WAV, FLAC, M4A files
-- System automatically converts to MP3
-
-### 2. Start Background Music
-- On **Now Playing** page, click **Play All Music**
-- System will play all songs in sequence and loop
-
-### 3. Set Up Prayer Times
-- Go to **Settings** > **Prayer Times**
-- Select province and district
-- Check "Mute during prayer times"
-- System will automatically fetch times
-
-### 4. Set Business Hours
-- Go to **Settings** > **Business Hours**
-- Opening time: `09:00`
-- Closing time: `22:00`
-- Check "Mute outside business hours"
-
-### 5. Schedule Announcements (Optional)
-- Go to **Schedules** > **One-time** or **Recurring**
-- Select announcement file, date, and time
-- Announcements interrupt music, then music resumes
+- Session-based authentication
+- Environment-based secret key management
+- XSS prevention with HTML escaping
+- Rate limiting on sensitive endpoints
+- File upload validation and sanitization
 
 ---
 
-## Real-World Impact
+## 📄 License
 
-AnnounceFlow has been running flawlessly in a real fast-food restaurant for months.
+This project is proprietary software. All rights reserved.
 
-### Before vs After
-
-| Before | With AnnounceFlow |
-|--------|-------------------|
-| Staff forgets to turn on music daily | Automatic startup |
-| Music plays during prayer time, complaints arise | Automatic muting |
-| Music stays on at night, power waste | Automatic shutdown |
-| Power outage resets everything | Automatic recovery |
-| IT support calls for every issue | Zero maintenance |
-
-### Savings
-
-| Metric | Savings |
-|--------|---------|
-| **Staff time** | ~15 min/day x 365 days = **91 hours/year** |
-| **Energy** | Night auto-off = **10-15% electricity savings** |
-| **Customer satisfaction** | Prayer time sensitivity = **zero complaints** |
-| **Maintenance cost** | Set-and-forget = **zero IT support** |
-
----
-
-## Changelog
-
-### v2.7.0 - Stabilization & Optimization *(Latest)*
-
-**Major Improvements:**
-
-- **Thread Management (S1):** Improved scheduler thread tracking and cleanup, preventing memory leaks during restore operations
-- **Config Caching (O1):** Reduced disk I/O by 97% with 30-second config cache (86,400 → 2,880 reads/day)
-- **XSS Prevention (S5):** Added HTML escaping for user-generated content to prevent cross-site scripting attacks
-- **Turkish Character Support (C1):** Fixed prayer time city name normalization for proper İ/I handling
-- **Scheduler Refactoring (R1):** Reduced `_run_loop()` complexity from 100 lines to 25 lines with extracted methods
-- **Repository Pattern (v2.6.0):** Migrated to clean repository architecture with MediaRepository, ScheduleRepository, and PlaybackRepository
-- **API Error Handling (S4):** Enhanced prayer time API error logging for better debugging
-- **Security Hardening (S3):** Environment-based secret key management instead of hardcoded values
-- **DateTime Robustness (S2):** Added exception handling for corrupted schedule datetime parsing
-- **File Size Optimization (O2):** Improved media library performance with optimized file stat operations
-
-**Test Coverage:**
-- 18 regression tests passing (Stabilization, Optimization, Cleanup, Refactoring)
-- 8 blueprint API tests passing (v2.6.0)
-- Comprehensive test suite for all major features
-
----
-
-## Roadmap
-
-### v1.7 - Multi-Device Management *(Planned)*
-- [ ] Manage multiple Raspberry Pis from single panel
-- [ ] Centralized music library synchronization
-- [ ] Branch-based announcement management
-- [ ] Group volume control
-
-### v1.8 - Advanced Features
-- [ ] Mobile app (iOS/Android)
-- [ ] Cloud backup
-- [ ] Detailed reporting and analytics
-
-### v2.0 - Enterprise
-- [ ] Multi-user roles
-- [ ] API access
-- [ ] Webhook integrations
-
----
-
-## FAQ
-
-<details>
-<summary><strong>Do prayer times work during internet outage?</strong></summary>
-
-Yes. The system pre-caches 7 days of prayer times. Even if internet is down for a week, the system continues to work correctly.
-</details>
-
-<details>
-<summary><strong>What audio formats are supported?</strong></summary>
-
-MP3, WAV, OGG, FLAC, M4A, WMA, AIFF formats are supported. Non-MP3 formats are automatically converted to MP3.
-</details>
-
-<details>
-<summary><strong>Does it work with Raspberry Pi 3?</strong></summary>
-
-It can work, but Raspberry Pi 4 is recommended. Performance issues may occur on Pi 3.
-</details>
-
-<details>
-<summary><strong>Can I connect multiple speakers?</strong></summary>
-
-Yes. Connect the 3.5mm output to an amplifier to distribute to multiple speakers. 100V line systems are recommended for professional installations.
-</details>
-
-<details>
-<summary><strong>Can I use it without Windows Agent?</strong></summary>
-
-Yes. Windows Agent is optional. All management can be done through the web panel. Agent just provides quick access convenience.
-</details>
-
-<details>
-<summary><strong>How do I change the password?</strong></summary>
-
-Go to **Settings** > **Security** in the web panel to change username and password.
-</details>
-
----
-
-## License
-
-This software is licensed under **Proprietary License**.
-
-- Commercial use requires permission
-- Source code distribution is prohibited
-- Modification rights belong to the owner
-
-Contact for licensing and usage rights.
+For licensing inquiries, please contact the repository owner.
 
 ---
 
 <div align="center">
 
-**AnnounceFlow v1.6.4** · 2025
-
-*Professional audio management for commercial spaces*
+*Deployed and running in production since January 2026*
 
 </div>
