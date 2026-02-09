@@ -1,283 +1,235 @@
 <div align="center">
 
-# 🎵 AnnounceFlow
+# AnnounceFlow
 
-### Autonomous Audio Management System for Commercial Spaces
+**Autonomous Audio Management System for Commercial Spaces**
 
-**Set it once. Let it run forever.**
+[![Python](https://img.shields.io/badge/Python-3.9+-3776AB?logo=python&logoColor=white)](https://python.org)
+[![Flask](https://img.shields.io/badge/Flask-3.0-000000?logo=flask)](https://flask.palletsprojects.com)
+[![SQLite](https://img.shields.io/badge/SQLite-Database-003B57?logo=sqlite)](https://sqlite.org)
+[![Raspberry Pi](https://img.shields.io/badge/Raspberry%20Pi%204-Deployed-A22846?logo=raspberrypi)](https://raspberrypi.org)
 
-[![Python](https://img.shields.io/badge/Python-3.9+-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
-[![Flask](https://img.shields.io/badge/Flask-3.0-000000?style=for-the-badge&logo=flask&logoColor=white)](https://flask.palletsprojects.com)
-[![SQLite](https://img.shields.io/badge/SQLite-Database-003B57?style=for-the-badge&logo=sqlite&logoColor=white)](https://sqlite.org)
-[![Raspberry Pi](https://img.shields.io/badge/Raspberry%20Pi%204-Hardware-A22846?style=for-the-badge&logo=raspberrypi&logoColor=white)](https://raspberrypi.org)
-
-[Features](#-key-features) · [Architecture](#-architecture) · [Tech Stack](#-tech-stack) · [Installation](#-installation) · [Screenshots](#-screenshots)
+*Production-deployed system running 24/7 in a fast-food restaurant since January 2026*
 
 </div>
 
 ---
 
-## 📋 Overview
+## Overview
 
-**AnnounceFlow** is a production-ready, embedded audio management system designed for restaurants, cafes, and retail stores. Running on Raspberry Pi 4, it provides **24/7 autonomous operation** with zero daily maintenance.
+AnnounceFlow is an embedded audio system designed for restaurants and retail stores. It runs on Raspberry Pi 4 and provides automated music playback, prayer time integration via Turkish Diyanet API, and scheduled announcements with zero daily maintenance.
 
-The system was built to solve real-world problems faced by business owners:
-- Staff forgetting to turn on background music
-- Music playing during prayer times (culturally sensitive in Turkey)
-- Audio continuing after business hours
-- Complete reset after power outages
-
-> 💡 **Real-World Deployment:** Successfully deployed and running in a fast-food restaurant since January 2026.
+The system was built to solve real operational problems: staff forgetting to turn on music, audio playing during culturally sensitive times, and complete state loss after power outages.
 
 ---
 
-## ✨ Key Features
+## Technical Stack
 
-### 🎶 Intelligent Playback
-- Continuous background music with playlist looping
-- Multi-format support: MP3, WAV, FLAC, M4A, OGG, WMA, AIFF
-- Automatic format conversion via FFmpeg
-- Resume-from-position after interruptions
+| Layer | Technology |
+|-------|------------|
+| Backend | Python 3.9+, Flask 3.0, Waitress WSGI |
+| Database | SQLite with Repository Pattern |
+| Frontend | HTML5, CSS3, Vanilla JavaScript, Jinja2 |
+| Audio Engine | mpg123, FFmpeg |
+| Deployment | systemd, SSH, rsync |
+| Hardware | Raspberry Pi 4 (2GB RAM) |
 
-### 🕌 Prayer Time Integration
-- Real-time prayer times via Turkish Diyanet API
-- Coverage for all 81 Turkish provinces and 900+ districts
-- 7-day cache for offline resilience
-- Auto-mute during prayer, auto-resume after
+---
 
-### ⏰ Business Hours Automation
-- Define opening/closing hours per day
-- Automatic silence outside business hours
-- Weekend and holiday support
-- Zero staff intervention required
+## Architecture
 
-### 📢 Announcement Scheduling
-- **One-time:** Schedule announcements for specific date/time
-- **Recurring:** Daily, weekly, or custom patterns
-- Priority interruption: Announcements pause music, then resume from exact position
+```
+Client Layer
+├── Web Browser (responsive)
+├── Windows Desktop Agent (system tray)
+└── Mobile Browser
+         │
+         ▼  HTTP / REST API
+┌─────────────────────────────────────────┐
+│          Flask Application              │
+├─────────────────────────────────────────┤
+│  Routes       │ Player     │ Scheduler  │
+│  (Blueprints) │ (mpg123)   │ (Custom)   │
+├─────────────────────────────────────────┤
+│  Repositories │ Services   │ External   │
+│  (SQLite)     │ (Logic)    │ API        │
+└─────────────────────────────────────────┘
+         │
+         ▼
+   Raspberry Pi 4 (systemd service)
+```
 
-### 🌐 Web-Based Control Panel
-- Responsive design for mobile, tablet, and desktop
-- Real-time system status monitoring
-- Secure authentication with session management
-- Dark mode UI
+---
 
-### 🖥️ Windows Desktop Agent
-- System tray application for quick access
-- One-click play/pause control
-- Volume slider
-- Built with PyInstaller for easy distribution
+## API Design
 
-### ⚡ Power Failure Recovery
-- Automatic service restart via systemd
+REST API with Flask Blueprints. JSON request/response format.
+
+**Endpoints:**
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | /api/health | Health check (no auth) |
+| POST | /api/play | Play media file |
+| POST | /api/stop | Stop playback |
+| POST | /api/volume | Set volume (0-100) |
+| GET | /api/now-playing | Current player state |
+| GET | /api/media/music | List music files |
+| POST | /api/playlist/start | Start playlist loop |
+
+**Authentication:** Session-based with Flask session. Secret key managed via environment variables.
+
+---
+
+## Database Schema
+
+SQLite with foreign key relationships and indexed queries.
+
+**Tables:**
+- `media_files` - Uploaded audio files with duration metadata
+- `one_time_schedules` - Single-use scheduled announcements
+- `recurring_schedules` - Repeating schedules (daily, weekly patterns)
+- `playback_state` - Current player state for crash recovery
+
+**Data Access:** Repository pattern implementation with `MediaRepository`, `ScheduleRepository`, and `PlaybackRepository` classes wrapping raw SQL queries.
+
+---
+
+## Key Features
+
+**Audio Management**
+- Playlist playback with loop support
+- Resume from exact position after interruption
+- Multi-format support (MP3, WAV, FLAC, M4A) via FFmpeg conversion
+
+**External API Integration**
+- Turkish Diyanet API for prayer times
+- 7-day cache for offline operation
+- Location-based queries (81 provinces, 900+ districts)
+
+**Scheduling**
+- One-time announcements for specific datetime
+- Recurring announcements with daily/weekly patterns
+- Business hours automation with auto-mute
+
+**Reliability**
 - State persistence in SQLite database
-- Resumes playback from last known position
-- Zero-touch recovery
+- Automatic recovery after power failure
+- systemd service with restart policy
 
 ---
 
-## 🏗️ Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                        Client Layer                              │
-├──────────────────┬──────────────────┬───────────────────────────┤
-│   Web Browser    │  Windows Agent   │     Mobile Browser        │
-│   (Any Device)   │  (System Tray)   │    (Responsive UI)        │
-└────────┬─────────┴────────┬─────────┴─────────────┬─────────────┘
-         │                  │                       │
-         └──────────────────┼───────────────────────┘
-                            │ HTTP/REST API
-                            ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                    Flask Application Server                      │
-│                      (Waitress WSGI)                             │
-├─────────────────────────────────────────────────────────────────┤
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐  │
-│  │   Routes    │  │   Player    │  │      Scheduler          │  │
-│  │ (Blueprints)│  │  (mpg123)   │  │ (APScheduler + Custom)  │  │
-│  └─────────────┘  └─────────────┘  └─────────────────────────┘  │
-├─────────────────────────────────────────────────────────────────┤
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐  │
-│  │  Services   │  │ Repositories│  │    Prayer Times API     │  │
-│  │  (Logic)    │  │  (SQLite)   │  │    (Diyanet.gov.tr)     │  │
-│  └─────────────┘  └─────────────┘  └─────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────┘
-                            │
-                            ▼
-┌─────────────────────────────────────────────────────────────────┐
-│                      Hardware Layer                              │
-├──────────────────┬──────────────────┬───────────────────────────┤
-│  Raspberry Pi 4  │   Audio Output   │     Network/WiFi          │
-│   (2GB+ RAM)     │  (3.5mm/HDMI)    │                           │
-└──────────────────┴──────────────────┴───────────────────────────┘
-```
-
----
-
-## 🛠️ Tech Stack
-
-| Layer | Technology | Purpose |
-|-------|------------|---------|
-| **Backend** | Python 3.9+, Flask 3.0 | Application server |
-| **WSGI** | Waitress | Production-grade HTTP server |
-| **Database** | SQLite | Embedded, serverless data persistence |
-| **Audio** | mpg123, FFmpeg | Playback engine and format conversion |
-| **Frontend** | HTML5, CSS3, JavaScript | Responsive web interface |
-| **Templating** | Jinja2 | Server-side rendering |
-| **Desktop** | Tkinter, Pystray, PyInstaller | Windows tray application |
-| **Scheduling** | APScheduler + Custom Logic | Time-based automation |
-| **External API** | Diyanet Prayer Times API | Islamic prayer time data |
-| **Deployment** | systemd, rsync, SSH | Automated Pi deployment |
-| **Hardware** | Raspberry Pi 4 | Embedded Linux platform |
-
----
-
-## 📁 Project Structure
+## Project Structure
 
 ```
 announceflow/
-├── main.py                 # Application entry point
-├── web_panel.py            # Flask app initialization
-├── player.py               # Audio playback engine (mpg123/pygame)
-├── scheduler.py            # Time-based job scheduling
-├── prayer_times.py         # Diyanet API integration
+├── main.py                 # Entry point
+├── web_panel.py            # Flask app, auth routes
+├── player.py               # Audio engine (mpg123/pygame)
+├── scheduler.py            # Time-based job runner
+├── prayer_times.py         # Diyanet API client
 ├── logger.py               # Rotating file logger
 │
-├── routes/                 # Flask Blueprints (API endpoints)
-│   ├── api_routes.py       # Core REST API
-│   ├── playback_routes.py  # Play/pause/volume controls
-│   ├── schedule_routes.py  # Announcement scheduling
-│   └── settings_routes.py  # Configuration management
+├── routes/                 # Flask Blueprints
+│   ├── player_routes.py    # Playback control API
+│   ├── media_routes.py     # File upload/delete
+│   ├── schedule_routes.py  # Schedule CRUD
+│   ├── playlist_routes.py  # Playlist control
+│   └── settings_routes.py  # Configuration API
 │
 ├── database/               # Data access layer
-│   ├── __init__.py         # Schema initialization
-│   ├── base_repository.py  # Abstract repository
-│   ├── media_repository.py # Music file management
-│   ├── playback_repository.py  # Playback state
-│   └── schedule_repository.py  # Scheduled announcements
+│   ├── __init__.py         # Schema, migrations
+│   ├── base_repository.py  # Abstract base class
+│   ├── media_repository.py
+│   ├── schedule_repository.py
+│   └── playback_repository.py
 │
-├── services/               # Business logic layer
+├── services/               # Business logic
 ├── templates/              # Jinja2 HTML templates
+├── utils/                  # Helper functions, decorators
+├── tests/                  # API tests
 ├── agent/                  # Windows desktop application
-├── tests/                  # Unit and integration tests
 │
-├── deploy.sh               # One-command Pi deployment
-├── requirements.txt        # Python dependencies
-└── config.example.json     # Configuration template
+├── deploy.sh               # Remote deployment script
+└── requirements.txt        # Python dependencies
 ```
 
 ---
 
-## 🚀 Installation
+## Deployment
 
-### Prerequisites
-
-| Component | Requirement |
-|-----------|-------------|
-| Hardware | Raspberry Pi 4 (2GB+ RAM recommended) |
-| OS | Raspberry Pi OS (64-bit) |
-| Audio | 3.5mm jack, HDMI, or USB sound card |
-| Network | Internet for initial setup and prayer times |
-
-### Quick Setup
-
+**Development:**
 ```bash
-# 1. System dependencies
-sudo apt update && sudo apt install -y python3 python3-pip python3-venv mpg123 ffmpeg git
-
-# 2. Clone repository
-git clone https://github.com/YOUR_USERNAME/announceflow.git
-cd announceflow
-
-# 3. Python environment
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
-
-# 4. Configuration
-cp config.example.json config.json
-cp .env.example .env
-# Edit config.json with your settings
-
-# 5. Run directly (development)
 python main.py
-
-# 6. Install as service (production)
-sudo cp announceflow.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable announceflow
-sudo systemctl start announceflow
 ```
 
-### One-Command Deployment
-
-For remote deployment to Raspberry Pi:
-
+**Production (Raspberry Pi):**
 ```bash
 ./deploy.sh pi4.local
 ```
 
-This script handles:
-- File synchronization via rsync
-- Python dependency installation
-- systemd service configuration
-- Automatic service restart
-- Health check verification
+The deployment script handles file synchronization via rsync, dependency installation, systemd service configuration, automatic restart, and health check verification.
 
 ---
 
-## 📸 Screenshots
-
-> *Screenshots coming soon*
-
----
-
-## 🧪 Testing
+## Testing
 
 ```bash
-# Run all tests
-python -m pytest tests/ -v
-
-# Run specific test file
 python -m pytest tests/test_api.py -v
 ```
 
----
-
-## 📈 Performance
-
-Tested on Raspberry Pi 4 (2GB RAM):
-
-| Metric | Value |
-|--------|-------|
-| Idle RAM usage | ~150MB |
-| CPU load (playback) | <5% |
-| Boot to playback | <30 seconds |
-| Config read latency | <1ms (cached) |
+Test coverage includes: health endpoint, authentication flow, volume control, player state, media library operations, playlist control, and page rendering.
 
 ---
 
-## 🔒 Security Features
+## Environment Configuration
 
-- Session-based authentication
-- Environment-based secret key management
-- XSS prevention with HTML escaping
-- Rate limiting on sensitive endpoints
-- File upload validation and sanitization
+| Variable | Description |
+|----------|-------------|
+| FLASK_SECRET_KEY | Session security key |
+| ANNOUNCEFLOW_WEB_PORT | Server port (default: 5001) |
+| ANNOUNCEFLOW_MEDIA_FOLDER | Media storage path |
 
 ---
 
-## 📄 License
+## What This Project Demonstrates
 
-This project is proprietary software. All rights reserved.
+- REST API design and implementation with Flask
+- Relational database operations with SQL and foreign keys
+- Repository pattern for data access abstraction
+- Session-based authentication with protected routes
+- External API integration and caching strategy
+- Server-side rendering with Jinja2 templating
+- Linux service management with systemd
+- Remote deployment automation via SSH
+- Real-world production operation and maintenance
 
-For licensing inquiries, please contact the repository owner.
+---
+
+## Limitations
+
+This project was built as a practical solution for a specific use case. The following were intentionally kept simple or not implemented:
+
+- Frontend uses vanilla JavaScript; no React, Vue, or similar framework
+- SQLite database; not PostgreSQL or MySQL
+- Session-based authentication; no JWT or OAuth implementation
+- No Docker containerization
+- No CI/CD pipeline; manual deployment via script
+- Single-user system; no role-based access control
+
+---
+
+## License
+
+Proprietary. All rights reserved.
 
 ---
 
 <div align="center">
 
-*Deployed and running in production since January 2026*
+*Built for reliability. Running in production.*
 
 </div>
