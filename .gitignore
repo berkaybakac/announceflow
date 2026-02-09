@@ -40,3 +40,7 @@ announceflow.service
 # Logs
 logs/
 logs/**
+
+# Private Notes (credentials, device info)
+DEVICE_NOTES.md
+README.backup.md
