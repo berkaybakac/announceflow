@@ -264,7 +264,7 @@ class AnnounceFlowAgent:
             return {"success": False, "error": "timeout"}
         except Exception as e:
             print(f"Login error: {e}")
-            return {\"success\": False, \"error\": \"unknown\"}
+            return {"success": False, "error": "unknown"}
 
     def discover_server(self, port=5001):
         """Scan local network for AnnounceFlow server on given port.
