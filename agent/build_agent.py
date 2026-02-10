@@ -21,6 +21,7 @@ def build():
         "--clean",  # Build from a clean state
         "--onefile",  # Single executable
         "--noconsole",  # No console window (GUI app)
+        "--win-private-assemblies",  # Bundle Windows DLLs for compatibility
         "--name", "AnnounceFlowAgent",
         "--add-data",
         config_data,
