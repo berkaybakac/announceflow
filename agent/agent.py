@@ -4,6 +4,7 @@ System tray application for quick access and management.
 """
 import os
 import json
+import socket
 import webbrowser
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
@@ -263,7 +264,49 @@ class AnnounceFlowAgent:
             return {"success": False, "error": "timeout"}
         except Exception as e:
             print(f"Login error: {e}")
-            return {"success": False, "error": "unknown"}
+            return {\"success\": False, \"error\": \"unknown\"}
+
+    def discover_server(self, port=5001):
+        """Scan local network for AnnounceFlow server on given port.
+        Returns the working URL or None.
+        """
+        # Find local IP to determine subnet
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            s.connect(("8.8.8.8", 80))
+            local_ip = s.getsockname()[0]
+            s.close()
+        except Exception:
+            return None
+
+        # Get subnet (e.g., 192.168.0)
+        parts = local_ip.split(".")
+        if len(parts) != 4:
+            return None
+        subnet = ".".join(parts[:3])
+
+        # Scan common IPs (1-254)
+        for i in range(1, 255):
+            ip = f"{subnet}.{i}"
+            if ip == local_ip:
+                continue
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(0.15)
+                result = sock.connect_ex((ip, port))
+                sock.close()
+                if result == 0:
+                    # Port open, verify it's AnnounceFlow
+                    try:
+                        url = f"http://{ip}:{port}"
+                        resp = requests.get(f"{url}/api/health", timeout=2)
+                        if resp.ok and "player" in resp.json():
+                            return url
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+        return None
 
     def get_media_files(self):
         """Fetch all media files."""
@@ -559,7 +602,43 @@ class AgentGUI:
                     text="Giriş başarısız! Bilgileri kontrol edin.", fg="#ef4444"
                 )
             elif error == "connection_error":
-                self.status_label.config(text="Sunucuya bağlanılamıyor!", fg="#ef4444")
+                # Try auto-discovery
+                self.status_label.config(
+                    text="Sunucu bulunamadi, ag taranıyor...", fg="#f59e0b"
+                )
+                if self.root:
+                    self.root.update()
+                found_url = self.agent.discover_server()
+                if found_url:
+                    # Update URL and retry login
+                    self.agent.api_base = found_url
+                    self.agent.config["api_base"] = found_url
+                    save_agent_config(self.agent.config)
+                    self.url_entry.delete(0, tk.END)
+                    self.url_entry.insert(0, found_url)
+                    self.status_label.config(
+                        text=f"Sunucu bulundu: {found_url} - tekrar deneniyor...",
+                        fg="#22c55e",
+                    )
+                    if self.root:
+                        self.root.update()
+                    # Retry login with discovered URL
+                    retry = self.agent.login(username, password)
+                    if retry.get("success"):
+                        if remember:
+                            save_credentials(found_url, username, password)
+                        self.logged_in = True
+                        self.show_main_frame()
+                        return
+                    else:
+                        self.status_label.config(
+                            text=f"Sunucu bulundu ({found_url}) ama giris basarisiz!",
+                            fg="#ef4444",
+                        )
+                else:
+                    self.status_label.config(
+                        text="Sunucu agda bulunamadi!", fg="#ef4444"
+                    )
             elif error == "timeout":
                 self.status_label.config(
                     text="Bağlantı zaman aşımına uğradı!", fg="#ef4444"
