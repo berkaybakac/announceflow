@@ -66,6 +66,7 @@ class AudioPlayer:
         self._duration: float = 0.0
         self._started_at: float = 0.0  # Unix timestamp when playback started
         self._lock = threading.Lock()
+        self._state_lock = threading.RLock()
         self._process: Optional[subprocess.Popen] = None
         self._monitor_thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
@@ -269,6 +270,42 @@ class AudioPlayer:
             self.play_next()
         elif self._user_on_track_end:
             self._user_on_track_end()
+
+    def apply_playlist_state(
+        self,
+        *,
+        playlist: Optional[list] = None,
+        index: Optional[int] = None,
+        loop: Optional[bool] = None,
+        runtime_active: Optional[bool] = None,
+        db_active: Optional[bool] = None,
+        play_next: bool = False,
+    ) -> bool:
+        """Single orchestration point for playlist state transitions."""
+        with self._state_lock:
+            playlist_value = list(self._playlist) if playlist is None else list(playlist)
+            index_value = self._playlist_index if index is None else int(index)
+            loop_value = self._playlist_loop if loop is None else bool(loop)
+            runtime_active_value = (
+                self._playlist_active if runtime_active is None else bool(runtime_active)
+            )
+
+            self._playlist = playlist_value
+            self._playlist_index = index_value
+            self._playlist_loop = loop_value
+            self._playlist_active = runtime_active_value
+
+        if db_active is not None:
+            db.save_playlist_state(
+                playlist=playlist_value,
+                index=index_value,
+                loop=loop_value,
+                active=bool(db_active),
+            )
+
+        if play_next:
+            return self.play_next()
+        return True
 
     def set_playlist(self, file_paths: list, loop: bool = True) -> bool:
         """Set a playlist of files to play sequentially."""
@@ -597,17 +634,14 @@ class AudioPlayer:
 
         if resume_allowed and playlist_was_active and playlist_files:
             next_idx = (playlist_index + 1) % len(playlist_files)
-            self._playlist = playlist_files
-            self._playlist_loop = playlist_loop
-            self._playlist_index = next_idx - 1  # Will be incremented by play_next
-            self._playlist_active = True
-            db.save_playlist_state(
+            self.apply_playlist_state(
                 playlist=playlist_files,
                 index=next_idx - 1,
                 loop=playlist_loop,
-                active=True,
+                runtime_active=True,
+                db_active=True,
+                play_next=True,
             )
-            self.play_next()
         return True
 
     def stop(self) -> bool:

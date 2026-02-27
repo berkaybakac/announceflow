@@ -197,13 +197,15 @@ class Scheduler:
                 and self._prayer_pause_state.get("active")
                 and self._prayer_pause_state.get("playlist")
             ):
-                db.save_playlist_state(
+                player.apply_playlist_state(
                     playlist=self._prayer_pause_state["playlist"],
                     index=self._prayer_pause_state["index"],
                     loop=self._prayer_pause_state["loop"],
-                    active=True,
+                    runtime_active=False,
+                    db_active=True,
                 )
-            player._playlist_active = False  # Temporarily disable without clearing
+            else:
+                player.apply_playlist_state(runtime_active=False)
             return True  # Skip rest of loop
 
         # Prayer time ended - restore playlist if we saved state
@@ -221,18 +223,14 @@ class Scheduler:
                     f"Prayer ended - restoring playlist (index={state['index']})"
                 )
                 log_prayer("silence_end", {"index": state["index"]})
-                player._playlist = state["playlist"]
-                player._playlist_loop = state["loop"]
-                player._playlist_index = state["index"]
-                player._playlist_active = True
-                # Sync to DB and play next
-                db.save_playlist_state(
+                player.apply_playlist_state(
                     playlist=state["playlist"],
                     index=state["index"],
                     loop=state["loop"],
-                    active=True,
+                    runtime_active=True,
+                    db_active=True,
+                    play_next=True,
                 )
-                player.play_next()
 
         return False  # Continue with rest of loop
 
@@ -279,13 +277,15 @@ class Scheduler:
                 and self._working_hours_pause_state.get("active")
                 and self._working_hours_pause_state.get("playlist")
             ):
-                db.save_playlist_state(
+                player.apply_playlist_state(
                     playlist=self._working_hours_pause_state["playlist"],
                     index=self._working_hours_pause_state["index"],
                     loop=self._working_hours_pause_state["loop"],
-                    active=True,
+                    runtime_active=False,
+                    db_active=True,
                 )
-            player._playlist_active = False  # Temporarily disable without clearing
+            else:
+                player.apply_playlist_state(runtime_active=False)
         else:
             # Working hours started - restore playlist if we saved state
             if self._working_hours_pause_state is not None:
@@ -302,18 +302,14 @@ class Scheduler:
                         f"Working hours started - restoring playlist (index={state['index']})"
                     )
                     log_schedule("working_hours_start", {"index": state["index"]})
-                    player._playlist = state["playlist"]
-                    player._playlist_loop = state["loop"]
-                    player._playlist_index = state["index"]
-                    player._playlist_active = True
-                    # Sync to DB and play next
-                    db.save_playlist_state(
+                    player.apply_playlist_state(
                         playlist=state["playlist"],
                         index=state["index"],
                         loop=state["loop"],
-                        active=True,
+                        runtime_active=True,
+                        db_active=True,
+                        play_next=True,
                     )
-                    player.play_next()
 
         return outside_working_hours
 
@@ -583,22 +579,16 @@ class Scheduler:
                             logger.info(
                                 f"Scheduled media finished - resuming playlist from index {index + 1}"
                             )
-                            player._playlist = playlist
-                            player._playlist_loop = loop
                             # Resume from NEXT track (user requested this behavior)
                             next_idx = (index + 1) % len(playlist)
-                            player._playlist_index = (
-                                next_idx - 1
-                            )  # Will be incremented by play_next
-                            player._playlist_active = True
-                            # Sync to DB before playing
-                            db.save_playlist_state(
+                            player.apply_playlist_state(
                                 playlist=playlist,
                                 index=next_idx - 1,
                                 loop=loop,
-                                active=True,
+                                runtime_active=True,
+                                db_active=True,
+                                play_next=True,
                             )
-                            player.play_next()
                     except Exception as e:
                         logger.error(f"Restore playlist thread error: {e}")
                     finally:
