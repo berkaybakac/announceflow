@@ -46,4 +46,6 @@ DEVICE_NOTES.md
 README.backup.md
 
 # Docs
-/docs/
+/docs/**
+!/docs/
+!/docs/backlog.md
