@@ -72,7 +72,6 @@ def test_health():
     print(f"  Volume: {data['player']['volume']}%")
     print(f"  Scheduler: {'Running' if data['scheduler']['running'] else 'Stopped'}")
     print("✓ Health check OK")
-    return True
 
 
 def test_login():
@@ -85,7 +84,6 @@ def test_login():
     )
     assert r.status_code in [200, 302], f"Status: {r.status_code}"
     print("✓ Login OK")
-    return True
 
 
 def test_volume():
@@ -103,7 +101,6 @@ def test_volume():
     SESSION.post(f"{BASE_URL}/api/volume", json={"volume": current_vol}, timeout=5)
     print(f"  Volume test: {current_vol}% -> {new_vol}% -> {current_vol}%")
     print("✓ Volume OK")
-    return True
 
 
 def test_player_state():
@@ -115,7 +112,6 @@ def test_player_state():
     print(f"  Playing: {data.get('is_playing')}")
     print(f"  File: {data.get('filename') or 'None'}")
     print("✓ Player state OK")
-    return True
 
 
 def test_media_library():
@@ -125,7 +121,6 @@ def test_media_library():
     assert "files" in data, "Missing: files"
     print(f"  Music files: {data.get('count', 0)}")
     print("✓ Media library OK")
-    return True
 
 
 def test_playlist_operations():
@@ -137,7 +132,6 @@ def test_playlist_operations():
     assert data.get("success") == True, "Playlist stop failed"
     print("  Playlist stop: OK")
     print("✓ Playlist blueprint OK")
-    return True
 
 
 def test_library_page():
@@ -150,7 +144,6 @@ def test_library_page():
     ), "Page content check failed"
     print("  Library page rendered: OK")
     print("✓ Media blueprint (page) OK")
-    return True
 
 
 def test_settings_page():
@@ -162,7 +155,6 @@ def test_settings_page():
     ), "Page content check failed"
     print("  Settings page rendered: OK")
     print("✓ Settings blueprint (page) OK")
-    return True
 
 
 if __name__ == "__main__":
@@ -189,8 +181,8 @@ if __name__ == "__main__":
     for name, test_func in tests:
         print(f"\n[{name}]")
         try:
-            if test_func():
-                passed += 1
+            test_func()
+            passed += 1
         except AssertionError as e:
             print(f"✗ FAILED: {e}")
             failed += 1
