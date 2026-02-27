@@ -64,7 +64,7 @@ def api_health():
                 "backend": player.get_state().get("backend"),
                 "volume": player.get_volume(),
             },
-            "scheduler": {"running": scheduler._running},
+            "scheduler": {"running": scheduler.is_running()},
             "timestamp": int(time_module.time()),
         }
     )
@@ -171,13 +171,16 @@ def api_stop_preview():
     playlist_was_active = player._playlist_active and len(player._playlist) > 0
     if not resume_allowed and playlist_was_active:
         scheduler = get_scheduler()
-        if scheduler._working_hours_pause_state is None:
-            scheduler._working_hours_pause_state = {
+        if not scheduler.has_deferred_restore("working_hours"):
+            scheduler.defer_playlist_restore(
+                "working_hours",
+                {
                 "playlist": list(player._playlist),
                 "index": player._playlist_index,
                 "loop": player._playlist_loop,
                 "active": True,
-            }
+                },
+            )
         player.apply_playlist_state(runtime_active=False, db_active=True)
 
     success = player.stop_preview(resume_allowed=resume_allowed)
