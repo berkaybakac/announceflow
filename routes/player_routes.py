@@ -178,13 +178,7 @@ def api_stop_preview():
                 "loop": player._playlist_loop,
                 "active": True,
             }
-        player._playlist_active = False
-        db.save_playlist_state(
-            playlist=list(player._playlist),
-            index=player._playlist_index,
-            loop=player._playlist_loop,
-            active=True,
-        )
+        player.apply_playlist_state(runtime_active=False, db_active=True)
 
     success = player.stop_preview(resume_allowed=resume_allowed)
     _clear_preview_context()

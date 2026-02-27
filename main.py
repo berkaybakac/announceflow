@@ -163,14 +163,16 @@ def main():
             logger.info(
                 f"Playlist restore ediliyor: {len(valid_playlist)} şarkı, index={index}"
             )
-            player._playlist = valid_playlist
-            player._playlist_loop = loop
-            player._playlist_active = within_hours
 
             # Adjust index if files were removed
             if index >= len(valid_playlist):
                 index = 0
-            player._playlist_index = index - 1  # Will be incremented by play_next
+            player.apply_playlist_state(
+                playlist=valid_playlist,
+                index=index - 1,  # Will be incremented by play_next
+                loop=loop,
+                runtime_active=within_hours,
+            )
 
             if within_hours:
                 # Start playing from saved position
