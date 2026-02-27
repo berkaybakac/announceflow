@@ -36,14 +36,14 @@ sudo systemctl status announceflow
 ===============================================================================
 EVENT KATEGORİLERİ
 ===============================================================================
-SYSTEM  : boot, shutdown, playlist_restore
+SYSTEM  : boot, shutdown, playlist_restore, playlist_restore_deferred
 PLAY    : track_start, track_end, stop, playlist_set, playlist_end  
 TRIGGER : one_time, recurring
-PRAYER  : silence_start, silence_end, fetch, cache_hit, in_window
-SCHEDULE: working_hours_start, working_hours_end
+PRAYER  : silence_start, silence_end, fetch, cache_hit, in_window, policy_decision
+SCHEDULE: working_hours_start, working_hours_end, policy_decision, reconcile_resume
 VOLUME  : change
 WEB     : login, play, stop, volume, upload, delete
-ERROR   : Hatalar ve uyarılar
+ERROR   : Hatalar ve uyarılar (örn: prayer_cache_corrupt, policy_fail_safe_engaged)
 
 ===============================================================================
 """

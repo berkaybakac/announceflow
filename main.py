@@ -15,10 +15,11 @@ from logging.handlers import RotatingFileHandler
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import database as db
-from scheduler import get_scheduler, is_within_working_hours
+from scheduler import get_scheduler
 from player import get_player
 from logger import log_system, log_error
 from services.config_service import load_config
+from services.silence_policy import resolve_silence_policy
 
 
 def _resolve_web_port(config: dict) -> int:
@@ -154,7 +155,12 @@ def main():
         index = playlist_state.get("index", 0)
         loop = playlist_state.get("loop", True)
         startup_config = load_config()
-        within_hours = is_within_working_hours(startup_config)
+        startup_policy = resolve_silence_policy(
+            startup_config,
+            allow_network=False,
+            fail_safe_on_unknown=True,
+        )
+        resume_allowed = not startup_policy.get("silence_active", False)
 
         # Filter out non-existent files
         valid_playlist = [f for f in playlist if os.path.exists(f)]
@@ -171,10 +177,10 @@ def main():
                 playlist=valid_playlist,
                 index=index - 1,  # Will be incremented by play_next
                 loop=loop,
-                runtime_active=within_hours,
+                runtime_active=resume_allowed,
             )
 
-            if within_hours:
+            if resume_allowed:
                 # Start playing from saved position
                 player.play_next()
                 logger.info("Playlist otomatik başlatıldı!")
@@ -182,19 +188,41 @@ def main():
                     "playlist_restore", {"tracks": len(valid_playlist), "index": index}
                 )
             else:
-                # Defer until working hours
+                # Defer until silence policy allows playback
                 scheduler = get_scheduler()
-                scheduler._working_hours_pause_state = {
+                pause_state = {
                     "playlist": list(valid_playlist),
                     "index": index,
                     "loop": loop,
                     "active": True,
                 }
-                logger.info("Mesai dışında: playlist otomatik başlatılmadı.")
+                if startup_policy.get("policy") == "working_hours":
+                    scheduler.defer_playlist_restore("working_hours", pause_state)
+                    logger.info("Mesai dışında: playlist otomatik başlatılmadı.")
+                else:
+                    scheduler.defer_playlist_restore("prayer", pause_state)
+                    logger.info("Sessizlik policy aktif: playlist otomatik başlatılmadı.")
                 log_system(
                     "playlist_restore_deferred",
-                    {"tracks": len(valid_playlist), "index": index},
+                    {
+                        "tracks": len(valid_playlist),
+                        "index": index,
+                        "policy": startup_policy.get("policy"),
+                        "reason_code": startup_policy.get("reason_code"),
+                        "source": startup_policy.get("source"),
+                        "fail_safe_applied": startup_policy.get("fail_safe_applied"),
+                    },
                 )
+                if startup_policy.get("fail_safe_applied"):
+                    log_error(
+                        "policy_fail_safe_engaged",
+                        {
+                            "context": "startup_restore",
+                            "policy": startup_policy.get("policy"),
+                            "reason_code": startup_policy.get("reason_code"),
+                            "source": startup_policy.get("source"),
+                        },
+                    )
         else:
             logger.warning("Kaydedilmiş playlist'teki dosyalar bulunamadı")
             log_error("playlist_restore_failed", {"reason": "files_not_found"})
