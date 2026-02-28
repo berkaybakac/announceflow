@@ -33,12 +33,23 @@ agent/dist/
 
 # Cache
 *_cache.json
+*.corrupt.*
 
 # Service files
 announceflow.service
+release_stamp.json
 
 # Logs
 logs/
+runtime/
+
+# Test & Coverage
+.coverage
+.coverage.*
+htmlcov/
+
+# Script bytecode
+scripts/__pycache__/
 
 # Private Notes (credentials, device info)
 DEVICE_NOTES.md
