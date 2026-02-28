@@ -36,7 +36,19 @@ Bu dosya V1 disi ama sonraki fazlarda degerli teknik isleri toplar.
 - Kanit: [scheduler.py:327](/Users/berkaybakac/announceflow/scheduler.py:327), [scheduler.py:573](/Users/berkaybakac/announceflow/scheduler.py:573)
 - YAGNI Siniri: Yeni policy sistemi kurma yok; mevcut karar akisinin mesai+ezan guard'i sertlestirilir.
 - Kabul Kriteri: Mesai/ezan aktifken ses geri donmez, bitiste sadece policy'ye uygun geri donus olur.
-- V1.1'i Bloklar mi?: `Evet`
+- Durum: `Kapatildi`
+- Kapanis Tarihi: `2026-02-28`
+- Kapanis Commitleri: `a72f29f, 711de6a, d4d945d`
+- Dogrulama:
+  - `pytest -q tests/test_silence_policy.py (PASS)`
+  - `pytest -q tests/test_prayer_cache_horizon.py (PASS)`
+  - `pytest -q tests/test_schedule_conflicts.py (PASS)`
+  - `pytest -q tests/test_api.py (PASS)`
+  - `python3 simulate_smoke.py --dry-run (PASS)`
+- Devreden Risk/Not:
+  - `unknown => silence` hard-constraint trade-off'u korunuyor (false-positive sessizlik riski).
+  - Saha canli smoke (gercek vakit penceresi) operasyonel olarak halen gerekli.
+- V1.1'i Bloklar mi?: `Hayir (Kapatildi)`
 
 #### BL-STREAM-BLOCKER-03 - Agent ag cagrilarinda timeout/UI blok riski
 
