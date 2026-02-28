@@ -217,6 +217,7 @@ def main() -> int:
     session = requests.Session()
     baseline_state: Optional[dict[str, Any]] = None
     silence_observed = False
+    restore_failed = False
 
     try:
         for path in (CONFIG_PATH, CACHE_PATH):
@@ -267,8 +268,11 @@ def main() -> int:
                 _restore_file(path, backup, existed_before)
             except Exception as restore_error:
                 print(f"[error] Failed to restore {path.name}: {restore_error}")
-                return 4
+                restore_failed = True
         print("[info] Original files restored.")
+
+    if restore_failed:
+        return 4
 
     if not _login(session, base_url, username, password):
         print("[warn] Could not re-login after restore; normalization check skipped.")
