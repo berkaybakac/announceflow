@@ -21,7 +21,12 @@ Bu dosya V1 disi ama sonraki fazlarda degerli teknik isleri toplar.
 - Kanit: [main.py:166](/Users/berkaybakac/announceflow/main.py:166), [scheduler.py:224](/Users/berkaybakac/announceflow/scheduler.py:224), [scheduler.py:305](/Users/berkaybakac/announceflow/scheduler.py:305), [scheduler.py:586](/Users/berkaybakac/announceflow/scheduler.py:586), [player_routes.py:171](/Users/berkaybakac/announceflow/routes/player_routes.py:171), [player.py:624](/Users/berkaybakac/announceflow/player.py:624)
 - YAGNI Siniri: Buyuk refactor yok; sadece state orkestrasyon sahipligi tek noktaya cekilir.
 - Kabul Kriteri: Stream olmayan mevcut akislarda davranis degismeden, state gecisleri tek orkestrasyon noktasi uzerinden ilerler.
-- V1.1'i Bloklar mi?: `Evet`
+- Durum: `Kapatildi`
+- Kapanis Tarihi: `2026-02-27`
+- Kapanis Commit: `a31a98a`
+- Dogrulama: `pytest -q tests/test_schedule_conflicts.py (PASS), pytest -q tests/test_api.py (PASS), manuel smoke PASS`
+- Devreden Risk/Not: `TECH-DEBT-IO-LOCK` maddesine tasindi (V1.2 actor/command queue ile kapanacak).
+- V1.1'i Bloklar mi?: `Hayir (Kapatildi)`
 
 #### BL-STREAM-BLOCKER-02 - Mesai/ezan restore akisinda policy boslugu
 
