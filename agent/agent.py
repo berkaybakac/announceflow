@@ -283,6 +283,7 @@ class AnnounceFlowAgent:
             - 'connection_error': cannot reach server
             - 'timeout': request timed out
         """
+        session = None
         try:
             session = requests.Session()
             session.post(
@@ -306,15 +307,18 @@ class AnnounceFlowAgent:
             # No session cookie = invalid credentials
             return {"success": False, "error": "invalid_credentials"}
         except requests.exceptions.ConnectionError:
-            session.close()
+            if session is not None:
+                session.close()
             print(f"Connection error: Cannot reach {self.api_base}")
             return {"success": False, "error": "connection_error"}
         except requests.exceptions.Timeout:
-            session.close()
+            if session is not None:
+                session.close()
             print("Connection timeout")
             return {"success": False, "error": "timeout"}
         except Exception as e:
-            session.close()
+            if session is not None:
+                session.close()
             print(f"Login error: {e}")
             return {"success": False, "error": "unknown"}
 
