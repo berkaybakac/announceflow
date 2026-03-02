@@ -50,15 +50,34 @@ Bu dosya V1 disi ama sonraki fazlarda degerli teknik isleri toplar.
   - Saha canli smoke (gercek vakit penceresi) operasyonel olarak halen gerekli.
 - V1.1'i Bloklar mi?: `Hayir (Kapatildi)`
 
-#### BL-STREAM-BLOCKER-03 - Agent ag cagrilarinda timeout/UI blok riski
+#### BL-STREAM-BLOCKER-03A - Agent ag cagrilarinda timeout/non-blocking standardizasyon
 
-- ID: `BL-STREAM-BLOCKER-03`
+- ID: `BL-STREAM-BLOCKER-03A`
 - Oncelik: `P0`
 - Neden/Risk: Bazi isteklerde timeout yok ve login/discovery akisinda UI thread bloklanabilir. Stream butonu eklendiginde kullanici deneyimi bozulur.
 - Kanit: [agent.py:318](/Users/berkaybakac/announceflow/agent/agent.py:318), [agent.py:337](/Users/berkaybakac/announceflow/agent/agent.py:337), [agent.py:349](/Users/berkaybakac/announceflow/agent/agent.py:349), [agent.py:359](/Users/berkaybakac/announceflow/agent/agent.py:359), [agent.py:369](/Users/berkaybakac/announceflow/agent/agent.py:369), [agent.py:379](/Users/berkaybakac/announceflow/agent/agent.py:379), [agent.py:394](/Users/berkaybakac/announceflow/agent/agent.py:394), [agent.py:611](/Users/berkaybakac/announceflow/agent/agent.py:611)
 - YAGNI Siniri: Yeni UI framework yok; sadece timeout standardizasyonu ve bloklamayan ag cagrisi.
-- Kabul Kriteri: Ag hatasinda UI donmaz, istekler belirli surede timeout olur.
-- V1.1'i Bloklar mi?: `Evet`
+- Kabul Kriteri: Tum ag operasyonlarinda explicit timeout, NetworkWorker ile non-blocking cagri, shutdown pratik bounded-time davranisi.
+- Durum: `Kapatildi`
+- Kapanis Tarihi: `2026-03-03`
+- Kapanis Commitleri: `46b57a7, 381faec`
+- Dogrulama:
+  - 10+ ag operasyonunda explicit timeout dogrulandi (DEFAULT 2/5s, LOGIN 2/10s, UPLOAD 3/30s)
+  - `NetworkWorker.shutdown(wait=False, cancel_futures=True)` kuyruktaki isleri iptal eder; calisan ag istegi (or. upload timeout penceresi) dogal suresinde tamamlanir
+  - Session leak fix: except handler'larda `session.close()` eklendi (381faec)
+- Devreden Risk/Not:
+  - `login()` icinde `requests.Session()` constructor basarisiz olursa except handler'lardaki `session.close()` teorik olarak `NameError` uretebilir. Cok nadir edge-case; minik guard fix (`session = None` init) ile tamamen kapatilabilir.
+- V1.1'i Bloklar mi?: `Hayir (Kapatildi)`
+
+#### BL-STREAM-BLOCKER-03B - Agent ag katmani kalan iyilestirmeler
+
+- ID: `BL-STREAM-BLOCKER-03B`
+- Oncelik: `P1`
+- Neden/Risk: BL-03 kapsaminda kalan iyilestirmeler (POST-01, POST-04 vb.) stash'te bekliyor.
+- Kanit: `stash@{0}` ("wip: BL-03/POST-01/POST-04 tum uncommitted work")
+- YAGNI Siniri: Stash icerigi dokunulmadan parkta bekletilir; scope degerlendirmesi stream sonrasina birakilir.
+- Durum: `Ertelendi (Stash'te)`
+- V1.1'i Bloklar mi?: `Hayir (Ertelendi)`
 
 #### BL-STREAM-BLOCKER-04 - Guvenlik taban riski (varsayilan sifre / plaintext)
 
@@ -68,7 +87,9 @@ Bu dosya V1 disi ama sonraki fazlarda degerli teknik isleri toplar.
 - Kanit: [config_service.py:25](/Users/berkaybakac/announceflow/services/config_service.py:25), [web_panel.py:114](/Users/berkaybakac/announceflow/web_panel.py:114), [settings_routes.py:46](/Users/berkaybakac/announceflow/routes/settings_routes.py:46), [credential_manager.py:84](/Users/berkaybakac/announceflow/agent/credential_manager.py:84)
 - YAGNI Siniri: Kurumsal IAM/pairing katmani yok; yalnizca temel sifre ve credential sertlestirme.
 - Kabul Kriteri: Varsayilan sifre ile canli kullanim kalmaz; plaintext bagimliligi minimize edilir.
-- V1.1'i Bloklar mi?: `Evet`
+- Durum: `Acik (Release Gate)`
+- Stream'i Bloklar mi?: `Hayir` — stream implementasyonunu teknik olarak engellemez
+- Release'i Bloklar mi?: `Evet` — V1.1 tag oncesi kapatilmalidir
 
 #### BL-STREAM-BLOCKER-05 - Release gate zayifligi (ortama bagli API testi)
 
@@ -78,7 +99,15 @@ Bu dosya V1 disi ama sonraki fazlarda degerli teknik isleri toplar.
 - Kanit: [test_api.py:60](/Users/berkaybakac/announceflow/tests/test_api.py:60), [test_api.py:67](/Users/berkaybakac/announceflow/tests/test_api.py:67)
 - YAGNI Siniri: Tam e2e altyapisi kurma yok; test gate ayrimi (unit/integration) netlestirilir.
 - Kabul Kriteri: Ortama bagli testler acik etiketlenir; release gate'de deterministic asama bulunur.
-- V1.1'i Bloklar mi?: `Evet`
+- Durum: `Kapatildi`
+- Kapanis Tarihi: `2026-03-03`
+- Kapanis Commit: `34c0073`
+- Dogrulama:
+  - Integration testleri `ANNOUNCEFLOW_RUN_LIVE_API_TESTS=1` env var arkasina alindi
+  - `pytest.ini` icinde `integration` marker tanimi eklendi
+  - `pytest -q` (env var olmadan) integration testlerini atlar, unit testleri calistirir
+- Devreden Risk/Not: CI pipeline otomasyonu V1.2 backlog'unda.
+- V1.1'i Bloklar mi?: `Hayir (Kapatildi)`
 
 ### V1.1 SONRASI (Non-Blocker / Iyilestirme)
 
