@@ -65,8 +65,7 @@ Bu dosya V1 disi ama sonraki fazlarda degerli teknik isleri toplar.
   - 10+ ag operasyonunda explicit timeout dogrulandi (DEFAULT 2/5s, LOGIN 2/10s, UPLOAD 3/30s)
   - `NetworkWorker.shutdown(wait=False, cancel_futures=True)` kuyruktaki isleri iptal eder; calisan ag istegi (or. upload timeout penceresi) dogal suresinde tamamlanir
   - Session leak fix: except handler'larda `session.close()` eklendi (381faec)
-- Devreden Risk/Not:
-  - `login()` icinde `requests.Session()` constructor basarisiz olursa except handler'lardaki `session.close()` teorik olarak `NameError` uretebilir. Cok nadir edge-case; minik guard fix (`session = None` init) ile tamamen kapatilabilir.
+- Devreden Risk/Not: Yok. `login()` icindeki `session = None` init + `if session is not None` guard ile NameError edge-case tamamen kapatildi (381faec).
 - V1.1'i Bloklar mi?: `Hayir (Kapatildi)`
 
 #### BL-STREAM-BLOCKER-03B - Agent ag katmani kalan iyilestirmeler
