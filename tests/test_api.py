@@ -4,6 +4,22 @@ import requests
 import sys
 import os
 import json
+import pytest
+
+
+pytestmark = pytest.mark.integration
+
+
+def _live_api_tests_enabled() -> bool:
+    return os.environ.get("ANNOUNCEFLOW_RUN_LIVE_API_TESTS", "").strip() == "1"
+
+
+@pytest.fixture(autouse=True)
+def _skip_when_live_api_tests_disabled():
+    if not _live_api_tests_enabled():
+        pytest.skip(
+            "Live API tests disabled. Set ANNOUNCEFLOW_RUN_LIVE_API_TESTS=1 to enable."
+        )
 
 
 def _load_local_config() -> dict:
