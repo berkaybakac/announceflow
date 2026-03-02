@@ -6,9 +6,12 @@ import os
 import json
 import socket
 import webbrowser
+import logging
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from typing import Optional, Dict, Any
+from concurrent.futures import ThreadPoolExecutor
+import threading
 import requests
 
 # Credential management
@@ -22,6 +25,11 @@ from credential_manager import (
 # Configuration
 API_BASE = "http://aflow.local:5001"
 CONFIG_FILE = "agent_config.json"
+DEFAULT_TIMEOUT = (2, 5)
+LOGIN_TIMEOUT = (2, 10)
+UPLOAD_TIMEOUT = (3, 30)
+
+logger = logging.getLogger(__name__)
 
 
 def load_agent_config():
@@ -231,6 +239,39 @@ class AnnounceFlowAgent:
         self.config = load_agent_config()
         self.api_base = self.config.get("api_base", API_BASE)
         self.session = None  # Will store session cookie
+        self._session_lock = threading.RLock()
+
+    def close(self):
+        """Release network resources."""
+        with self._session_lock:
+            if self.session is not None:
+                try:
+                    self.session.close()
+                except Exception:
+                    pass
+                self.session = None
+
+    def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        auth_required: bool = True,
+        timeout=DEFAULT_TIMEOUT,
+        **kwargs,
+    ) -> Optional[requests.Response]:
+        """Issue HTTP request with explicit timeout and optional auth session."""
+        url = f"{self.api_base}{path}"
+        try:
+            if auth_required:
+                with self._session_lock:
+                    session = self.session
+                if session is None:
+                    return None
+                return session.request(method=method.upper(), url=url, timeout=timeout, **kwargs)
+            return requests.request(method=method.upper(), url=url, timeout=timeout, **kwargs)
+        except requests.exceptions.RequestException:
+            return None
 
     def login(self, username: str, password: str) -> Dict[str, Any]:
         """
@@ -248,12 +289,20 @@ class AnnounceFlowAgent:
                 f"{self.api_base}/login",
                 data={"username": username, "password": password},
                 allow_redirects=True,
-                timeout=10,
+                timeout=LOGIN_TIMEOUT,
             )
             # Check if we got a session cookie (login successful)
             if "session" in session.cookies:
-                self.session = session
+                with self._session_lock:
+                    old_session = self.session
+                    self.session = session
+                if old_session is not None:
+                    try:
+                        old_session.close()
+                    except Exception:
+                        pass
                 return {"success": True}
+            session.close()
             # No session cookie = invalid credentials
             return {"success": False, "error": "invalid_credentials"}
         except requests.exceptions.ConnectionError:
@@ -299,7 +348,7 @@ class AnnounceFlowAgent:
                     # Port open, verify it's AnnounceFlow
                     try:
                         url = f"http://{ip}:{port}"
-                        resp = requests.get(f"{url}/api/health", timeout=2)
+                        resp = requests.get(f"{url}/api/health", timeout=DEFAULT_TIMEOUT)
                         if resp.ok and "player" in resp.json():
                             return url
                     except Exception:
@@ -310,94 +359,120 @@ class AnnounceFlowAgent:
 
     def get_media_files(self):
         """Fetch all media files."""
-        if not self.session:
+        response = self._request("GET", "/api/now-playing", auth_required=True)
+        if response is None:
             return []
         try:
-            # We need an API endpoint that returns JSON
-            # For now, parse from library page or create a simple endpoint
-            response = self.session.get(f"{self.api_base}/api/now-playing")
             return response.json() if response.ok else []
-        except requests.exceptions.RequestException:
+        except ValueError:
             return []
 
     def get_health(self):
         """Fetch system health including current volume (no auth required)."""
+        response = self._request("GET", "/api/health", auth_required=False)
+        if response is None:
+            return {}
         try:
-            # Use requests directly (no session needed - no auth)
-            response = requests.get(f"{self.api_base}/api/health", timeout=5)
             return response.json() if response.ok else {}
-        except requests.exceptions.RequestException:
+        except ValueError:
             return {}
 
     def play_file(self, media_id):
         """Play a media file."""
-        if not self.session:
-            return False
-        try:
-            response = self.session.post(
-                f"{self.api_base}/api/play", json={"media_id": media_id}
-            )
-            return response.ok
-        except requests.exceptions.RequestException:
-            return False
+        response = self._request(
+            "POST",
+            "/api/play",
+            auth_required=True,
+            json={"media_id": media_id},
+        )
+        return bool(response and response.ok)
 
     def stop_playback(self):
         """Stop playback."""
-        if not self.session:
-            return False
-        try:
-            response = self.session.post(f"{self.api_base}/api/stop")
-            return response.ok
-        except requests.exceptions.RequestException:
-            return False
+        response = self._request("POST", "/api/stop", auth_required=True)
+        return bool(response and response.ok)
 
     def start_playlist(self):
         """Start background music playlist (loop)."""
-        if not self.session:
-            return False
-        try:
-            response = self.session.post(f"{self.api_base}/api/playlist/start-all")
-            return response.ok
-        except requests.exceptions.RequestException:
-            return False
+        response = self._request("POST", "/api/playlist/start-all", auth_required=True)
+        return bool(response and response.ok)
 
     def stop_playlist(self):
         """Stop background music playlist."""
-        if not self.session:
-            return False
-        try:
-            response = self.session.post(f"{self.api_base}/api/playlist/stop")
-            return response.ok
-        except requests.exceptions.RequestException:
-            return False
+        response = self._request("POST", "/api/playlist/stop", auth_required=True)
+        return bool(response and response.ok)
 
     def set_volume(self, volume):
         """Set volume level."""
-        if not self.session:
-            return False
-        try:
-            response = self.session.post(
-                f"{self.api_base}/api/volume", json={"volume": volume}
-            )
-            return response.ok
-        except requests.exceptions.RequestException:
-            return False
+        response = self._request(
+            "POST",
+            "/api/volume",
+            auth_required=True,
+            json={"volume": volume},
+        )
+        return bool(response and response.ok)
 
     def upload_file(self, filepath, media_type="announcement"):
         """Upload a media file."""
-        if not self.session:
-            return False
         try:
             with open(filepath, "rb") as f:
                 files = {"file": (os.path.basename(filepath), f)}
                 data = {"media_type": media_type}
-                response = self.session.post(
-                    f"{self.api_base}/api/media/upload", files=files, data=data
+                response = self._request(
+                    "POST",
+                    "/api/media/upload",
+                    auth_required=True,
+                    timeout=UPLOAD_TIMEOUT,
+                    files=files,
+                    data=data,
                 )
-            return response.ok
+            return bool(response and response.ok)
         except Exception as e:
             print(f"Upload error: {e}")
             return False
+
+
+class NetworkWorker:
+    """Run network jobs outside Tkinter UI thread and marshal results back safely."""
+
+    def __init__(self, root: tk.Tk, max_workers: int = 4):
+        self._root = root
+        self._executor = ThreadPoolExecutor(
+            max_workers=max(1, int(max_workers)), thread_name_prefix="agent-net"
+        )
+        self._lock = threading.RLock()
+        self._closed = False
+
+    def submit(self, fn, *, on_success=None, on_error=None):
+        with self._lock:
+            if self._closed:
+                return
+            future = self._executor.submit(fn)
+
+        def _done(done_future):
+            try:
+                result = done_future.result()
+            except Exception as exc:
+                self._dispatch(on_error, exc)
+                return
+            self._dispatch(on_success, result)
+
+        future.add_done_callback(_done)
+
+    def _dispatch(self, callback, payload):
+        if callback is None:
+            return
+        try:
+            self._root.after(0, lambda: callback(payload))
+        except tk.TclError:
+            return
+
+    def shutdown(self):
+        with self._lock:
+            if self._closed:
+                return
+            self._closed = True
+        self._executor.shutdown(wait=False, cancel_futures=True)
 
 
 class AgentGUI:
@@ -407,6 +482,10 @@ class AgentGUI:
         self.agent = agent
         self.root: Optional[tk.Tk] = None
         self.logged_in = False
+        self.network_worker: Optional[NetworkWorker] = None
+        self._closing = False
+        self._volume_update_job = None
+        self._pending_volume: Optional[int] = None
 
     def run(self):
         """Run the GUI application."""
@@ -414,6 +493,8 @@ class AgentGUI:
         self.root.title("AnnounceFlow Agent")
         self.root.geometry("400x700")
         self.root.configure(bg="#1a1a1a")
+        self.network_worker = NetworkWorker(self.root)
+        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
         # Style
         style = ttk.Style()
@@ -427,63 +508,131 @@ class AgentGUI:
         # Try auto-login if credentials are saved
         self._try_auto_login()
 
-        self.root.mainloop()
+        try:
+            self.root.mainloop()
+        finally:
+            self.on_close()
+
+    def _root_alive(self) -> bool:
+        return bool(self.root and self.root.winfo_exists() and not self._closing)
+
+    def _submit_network_job(self, fn, *, on_success=None, on_error=None):
+        worker = self.network_worker
+        if not worker or not self._root_alive():
+            return
+        if on_error is None:
+            on_error = self._handle_network_error
+        worker.submit(fn, on_success=on_success, on_error=on_error)
+
+    def _handle_network_error(self, exc: Exception):
+        """Default UI bridge for unexpected worker exceptions."""
+        logger.exception("Network worker job failed: %s", exc)
+
+        if not self._root_alive():
+            return
+
+        user_message = "Ağ işlemi sırasında beklenmeyen bir hata oluştu. Lütfen tekrar deneyin."
+        if hasattr(self, "status_label"):
+            try:
+                if self.status_label.winfo_exists():
+                    self.status_label.config(text=user_message, fg="#ef4444")
+            except tk.TclError:
+                pass
+
+        try:
+            messagebox.showerror("Ağ Hatası", user_message)
+        except tk.TclError:
+            pass
+
+    def on_close(self):
+        """Bounded-time, idempotent UI shutdown."""
+        if self._closing:
+            return
+        self._closing = True
+
+        if self.root and self._volume_update_job is not None:
+            try:
+                self.root.after_cancel(self._volume_update_job)
+            except tk.TclError:
+                pass
+            self._volume_update_job = None
+
+        if self.network_worker:
+            self.network_worker.shutdown()
+            self.network_worker = None
+
+        self.agent.close()
+
+        if self.root and self.root.winfo_exists():
+            try:
+                self.root.destroy()
+            except tk.TclError:
+                pass
 
     def _try_auto_login(self):
         """Attempt auto-login with saved credentials."""
-        if has_credentials(self.agent.api_base):
-            # Show loading state
-            self.clear_frame()
-            loading_frame = tk.Frame(self.root, bg="#1a1a1a")
-            loading_frame.pack(expand=True)
+        if not has_credentials(self.agent.api_base):
+            self.show_login_frame()
+            return
 
-            tk.Label(
-                loading_frame, text="🎵", font=("Segoe UI", 48), bg="#1a1a1a", fg="white"
-            ).pack(pady=20)
-            tk.Label(
-                loading_frame,
-                text="AnnounceFlow Agent",
-                font=("Segoe UI", 16, "bold"),
-                bg="#1a1a1a",
-                fg="white",
-            ).pack()
-            status_label = tk.Label(
-                loading_frame,
-                text="Otomatik giriş yapılıyor...",
-                bg="#1a1a1a",
-                fg="#f59e0b",
-                font=("Segoe UI", 10),
-            )
-            status_label.pack(pady=20)
-            self.root.update()
+        creds = get_credentials(self.agent.api_base)
+        if not creds:
+            self.show_login_frame()
+            return
 
-            # Get saved credentials and try login
-            creds = get_credentials(self.agent.api_base)
-            if creds:
-                username, password = creds
-                result = self.agent.login(username, password)
+        # Show loading state
+        self.clear_frame()
+        loading_frame = tk.Frame(self.root, bg="#1a1a1a")
+        loading_frame.pack(expand=True)
 
-                if result.get("success"):
-                    self.logged_in = True
-                    self.show_main_frame()
-                    return
-                elif result.get("error") == "invalid_credentials":
-                    # Password changed on server - clear stored credentials
-                    delete_credentials(self.agent.api_base)
-                    self.show_login_frame(
-                        error_message="Şifreniz değişti, lütfen tekrar girin."
-                    )
-                    return
-                else:
-                    # Connection error - show login with message
-                    self.show_login_frame(error_message="Sunucuya bağlanılamadı.")
-                    return
+        tk.Label(
+            loading_frame, text="🎵", font=("Segoe UI", 48), bg="#1a1a1a", fg="white"
+        ).pack(pady=20)
+        tk.Label(
+            loading_frame,
+            text="AnnounceFlow Agent",
+            font=("Segoe UI", 16, "bold"),
+            bg="#1a1a1a",
+            fg="white",
+        ).pack()
+        tk.Label(
+            loading_frame,
+            text="Otomatik giriş yapılıyor...",
+            bg="#1a1a1a",
+            fg="#f59e0b",
+            font=("Segoe UI", 10),
+        ).pack(pady=20)
 
-        # No saved credentials - show normal login
-        self.show_login_frame()
+        username, password = creds
+
+        def _job():
+            return self.agent.login(username, password)
+
+        def _on_done(result):
+            if not self._root_alive():
+                return
+            if result.get("success"):
+                self.logged_in = True
+                self.show_main_frame()
+                return
+            if result.get("error") == "invalid_credentials":
+                delete_credentials(self.agent.api_base)
+                self.show_login_frame(error_message="Şifreniz değişti, lütfen tekrar girin.")
+                return
+            self.show_login_frame(error_message="Sunucuya bağlanılamadı.")
+
+        self._submit_network_job(_job, on_success=_on_done)
 
     def show_login_frame(self, error_message: str = None):
         """Show login screen."""
+        if self.root and self._volume_update_job is not None:
+            try:
+                self.root.after_cancel(self._volume_update_job)
+            except tk.TclError:
+                pass
+            self._volume_update_job = None
+        self._pending_volume = None
+
         self.clear_frame()
 
         frame = tk.Frame(self.root, bg="#1a1a1a")
@@ -579,74 +728,67 @@ class AgentGUI:
         save_agent_config(self.agent.config)
 
         self.status_label.config(text="Bağlanılıyor...", fg="#f59e0b")
-        if self.root:
-            self.root.update()
 
-        result = self.agent.login(username, password)
+        def _job():
+            first = self.agent.login(username, password)
+            if first.get("success"):
+                return {"result": first, "resolved_url": self.agent.api_base}
+            if first.get("error") != "connection_error":
+                return {"result": first, "resolved_url": self.agent.api_base}
 
-        if result.get("success"):
-            # Save credentials if "Remember Me" is checked
-            if remember:
-                save_credentials(url, username, password)
-            else:
-                # Clear any previously saved credentials
-                delete_credentials(url)
+            found_url = self.agent.discover_server()
+            if not found_url:
+                return {"result": first, "resolved_url": None}
 
-            self.logged_in = True
-            self.show_main_frame()
-        else:
-            # Show appropriate error message
+            self.agent.api_base = found_url
+            retry = self.agent.login(username, password)
+            return {"result": retry, "resolved_url": found_url}
+
+        def _on_done(payload):
+            if not self._root_alive():
+                return
+
+            result = payload.get("result", {})
+            resolved_url = payload.get("resolved_url")
+
+            if result.get("success"):
+                final_url = resolved_url or url
+                self.agent.config["api_base"] = final_url
+                save_agent_config(self.agent.config)
+                if hasattr(self, "url_entry"):
+                    try:
+                        if self.url_entry.winfo_exists():
+                            self.url_entry.delete(0, tk.END)
+                            self.url_entry.insert(0, final_url)
+                    except tk.TclError:
+                        pass
+
+                if remember:
+                    save_credentials(final_url, username, password)
+                else:
+                    delete_credentials(final_url)
+
+                self.logged_in = True
+                self.show_main_frame()
+                return
+
             error = result.get("error", "unknown")
             if error == "invalid_credentials":
                 self.status_label.config(
                     text="Giriş başarısız! Bilgileri kontrol edin.", fg="#ef4444"
                 )
-            elif error == "connection_error":
-                # Try auto-discovery
-                self.status_label.config(
-                    text="Sunucu bulunamadi, ag taranıyor...", fg="#f59e0b"
-                )
-                if self.root:
-                    self.root.update()
-                found_url = self.agent.discover_server()
-                if found_url:
-                    # Update URL and retry login
-                    self.agent.api_base = found_url
-                    self.agent.config["api_base"] = found_url
-                    save_agent_config(self.agent.config)
-                    self.url_entry.delete(0, tk.END)
-                    self.url_entry.insert(0, found_url)
-                    self.status_label.config(
-                        text=f"Sunucu bulundu: {found_url} - tekrar deneniyor...",
-                        fg="#22c55e",
-                    )
-                    if self.root:
-                        self.root.update()
-                    # Retry login with discovered URL
-                    retry = self.agent.login(username, password)
-                    if retry.get("success"):
-                        if remember:
-                            save_credentials(found_url, username, password)
-                        self.logged_in = True
-                        self.show_main_frame()
-                        return
-                    else:
-                        self.status_label.config(
-                            text=f"Sunucu bulundu ({found_url}) ama giris basarisiz!",
-                            fg="#ef4444",
-                        )
-                else:
-                    self.status_label.config(
-                        text="Sunucu agda bulunamadi!", fg="#ef4444"
-                    )
-            elif error == "timeout":
+                return
+            if error == "connection_error":
+                self.status_label.config(text="Sunucu agda bulunamadi!", fg="#ef4444")
+                return
+            if error == "timeout":
                 self.status_label.config(
                     text="Bağlantı zaman aşımına uğradı!", fg="#ef4444"
                 )
-            else:
-                self.status_label.config(
-                    text="Beklenmeyen bir hata oluştu.", fg="#ef4444"
-                )
+                return
+            self.status_label.config(text="Beklenmeyen bir hata oluştu.", fg="#ef4444")
+
+        self._submit_network_job(_job, on_success=_on_done)
 
     def show_main_frame(self):
         """Show main control panel."""
@@ -675,12 +817,8 @@ class AgentGUI:
         content = tk.Frame(self.root, bg="#1a1a1a", padx=20, pady=20)
         content.pack(fill="both", expand=True)
 
-        # Sync with server immediately (using /api/health - no auth required)
-        try:
-            health = self.agent.get_health()
-            current_vol = health.get("player", {}).get("volume", 80)
-        except Exception:
-            current_vol = 80
+        # Default volume; server sync runs asynchronously.
+        current_vol = 80
 
         # Quick Actions
 
@@ -728,6 +866,21 @@ class AgentGUI:
         )
         self.volume_slider.pack(fill="x", pady=(0, 10))
 
+        def _load_health():
+            return self.agent.get_health()
+
+        def _apply_health(health):
+            if not self._root_alive():
+                return
+            if not hasattr(self, "volume_slider"):
+                return
+            player = health.get("player", {}) if isinstance(health, dict) else {}
+            current = player.get("volume")
+            if isinstance(current, (int, float)):
+                self.volume_slider.set_value(int(current))
+
+        self._submit_network_job(_load_health, on_success=_apply_health)
+
         # Logout (Modern)
         ModernButton(
             content,
@@ -739,17 +892,33 @@ class AgentGUI:
 
     def start_music(self):
         """Start background music playlist (loop)."""
-        if self.agent.start_playlist():
-            messagebox.showinfo("Başarılı", "Arka plan müzik başlatıldı!")
-        else:
-            messagebox.showerror("Hata", "Müzik başlatılamadı.")
+        def _on_done(success):
+            if not self._root_alive():
+                return
+            if success:
+                messagebox.showinfo("Başarılı", "Arka plan müzik başlatıldı!")
+            else:
+                messagebox.showerror("Hata", "Müzik başlatılamadı.")
+
+        self._submit_network_job(
+            lambda: self.agent.start_playlist(),
+            on_success=_on_done,
+        )
 
     def stop_music(self):
         """Stop current playback."""
-        if self.agent.stop_playlist():
-            messagebox.showinfo("Başarılı", "Müzik durduruldu.")
-        else:
-            messagebox.showerror("Hata", "İşlem başarısız.")
+        def _on_done(success):
+            if not self._root_alive():
+                return
+            if success:
+                messagebox.showinfo("Başarılı", "Müzik durduruldu.")
+            else:
+                messagebox.showerror("Hata", "İşlem başarısız.")
+
+        self._submit_network_job(
+            lambda: self.agent.stop_playlist(),
+            on_success=_on_done,
+        )
 
     def upload_announcement(self):
         """Upload an announcement file."""
@@ -759,10 +928,18 @@ class AgentGUI:
         )
 
         if filepath:
-            if self.agent.upload_file(filepath, "announcement"):
-                messagebox.showinfo("Başarılı", "Anons dosyası yüklendi!")
-            else:
-                messagebox.showerror("Hata", "Dosya yüklenemedi.")
+            def _on_done(success):
+                if not self._root_alive():
+                    return
+                if success:
+                    messagebox.showinfo("Başarılı", "Anons dosyası yüklendi!")
+                else:
+                    messagebox.showerror("Hata", "Dosya yüklenemedi.")
+
+            self._submit_network_job(
+                lambda: self.agent.upload_file(filepath, "announcement"),
+                on_success=_on_done,
+            )
 
     def open_web_panel(self):
         """Open web panel in browser."""
@@ -770,14 +947,26 @@ class AgentGUI:
 
     def on_volume_change(self, value):
         """Handle volume change."""
-        vol = int(float(value))
-        self.agent.set_volume(vol)
+        self._pending_volume = int(float(value))
+        if not self.root:
+            return
+        if self._volume_update_job is not None:
+            self.root.after_cancel(self._volume_update_job)
+        self._volume_update_job = self.root.after(120, self._flush_pending_volume)
+
+    def _flush_pending_volume(self):
+        self._volume_update_job = None
+        if self._pending_volume is None:
+            return
+        volume = self._pending_volume
+        self._pending_volume = None
+        self._submit_network_job(lambda: self.agent.set_volume(volume))
 
     def logout(self):
         """Logout and return to login screen."""
         # Clear stored credentials on logout
         delete_credentials(self.agent.api_base)
-        self.agent.session = None
+        self.agent.close()
         self.logged_in = False
         self.show_login_frame()
 
