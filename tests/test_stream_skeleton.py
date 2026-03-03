@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+from unittest.mock import patch
 
 from web_panel import app
 from services.stream_service import StreamService, StreamStatus
@@ -91,14 +92,28 @@ def test_stream_status_route_contract_when_logged_in():
     assert payload["state"] == "idle"
 
 
-def test_stream_start_stop_routes_functional_when_logged_in():
+@patch("routes.stream_routes._stream_service")
+def test_stream_start_stop_routes_functional_when_logged_in(mock_stream_service):
     app.config["TESTING"] = True
     client = app.test_client()
     with client.session_transaction() as sess:
         sess["logged_in"] = True
+
+    mock_stream_service.start.return_value = {
+        "success": True,
+        "status": StreamStatus(active=True, state="live").to_dict(),
+    }
+    mock_stream_service.stop.return_value = {
+        "success": True,
+        "status": StreamStatus(active=False, state="idle").to_dict(),
+    }
 
     start_resp = client.post("/api/stream/start")
     stop_resp = client.post("/api/stream/stop")
 
     assert start_resp.status_code == 200
     assert stop_resp.status_code == 200
+    assert start_resp.get_json()["success"] is True
+    assert stop_resp.get_json()["success"] is True
+    assert "status" in start_resp.get_json()
+    assert "status" in stop_resp.get_json()
