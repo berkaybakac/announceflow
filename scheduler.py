@@ -18,6 +18,13 @@ from services.silence_policy import (
     is_within_working_hours as _policy_is_within_working_hours,
     is_prayer_time_active as _policy_is_prayer_time_active,
 )
+from services.stream_policy import (
+    should_force_stop_stream,
+    should_interrupt_for_announcement,
+    should_resume_stream,
+    should_skip_scheduled_music,
+)
+from services.stream_service import get_stream_service
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +78,9 @@ class Scheduler:
         self._reconcile_interval_seconds: int = 60
         self._last_reconcile_monotonic: float = 0.0
         self._last_policy_fingerprint: Optional[str] = None
+        self._last_stream_silence_active: bool = False
+        self._stream_resume_worker_lock = threading.Lock()
+        self._stream_resume_worker_in_progress = False
 
     def start(self):
         """Start the scheduler background thread."""
@@ -494,6 +504,72 @@ class Scheduler:
 
         return outside_working_hours
 
+    def _apply_stream_runtime_policy(self, silence_decision: dict[str, Any]) -> None:
+        """Apply Faz 4 stream runtime rules against current silence decision."""
+        stream_service = get_stream_service()
+        stream_status = stream_service.status()
+        stream_active = bool(stream_status.get("active"))
+        silence_active = bool(silence_decision.get("silence_active", False))
+
+        if should_force_stop_stream(silence_active) and stream_active:
+            stream_service.force_stop_by_policy()
+
+        silence_ended = self._last_stream_silence_active and not silence_active
+        sender_alive = stream_service.policy_sender_alive()
+        if should_resume_stream(silence_ended, sender_alive):
+            stream_service.resume_after_policy()
+
+        self._last_stream_silence_active = silence_active
+
+    def _resume_stream_after_announcement_worker(self) -> None:
+        """Resume stream after announcement playback completes."""
+        try:
+            player = get_player()
+            while player.is_playing:
+                time.sleep(0.5)
+
+            stream_service = get_stream_service()
+            config = self._get_cached_config()
+            decision = resolve_silence_policy(
+                config,
+                allow_network=False,
+                fail_safe_on_unknown=True,
+            )
+            self._log_policy_decision_if_changed(decision)
+            if should_force_stop_stream(decision.get("silence_active", False)):
+                stream_service.force_stop_by_policy()
+                return
+
+            sender_alive = stream_service.policy_sender_alive()
+            if should_resume_stream(True, sender_alive):
+                stream_service.resume_after_announcement()
+        except Exception as e:
+            logger.error(f"Announcement stream resume worker error: {e}")
+        finally:
+            with self._stream_resume_worker_lock:
+                self._stream_resume_worker_in_progress = False
+
+    def _start_stream_resume_worker_after_announcement(self) -> bool:
+        with self._stream_resume_worker_lock:
+            if self._stream_resume_worker_in_progress:
+                logger.info(
+                    "Announcement stream resume worker already running; skipping new start"
+                )
+                return False
+            self._stream_resume_worker_in_progress = True
+
+        try:
+            thread = threading.Thread(
+                target=self._resume_stream_after_announcement_worker,
+                daemon=True,
+            )
+            thread.start()
+            return True
+        except Exception:
+            with self._stream_resume_worker_lock:
+                self._stream_resume_worker_in_progress = False
+            raise
+
     def _run_loop(self):
         """Main scheduler loop."""
         while self._running:
@@ -506,6 +582,7 @@ class Scheduler:
                     fail_safe_on_unknown=True,
                 )
                 self._log_policy_decision_if_changed(silence_decision)
+                self._apply_stream_runtime_policy(silence_decision)
 
                 # 1. Prayer time check - highest priority, stops EVERYTHING
                 prayer_pause_active = self._handle_prayer_time(
@@ -820,11 +897,29 @@ class Scheduler:
     ):
         """Trigger media playback with announcement priority."""
         player = get_player()
+        stream_service = get_stream_service()
         config = self._get_cached_config()
         source_type = "one-time" if is_one_time else "recurring"
 
         if not is_within_working_hours(config):
             return
+
+        stream_status = stream_service.status()
+        stream_active = bool(stream_status.get("active"))
+
+        if not is_announcement and should_skip_scheduled_music(stream_active):
+            logger.info(
+                "Skipping scheduled music while stream is active "
+                f"(schedule_id={schedule_id})"
+            )
+            if is_one_time:
+                db.update_one_time_schedule_status(schedule_id, "cancelled")
+            return
+
+        announcement_interrupted_stream = False
+        if is_announcement and should_interrupt_for_announcement(stream_active):
+            stream_service.pause_for_announcement()
+            announcement_interrupted_stream = True
 
         snapshot = self._capture_restore_snapshot(player)
         self._interrupt_for_scheduled_media(player, is_announcement, snapshot)
@@ -837,6 +932,8 @@ class Scheduler:
         )
         if success and self._queue_restore_target(snapshot):
             self._start_restore_worker(player)
+        if announcement_interrupted_stream:
+            self._start_stream_resume_worker_after_announcement()
         self._finalize_one_time_status(success, schedule_id, is_one_time)
 
     def _times_match(self, current: str, scheduled: str) -> bool:

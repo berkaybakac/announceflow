@@ -28,8 +28,7 @@ def should_interrupt_for_announcement(stream_active: bool) -> bool:
     Returns:
         True if stream should pause for announcement.
     """
-    # TODO(Faz 4): Implement announcement interrupt logic
-    return stream_active
+    return bool(stream_active)
 
 
 def should_skip_scheduled_music(stream_active: bool) -> bool:
@@ -41,8 +40,7 @@ def should_skip_scheduled_music(stream_active: bool) -> bool:
     Returns:
         True if scheduled music should be skipped.
     """
-    # TODO(Faz 4): Implement scheduled music skip logic
-    return stream_active
+    return bool(stream_active)
 
 
 def should_force_stop_stream(silence_active: bool) -> bool:
@@ -54,8 +52,7 @@ def should_force_stop_stream(silence_active: bool) -> bool:
     Returns:
         True if stream must be stopped immediately.
     """
-    # TODO(Faz 4): Implement force-stop logic
-    return silence_active
+    return bool(silence_active)
 
 
 def should_resume_stream(silence_ended: bool, sender_alive: bool) -> bool:
@@ -68,5 +65,4 @@ def should_resume_stream(silence_ended: bool, sender_alive: bool) -> bool:
     Returns:
         True if stream should resume.
     """
-    # TODO(Faz 4): Implement resume logic
-    return silence_ended and sender_alive
+    return bool(silence_ended and sender_alive)

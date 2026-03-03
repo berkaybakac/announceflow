@@ -13,6 +13,7 @@ V1 scope: single session, same LAN, no DB persistence for stream state.
 """
 import logging
 import threading
+from typing import Optional
 
 from logger import log_error, log_system
 
@@ -62,6 +63,11 @@ class StreamService:
         self._player_fn = player_fn
         self._status = StreamStatus()
         self._lock = threading.Lock()
+        self._policy_resume_armed = False
+        self._user_stopped = False
+
+    def _is_policy_sender_alive_unlocked(self) -> bool:
+        return bool(self._policy_resume_armed and not self._user_stopped)
 
     def start(self) -> dict:
         """Start a stream session (idempotent).
@@ -72,9 +78,12 @@ class StreamService:
         with self._lock:
             if self._status.active and self._status.state == "live":
                 logger.info("StreamService: start called but already live (idempotent)")
+                self._policy_resume_armed = True
+                self._user_stopped = False
                 return {"success": True, "status": self._status.to_dict()}
 
             try:
+                self._user_stopped = False
                 player = self._player_fn()
                 player_state = player.get_state()
                 was_playlist_active = player_state.get("playlist", {}).get(
@@ -109,6 +118,7 @@ class StreamService:
                         source_before_stream=source_before,
                         last_error="receiver_start_failed",
                     )
+                    self._policy_resume_armed = False
                     log_error(
                         "stream_start_failed", {"reason": "receiver_start_failed"}
                     )
@@ -120,6 +130,7 @@ class StreamService:
                     source_before_stream=source_before,
                     last_error=None,
                 )
+                self._policy_resume_armed = True
                 log_system("stream_started", {"source_before": source_before})
                 return {"success": True, "status": self._status.to_dict()}
 
@@ -130,6 +141,7 @@ class StreamService:
                     state="error",
                     last_error=str(exc),
                 )
+                self._policy_resume_armed = False
                 log_error("stream_start_exception", {"error": str(exc)})
                 return {"success": False, "status": self._status.to_dict()}
 
@@ -144,9 +156,13 @@ class StreamService:
                 logger.info(
                     "StreamService: stop called but already idle (idempotent)"
                 )
+                self._policy_resume_armed = False
+                self._user_stopped = True
                 return {"success": True, "status": self._status.to_dict()}
 
             try:
+                self._policy_resume_armed = False
+                self._user_stopped = True
                 source_before = self._status.source_before_stream
                 stop_error = None
 
@@ -187,14 +203,119 @@ class StreamService:
             StreamStatus as dict.
         """
         with self._lock:
-            if self._status.active and self._manager and not self._manager.is_alive():
+            if (
+                self._status.active
+                and self._status.state == "live"
+                and self._manager
+                and not self._manager.is_alive()
+            ):
                 self._status = StreamStatus(
                     active=False,
                     state="error",
                     source_before_stream=self._status.source_before_stream,
                     last_error="receiver_died",
                 )
+                self._policy_resume_armed = False
             return self._status.to_dict()
+
+    def policy_sender_alive(self) -> bool:
+        """Policy-level sender liveness for Faz 4 runtime rules."""
+        with self._lock:
+            return self._is_policy_sender_alive_unlocked()
+
+    def pause_for_announcement(self) -> dict:
+        """Temporarily pause live stream for announcement playback."""
+        with self._lock:
+            if self._status.state == "paused_for_announcement":
+                return {"success": True, "status": self._status.to_dict()}
+            if not self._status.active or self._status.state != "live":
+                return {"success": True, "status": self._status.to_dict()}
+
+            if self._manager and not self._manager.stop_receiver():
+                logger.warning(
+                    "StreamService: pause_for_announcement stop_receiver returned False"
+                )
+
+            self._status = StreamStatus(
+                active=True,
+                state="paused_for_announcement",
+                source_before_stream=self._status.source_before_stream,
+                last_error=None,
+            )
+            log_system("stream_paused_for_announcement", {})
+            return {"success": True, "status": self._status.to_dict()}
+
+    def resume_after_announcement(self) -> dict:
+        """Resume stream after announcement if still policy-eligible."""
+        with self._lock:
+            if self._status.state != "paused_for_announcement":
+                return {"success": True, "status": self._status.to_dict()}
+            if not self._is_policy_sender_alive_unlocked():
+                return {"success": True, "status": self._status.to_dict()}
+
+            if self._manager and not self._manager.start_receiver():
+                self._status = StreamStatus(
+                    active=False,
+                    state="error",
+                    source_before_stream=self._status.source_before_stream,
+                    last_error="receiver_start_failed",
+                )
+                return {"success": False, "status": self._status.to_dict()}
+
+            self._status = StreamStatus(
+                active=True,
+                state="live",
+                source_before_stream=self._status.source_before_stream,
+                last_error=None,
+            )
+            return {"success": True, "status": self._status.to_dict()}
+
+    def force_stop_by_policy(self) -> dict:
+        """Force-stop stream output due to silence policy (intentional, non-error)."""
+        with self._lock:
+            if self._status.state == "stopped_by_policy" and not self._status.active:
+                return {"success": True, "status": self._status.to_dict()}
+            if not self._status.active and self._status.state != "paused_for_announcement":
+                return {"success": True, "status": self._status.to_dict()}
+
+            if self._manager and not self._manager.stop_receiver():
+                logger.warning(
+                    "StreamService: force_stop_by_policy stop_receiver returned False"
+                )
+
+            self._status = StreamStatus(
+                active=False,
+                state="stopped_by_policy",
+                source_before_stream=self._status.source_before_stream,
+                last_error=None,
+            )
+            log_system("stream_force_stopped_by_policy", {})
+            return {"success": True, "status": self._status.to_dict()}
+
+    def resume_after_policy(self) -> dict:
+        """Resume stream when silence policy ends and policy conditions allow it."""
+        with self._lock:
+            if self._status.state != "stopped_by_policy":
+                return {"success": True, "status": self._status.to_dict()}
+            if not self._is_policy_sender_alive_unlocked():
+                return {"success": True, "status": self._status.to_dict()}
+
+            if self._manager and not self._manager.start_receiver():
+                self._status = StreamStatus(
+                    active=False,
+                    state="error",
+                    source_before_stream=self._status.source_before_stream,
+                    last_error="receiver_start_failed",
+                )
+                return {"success": False, "status": self._status.to_dict()}
+
+            self._status = StreamStatus(
+                active=True,
+                state="live",
+                source_before_stream=self._status.source_before_stream,
+                last_error=None,
+            )
+            return {"success": True, "status": self._status.to_dict()}
 
     def _restore_playlist(self):
         """Restore playlist state from DB after stream stop."""
@@ -212,3 +333,23 @@ class StreamService:
                 logger.info("StreamService: restored playlist after stream stop")
         except Exception as exc:
             logger.warning("StreamService: failed to restore playlist: %s", exc)
+
+
+_stream_service_singleton: Optional[StreamService] = None
+_stream_service_singleton_lock = threading.Lock()
+
+
+def get_stream_service(stream_manager=None, player_fn=None) -> StreamService:
+    """Return singleton StreamService shared by routes and scheduler."""
+    global _stream_service_singleton
+    with _stream_service_singleton_lock:
+        if _stream_service_singleton is None:
+            if stream_manager is None:
+                from stream_manager import StreamManager
+
+                stream_manager = StreamManager()
+            _stream_service_singleton = StreamService(
+                stream_manager=stream_manager,
+                player_fn=player_fn,
+            )
+        return _stream_service_singleton
