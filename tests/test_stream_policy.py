@@ -117,3 +117,31 @@ def test_user_stop_clears_policy_resume_arm(mock_manager, mock_player):
 
     svc.stop()
     assert svc.policy_sender_alive() is False
+
+
+def test_resume_after_announcement_receiver_fail(mock_manager, mock_player):
+    """P2: receiver restart fails after announcement → error state."""
+    svc = _make_service(mock_manager, mock_player)
+    svc.start()
+    svc.pause_for_announcement()
+
+    mock_manager.start_receiver.return_value = False
+    result = svc.resume_after_announcement()
+    assert result["success"] is False
+    assert result["status"]["state"] == "error"
+    assert result["status"]["last_error"] == "receiver_start_failed"
+    assert result["status"]["active"] is False
+
+
+def test_resume_after_policy_receiver_fail(mock_manager, mock_player):
+    """P2: receiver restart fails after silence-policy end → error state."""
+    svc = _make_service(mock_manager, mock_player)
+    svc.start()
+    svc.force_stop_by_policy()
+
+    mock_manager.start_receiver.return_value = False
+    result = svc.resume_after_policy()
+    assert result["success"] is False
+    assert result["status"]["state"] == "error"
+    assert result["status"]["last_error"] == "receiver_start_failed"
+    assert result["status"]["active"] is False
