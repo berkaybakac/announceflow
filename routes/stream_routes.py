@@ -12,36 +12,49 @@ V1 API contract (PI4_STREAM_V1_SCOPE.md section 4):
     POST /api/stream/stop
     GET  /api/stream/status
 """
+import logging
+
 from flask import Blueprint, jsonify
-from utils.helpers import login_required
+
+from services.stream_service import StreamService
+from stream_manager import StreamManager
+from utils.helpers import _json_error, _json_success, login_required
 
 stream_bp = Blueprint("stream", __name__)
+logger = logging.getLogger(__name__)
+
+_stream_manager = StreamManager()
+_stream_service = StreamService(stream_manager=_stream_manager)
 
 
 @stream_bp.route("/api/stream/start", methods=["POST"])
 @login_required
 def stream_start():
     """Start a stream session."""
-    # TODO(Faz 3): Wire to StreamService.start()
-    return jsonify({"success": False, "error": "not_implemented"}), 501
+    result = _stream_service.start()
+    if result["success"]:
+        return _json_success(status=result["status"])
+    return _json_error(
+        result["status"].get("last_error", "stream_start_failed"),
+        status=500,
+    )
 
 
 @stream_bp.route("/api/stream/stop", methods=["POST"])
 @login_required
 def stream_stop():
     """Stop the active stream session."""
-    # TODO(Faz 3): Wire to StreamService.stop()
-    return jsonify({"success": False, "error": "not_implemented"}), 501
+    result = _stream_service.stop()
+    if result["success"]:
+        return _json_success(status=result["status"])
+    return _json_error(
+        result["status"].get("last_error", "stream_stop_failed"),
+        status=500,
+    )
 
 
 @stream_bp.route("/api/stream/status", methods=["GET"])
 @login_required
 def stream_status():
     """Get current stream status."""
-    # TODO(Faz 3): Wire to StreamService.status()
-    return jsonify({
-        "active": False,
-        "state": "idle",
-        "source_before_stream": "none",
-        "last_error": None,
-    })
+    return jsonify(_stream_service.status())
