@@ -84,6 +84,7 @@ class StreamService:
 
                 was_playing = player_state.get("is_playing", False)
                 previous_file = player_state.get("current_file")
+                previous_position = player_state.get("position", 0.0) or 0.0
 
                 if was_playlist_active:
                     player.stop_playlist()
@@ -98,7 +99,7 @@ class StreamService:
                         self._restore_playlist()
                     elif was_playing and previous_file:
                         try:
-                            player.play(previous_file)
+                            player.play(previous_file, start_position=previous_position)
                             logger.info("StreamService: restored single-track after failed start")
                         except Exception as play_exc:
                             logger.warning("StreamService: failed to restore single-track: %s", play_exc)

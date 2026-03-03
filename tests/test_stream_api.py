@@ -121,13 +121,16 @@ class TestStreamServiceStart:
         mock_player.get_state.return_value = {
             "is_playing": True,
             "current_file": "/media/song.mp3",
+            "position": 12.5,
             "playlist": {"active": False},
         }
         svc = _make_service(mock_manager, mock_player)
         result = svc.start()
         assert result["success"] is False
         mock_player.stop.assert_called_once()
-        mock_player.play.assert_called_once_with("/media/song.mp3")
+        mock_player.play.assert_called_once_with(
+            "/media/song.mp3", start_position=12.5
+        )
 
 
 class TestStreamServiceStop:
@@ -228,6 +231,27 @@ class TestStreamRoutes:
         assert resp.status_code == 200
         data = resp.get_json()
         assert data["success"] is True
+
+    @patch("routes.stream_routes._stream_service")
+    def test_stop_endpoint_returns_error_state_when_receiver_stop_fails(
+        self, mock_svc, client
+    ):
+        """Route contract: best-effort stop may still return state=error."""
+        mock_svc.stop.return_value = {
+            "success": True,
+            "status": StreamStatus(
+                active=False,
+                state="error",
+                last_error="receiver_stop_failed",
+            ).to_dict(),
+        }
+        resp = client.post("/api/stream/stop")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["success"] is True
+        assert data["status"]["active"] is False
+        assert data["status"]["state"] == "error"
+        assert data["status"]["last_error"] == "receiver_stop_failed"
 
     @patch("routes.stream_routes._stream_service")
     def test_status_endpoint_contract(self, mock_svc, client):
