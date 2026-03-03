@@ -4,11 +4,14 @@ import os
 import tempfile
 import unittest
 from datetime import datetime, timedelta
+from unittest.mock import MagicMock, patch
 
 import database as db
+import scheduler as scheduler_module
 from database.media_repository import MediaRepository
 from database.playback_repository import PlaybackRepository
 from database.schedule_repository import ScheduleRepository
+from scheduler import Scheduler
 from services.schedule_conflict_service import (
     find_conflict_for_one_time,
     find_conflict_for_recurring,
@@ -211,6 +214,182 @@ class ScheduleConflictTestCase(unittest.TestCase):
         conflict = find_conflict_for_recurring(candidate)
         self.assertIsNotNone(conflict)
         self.assertEqual(conflict["type"], "one_time")
+
+
+class SchedulerStreamRuntimeRulesTestCase(unittest.TestCase):
+    """Faz 4 scheduler + stream policy interaction tests."""
+
+    def setUp(self):
+        self.scheduler = Scheduler(check_interval_seconds=1)
+
+    @staticmethod
+    def _player_mock():
+        player = MagicMock()
+        player._playlist = []
+        player._playlist_index = -1
+        player._playlist_loop = True
+        player._playlist_active = False
+        player.is_playing = False
+        player.play.return_value = True
+        player.stop.return_value = True
+        player.apply_playlist_state.return_value = True
+        return player
+
+    def test_non_announcement_one_time_skipped_when_stream_active(self):
+        stream_service = MagicMock()
+        stream_service.status.return_value = {"active": True, "state": "live"}
+        player = self._player_mock()
+
+        with patch.object(
+            scheduler_module,
+            "get_stream_service",
+            return_value=stream_service,
+        ), patch.object(
+            scheduler_module,
+            "get_player",
+            return_value=player,
+        ), patch.object(
+            scheduler_module,
+            "is_within_working_hours",
+            return_value=True,
+        ), patch.object(
+            scheduler_module.db,
+            "update_one_time_schedule_status",
+        ) as mock_update_status:
+            self.scheduler._play_media(
+                "/tmp/music.mp3",
+                schedule_id=10,
+                is_one_time=True,
+                is_announcement=False,
+            )
+
+        mock_update_status.assert_called_once_with(10, "cancelled")
+        player.play.assert_not_called()
+
+    def test_announcement_pauses_stream_and_schedules_resume_worker(self):
+        stream_service = MagicMock()
+        stream_service.status.return_value = {"active": True, "state": "live"}
+        player = self._player_mock()
+
+        with patch.object(
+            scheduler_module,
+            "get_stream_service",
+            return_value=stream_service,
+        ), patch.object(
+            scheduler_module,
+            "get_player",
+            return_value=player,
+        ), patch.object(
+            scheduler_module,
+            "is_within_working_hours",
+            return_value=True,
+        ), patch.object(
+            scheduler_module.db,
+            "get_playlist_state",
+            return_value={"playlist": [], "index": -1, "loop": True, "active": False},
+        ), patch.object(
+            self.scheduler,
+            "_start_stream_resume_worker_after_announcement",
+        ) as mock_resume_worker:
+            self.scheduler._play_media(
+                "/tmp/announcement.mp3",
+                schedule_id=11,
+                is_one_time=True,
+                is_announcement=True,
+            )
+
+        stream_service.pause_for_announcement.assert_called_once()
+        mock_resume_worker.assert_called_once()
+
+    def test_announcement_resume_worker_runs_even_when_play_fails(self):
+        stream_service = MagicMock()
+        stream_service.status.return_value = {"active": True, "state": "live"}
+        player = self._player_mock()
+        player.play.return_value = False
+
+        with patch.object(
+            scheduler_module,
+            "get_stream_service",
+            return_value=stream_service,
+        ), patch.object(
+            scheduler_module,
+            "get_player",
+            return_value=player,
+        ), patch.object(
+            scheduler_module,
+            "is_within_working_hours",
+            return_value=True,
+        ), patch.object(
+            scheduler_module.db,
+            "get_playlist_state",
+            return_value={"playlist": [], "index": -1, "loop": True, "active": False},
+        ), patch.object(
+            self.scheduler,
+            "_start_stream_resume_worker_after_announcement",
+        ) as mock_resume_worker:
+            self.scheduler._play_media(
+                "/tmp/announcement.mp3",
+                schedule_id=12,
+                is_one_time=True,
+                is_announcement=True,
+            )
+
+        stream_service.pause_for_announcement.assert_called_once()
+        mock_resume_worker.assert_called_once()
+
+    def test_silence_active_force_stops_stream(self):
+        stream_service = MagicMock()
+        stream_service.status.return_value = {"active": True, "state": "live"}
+        stream_service.policy_sender_alive.return_value = False
+
+        with patch.object(
+            scheduler_module,
+            "get_stream_service",
+            return_value=stream_service,
+        ):
+            self.scheduler._apply_stream_runtime_policy({"silence_active": True})
+
+        stream_service.force_stop_by_policy.assert_called_once()
+        stream_service.resume_after_policy.assert_not_called()
+
+    def test_silence_end_resumes_stream_only_when_sender_alive(self):
+        stream_service = MagicMock()
+        stream_service.status.return_value = {"active": False, "state": "stopped_by_policy"}
+        stream_service.policy_sender_alive.return_value = True
+        self.scheduler._last_stream_silence_active = True
+
+        with patch.object(
+            scheduler_module,
+            "get_stream_service",
+            return_value=stream_service,
+        ):
+            self.scheduler._apply_stream_runtime_policy({"silence_active": False})
+
+        stream_service.resume_after_policy.assert_called_once()
+
+    def test_silence_end_does_not_resume_when_sender_not_alive(self):
+        stream_service = MagicMock()
+        stream_service.status.return_value = {"active": False, "state": "stopped_by_policy"}
+        stream_service.policy_sender_alive.return_value = False
+        self.scheduler._last_stream_silence_active = True
+
+        with patch.object(
+            scheduler_module,
+            "get_stream_service",
+            return_value=stream_service,
+        ):
+            self.scheduler._apply_stream_runtime_policy({"silence_active": False})
+
+        stream_service.resume_after_policy.assert_not_called()
+
+    def test_resume_worker_single_flight_guard(self):
+        self.scheduler._stream_resume_worker_in_progress = True
+
+        with patch.object(scheduler_module.threading, "Thread") as mock_thread:
+            started = self.scheduler._start_stream_resume_worker_after_announcement()
+
+        assert started is False
+        mock_thread.assert_not_called()
 
 
 if __name__ == "__main__":

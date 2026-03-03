@@ -16,15 +16,13 @@ import logging
 
 from flask import Blueprint, jsonify
 
-from services.stream_service import StreamService
-from stream_manager import StreamManager
+from services.stream_service import get_stream_service
 from utils.helpers import _json_error, _json_success, login_required
 
 stream_bp = Blueprint("stream", __name__)
 logger = logging.getLogger(__name__)
 
-_stream_manager = StreamManager()
-_stream_service = StreamService(stream_manager=_stream_manager)
+_stream_service = get_stream_service()
 
 
 @stream_bp.route("/api/stream/start", methods=["POST"])
