@@ -391,6 +391,33 @@ class SchedulerStreamRuntimeRulesTestCase(unittest.TestCase):
         assert started is False
         mock_thread.assert_not_called()
 
+    def test_resume_worker_force_stops_when_silence_active_during_announcement(self):
+        """P2: silence activates while announcement plays → force-stop, not resume."""
+        stream_service = MagicMock()
+        stream_service.policy_sender_alive.return_value = True
+        player = self._player_mock()
+        player.is_playing = False  # announcement already finished
+
+        silence_decision = {"silence_active": True, "policy": "prayer"}
+
+        with patch.object(
+            scheduler_module,
+            "get_stream_service",
+            return_value=stream_service,
+        ), patch.object(
+            scheduler_module,
+            "get_player",
+            return_value=player,
+        ), patch.object(
+            scheduler_module,
+            "resolve_silence_policy",
+            return_value=silence_decision,
+        ):
+            self.scheduler._resume_stream_after_announcement_worker()
+
+        stream_service.force_stop_by_policy.assert_called_once()
+        stream_service.resume_after_announcement.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

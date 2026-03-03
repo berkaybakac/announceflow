@@ -185,3 +185,29 @@ Bu dosya V1 disi ama sonraki fazlarda degerli teknik isleri toplar.
   - Windows disi denemeler icin test harness tanimi
   - UI katmanindan platform detaylarini tamamen ayirma
 - Etiket: `V1'i bloklamaz`
+
+### BL-STREAM-POLICY-01 - Recurring schedule skip DB izi
+
+- ID: `BL-STREAM-POLICY-01`
+- Oncelik: `P3`
+- Kaynak: Faz 4 audit W3
+- Konu: Stream aktifken atlanan recurring schedule'larin DB'de izlenebilir kaydinin olmamasi
+- Mevcut davranis: Sadece log yaziliyor, DB'de iz yok
+- Icerik:
+  - Atlanan recurring schedule icin DB kaydi veya metrik olusturma
+  - Dashboard/reporting icin skip sayaci
+- Etiket: `V1'i bloklamaz`
+- Not: Recurring schedule bir sonraki tetik zamaninda tekrar denenecegi icin fonksiyonel risk dusuk.
+
+### BL-STREAM-POLICY-02 - Singleton StreamService test izolasyonu
+
+- ID: `BL-STREAM-POLICY-02`
+- Oncelik: `P2`
+- Kaynak: Faz 4 audit W4
+- Konu: `get_stream_service()` global singleton'u test suiteleri arasinda state sizmasina neden olabilir
+- Mevcut davranis: Testler mock/patch ile calistigi icin su an sorun yok
+- Icerik:
+  - Test fixture'da singleton reset mekanizmasi ekleme
+  - Alternatif: DI (dependency injection) ile test-local instance olusturma
+- Etiket: `V1'i bloklamaz`
+- Not: Test suite buyudukce onem kazanir; su an fonksiyonel risk yok.
