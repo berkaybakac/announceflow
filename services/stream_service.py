@@ -251,6 +251,13 @@ class StreamService:
             if self._status.state != "paused_for_announcement":
                 return {"success": True, "status": self._status.to_dict()}
             if not self._is_policy_sender_alive_unlocked():
+                self._status = StreamStatus(
+                    active=False,
+                    state="idle",
+                    source_before_stream=self._status.source_before_stream,
+                    last_error=None,
+                )
+                self._policy_resume_armed = False
                 return {"success": True, "status": self._status.to_dict()}
 
             if self._manager and not self._manager.start_receiver():

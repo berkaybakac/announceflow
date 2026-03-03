@@ -145,3 +145,18 @@ def test_resume_after_policy_receiver_fail(mock_manager, mock_player):
     assert result["status"]["state"] == "error"
     assert result["status"]["last_error"] == "receiver_start_failed"
     assert result["status"]["active"] is False
+
+
+def test_resume_after_announcement_when_sender_dead(mock_manager, mock_player):
+    """P1: If sender becomes dead during announcement, resume drops to idle instead of sticking to paused."""
+    svc = _make_service(mock_manager, mock_player)
+    svc.start()
+    svc.pause_for_announcement()
+    
+    # Simulate sender dying without calling stop()
+    svc._policy_resume_armed = False
+    
+    result = svc.resume_after_announcement()
+    assert result["success"] is True
+    assert result["status"]["state"] == "idle"
+    assert result["status"]["active"] is False
