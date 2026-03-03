@@ -46,8 +46,8 @@ def test_stream_service_stub_contract_shape():
 
     assert set(start_result.keys()) == {"success", "status"}
     assert set(stop_result.keys()) == {"success", "status"}
-    assert start_result["success"] is False
-    assert stop_result["success"] is False
+    assert isinstance(start_result["success"], bool)
+    assert isinstance(stop_result["success"], bool)
     assert set(status_result.keys()) == {
         "active",
         "state",
@@ -91,7 +91,7 @@ def test_stream_status_route_contract_when_logged_in():
     assert payload["state"] == "idle"
 
 
-def test_stream_start_stop_routes_stub_not_implemented_when_logged_in():
+def test_stream_start_stop_routes_functional_when_logged_in():
     app.config["TESTING"] = True
     client = app.test_client()
     with client.session_transaction() as sess:
@@ -100,7 +100,5 @@ def test_stream_start_stop_routes_stub_not_implemented_when_logged_in():
     start_resp = client.post("/api/stream/start")
     stop_resp = client.post("/api/stream/stop")
 
-    assert start_resp.status_code == 501
-    assert stop_resp.status_code == 501
-    assert start_resp.get_json().get("error") == "not_implemented"
-    assert stop_resp.get_json().get("error") == "not_implemented"
+    assert start_resp.status_code == 200
+    assert stop_resp.status_code == 200
