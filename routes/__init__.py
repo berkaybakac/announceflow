@@ -7,6 +7,7 @@ from .playlist_routes import playlist_bp
 from .media_routes import media_bp
 from .schedule_routes import schedule_bp
 from .settings_routes import settings_bp
+from .stream_routes import stream_bp
 
 
 def register_blueprints(app):
@@ -29,5 +30,8 @@ def register_blueprints(app):
 
     # Phase 3.5: Settings endpoints (4 endpoints)
     app.register_blueprint(settings_bp)
+
+    # Stream endpoints (start/stop/status)
+    app.register_blueprint(stream_bp)
 
     # Phase 3.6: auth_bp (auth routes)
