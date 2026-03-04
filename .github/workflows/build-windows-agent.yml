@@ -32,6 +32,26 @@ jobs:
         run: |
           python build_agent.py
 
+      - name: Smoke test - sender subprocess mode
+        working-directory: agent
+        run: |
+          $exe = "dist\AnnounceFlowAgent.exe"
+
+          # Start sender subprocess mode
+          $proc = Start-Process -FilePath $exe `
+            -ArgumentList "--stream-sender","127.0.0.1","5800" `
+            -PassThru -NoNewWindow
+          Start-Sleep -Seconds 2
+
+          if ($proc.HasExited) {
+            Write-Error "Sender subprocess exited unexpectedly (exit=$($proc.ExitCode))"
+            exit 1
+          }
+
+          Stop-Process -Id $proc.Id -Force
+          Write-Host "PASS: sender subprocess started and stopped successfully"
+        shell: pwsh
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:

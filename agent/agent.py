@@ -12,7 +12,9 @@ from tkinter import ttk, filedialog, messagebox
 from typing import Optional, Dict, Any
 from concurrent.futures import ThreadPoolExecutor
 import threading
+import sys
 import requests
+from urllib.parse import urlparse
 
 # Credential management
 from credential_manager import (
@@ -21,6 +23,7 @@ from credential_manager import (
     delete_credentials,
     has_credentials,
 )
+from stream_client import StreamClient
 
 # Configuration
 API_BASE = "http://aflow.local:5001"
@@ -419,6 +422,22 @@ class AnnounceFlowAgent:
         )
         return bool(response and response.ok)
 
+    def start_stream(self) -> bool:
+        """Start stream: tell Pi4 to start receiver."""
+        response = self._request("POST", "/api/stream/start", auth_required=True)
+        try:
+            return bool(response and response.ok and response.json().get("success"))
+        except (ValueError, AttributeError):
+            return False
+
+    def stop_stream(self) -> bool:
+        """Stop stream: tell Pi4 to stop receiver."""
+        response = self._request("POST", "/api/stream/stop", auth_required=True)
+        try:
+            return bool(response and response.ok and response.json().get("success"))
+        except (ValueError, AttributeError):
+            return False
+
     def upload_file(self, filepath, media_type="announcement"):
         """Upload a media file."""
         try:
@@ -493,6 +512,7 @@ class AgentGUI:
         self._closing = False
         self._volume_update_job = None
         self._pending_volume: Optional[int] = None
+        self._stream_client = StreamClient()
 
     def run(self):
         """Run the GUI application."""
@@ -563,6 +583,9 @@ class AgentGUI:
             except tk.TclError:
                 pass
             self._volume_update_job = None
+
+        if hasattr(self, '_stream_client'):
+            self._stream_client.stop_sender()
 
         if self.network_worker:
             self.network_worker.shutdown()
@@ -844,6 +867,8 @@ class AgentGUI:
         btn_configs = [
             ("🎵 Müzikleri Başlat", self.start_music, "#22c55e", "#4ade80"),
             ("⏹️ Durdur", self.stop_music, "#ef4444", "#f87171"),
+            ("📡 Yayını Başlat", self.start_stream, "#f59e0b", "#fbbf24"),
+            ("📡 Yayını Durdur", self.stop_stream, "#d97706", "#f59e0b"),
             ("📤 Anons Yükle", self.upload_announcement, "#6366f1", "#818cf8"),
             ("🌐 Web Panel", self.open_web_panel, "#3b82f6", "#60a5fa"),
         ]
@@ -952,6 +977,55 @@ class AgentGUI:
         """Open web panel in browser."""
         webbrowser.open(self.agent.api_base)
 
+    def _resolve_stream_host(self) -> str:
+        """Extract Pi4 hostname from api_base URL."""
+        parsed = urlparse(self.agent.api_base)
+        return parsed.hostname or "aflow.local"
+
+    def start_stream(self):
+        """Start live stream to Pi4."""
+        host = self._resolve_stream_host()
+
+        def _job():
+            api_ok = self.agent.start_stream()
+            if not api_ok:
+                return "api_fail"
+            sender_ok = self._stream_client.start_sender(host, 5800)
+            if not sender_ok:
+                self.agent.stop_stream()  # ROLLBACK
+                return "sender_fail"
+            return "ok"
+
+        def _on_done(result):
+            if not self._root_alive():
+                return
+            if result == "ok":
+                messagebox.showinfo("Başarılı", "Canlı yayın başlatıldı!")
+            elif result == "sender_fail":
+                messagebox.showerror(
+                    "Hata", "Ses göndericisi başlatılamadı. Yayın geri alındı."
+                )
+            else:
+                messagebox.showerror("Hata", "Yayın başlatılamadı.")
+
+        self._submit_network_job(_job, on_success=_on_done)
+
+    def stop_stream(self):
+        """Stop live stream."""
+        def _job():
+            self._stream_client.stop_sender()
+            return self.agent.stop_stream()
+
+        def _on_done(success):
+            if not self._root_alive():
+                return
+            if success:
+                messagebox.showinfo("Başarılı", "Yayın durduruldu.")
+            else:
+                messagebox.showerror("Hata", "Yayın durdurma işlemi başarısız.")
+
+        self._submit_network_job(_job, on_success=_on_done)
+
     def on_volume_change(self, value):
         """Handle volume change."""
         self._pending_volume = int(float(value))
@@ -992,4 +1066,11 @@ def main():
 
 
 if __name__ == "__main__":
+    if "--stream-sender" in sys.argv:
+        from stream_client import run_sender_mode
+        idx = sys.argv.index("--stream-sender")
+        host = sys.argv[idx + 1] if len(sys.argv) > idx + 1 else "127.0.0.1"
+        port = int(sys.argv[idx + 2]) if len(sys.argv) > idx + 2 else 5800
+        run_sender_mode(host, port)
+        sys.exit(0)
     main()
