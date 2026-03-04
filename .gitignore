@@ -26,6 +26,8 @@ media/*
 !media/.gitkeep
 
 # Build
+build/
+dist/
 agent/build/
 agent/dist/
 *.spec
