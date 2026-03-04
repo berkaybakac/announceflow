@@ -240,3 +240,16 @@ Bu dosya V1 disi ama sonraki fazlarda degerli teknik isleri toplar.
   - Alternatif: DI (dependency injection) ile test-local instance olusturma
 - Etiket: `V1'i bloklamaz`
 - Not: Test suite buyudukce onem kazanir; su an fonksiyonel risk yok.
+
+### BL-AGENT-UI-01 - AgentGUI callback helper refactor
+
+- ID: `BL-AGENT-UI-01`
+- Oncelik: `P3`
+- Kaynak: Faz 5 kapanisi
+- Konu: `_submit_network_job + messagebox` tekrar patternini private helper'a toplama
+- Mevcut davranis: Her callback (start/stop music, stream start/stop, upload) kendi `_job` + `_on_done` tanimliyor
+- Neden simdi yapilmadi: Callback'ler farkli akislara sahip (rollback, dosya secici, basit bool); ortak helper parametreleri sisirir veya if/else dallanmasi yaratir
+- Kabul Kriteri: Tekrar eden `_job` + `_on_done` bloklari tek helper uzerinden calisir; mevcut testler PASS, davranis degismez.
+- Durum: `Acik`
+- Tetik: Faz 6+ yeni callback eklerse pattern netlesir ve refactor hakli olur
+- Etiket: `V1'i bloklamaz`
