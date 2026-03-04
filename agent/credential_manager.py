@@ -52,6 +52,10 @@ def _save_fallback_credentials(data: dict) -> bool:
         os.makedirs(os.path.dirname(_FALLBACK_PATH), exist_ok=True)
         with open(_FALLBACK_PATH, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False)
+        try:
+            os.chmod(_FALLBACK_PATH, 0o600)
+        except OSError:
+            pass  # Windows may not support chmod
         return True
     except OSError as e:
         print(f"Error saving fallback credentials: {e}")

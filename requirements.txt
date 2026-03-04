@@ -1,4 +1,4 @@
-# AnnounceFlow Full Dependencies
+# AnnounceFlow Server Dependencies (Pi4 / Linux)
 # Generated for zero-error installation on new machines.
 
 # ---------------------------------------------------------
@@ -31,23 +31,9 @@ idna==3.4            # Internationalized Domain Names in Applications
 pygame==2.5.2        # Cross-platform library for multimedia (Audio fallback)
 
 # ---------------------------------------------------------
-# Windows Agent Build Tools
-# ---------------------------------------------------------
-pyinstaller==6.3.0   # Bundle a Python application and all its dependencies
-pyinstaller-hooks-contrib==2023.10 # Community maintained hooks
-altgraph==0.17.4     # Python graph (network) package
-macholib==1.16.3     # Mach-O header analysis and editing (for Mac builds)
-pefile==2023.2.7     # Python portable executable watcher
-
-# ---------------------------------------------------------
 # Utilities
 # ---------------------------------------------------------
-typing-extensions>=4.10.0 # Backported and Experimental Type Hints (Updated for compatibility)
-
-# ---------------------------------------------------------
-# Secure Credential Storage
-# ---------------------------------------------------------
-keyring>=24.0.0          # OS-native keychain integration (Win/Mac/Linux)
+typing-extensions==4.10.0 # Backported and Experimental Type Hints
 
 # ---------------------------------------------------------
 # System Requirements (Cannot be installed via pip)
@@ -60,7 +46,3 @@ keyring>=24.0.0          # OS-native keychain integration (Win/Mac/Linux)
 #
 # macOS (Homebrew):
 #   brew install ffmpeg mpg123 python-tk
-#
-# Windows:
-#   1. Download ffmpeg from ffmpeg.org and add to PATH
-#   2. Python installation usually includes tkinter
