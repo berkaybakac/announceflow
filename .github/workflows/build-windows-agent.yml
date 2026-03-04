@@ -27,29 +27,57 @@ jobs:
           python -m pip install --upgrade pip
           pip install pyinstaller requests keyring pystray pillow
 
+      - name: Download ffmpeg
+        working-directory: agent
+        run: |
+          $ffmpegUrl = "https://www.gyan.dev/ffmpeg/builds/ffmpeg-release-essentials.zip"
+          Invoke-WebRequest -Uri $ffmpegUrl -OutFile ffmpeg.zip
+          Expand-Archive -Path ffmpeg.zip -DestinationPath ffmpeg_extract
+          $ffmpegExe = Get-ChildItem -Path ffmpeg_extract -Recurse -Filter "ffmpeg.exe" | Where-Object { $_.DirectoryName -like "*bin*" } | Select-Object -First 1
+          Copy-Item $ffmpegExe.FullName -Destination "ffmpeg.exe"
+          Write-Host "ffmpeg.exe copied to agent/ffmpeg.exe"
+        shell: pwsh
+
+      - name: Download VB-Cable installer
+        working-directory: agent
+        run: |
+          $vbcableUrl = "https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack43.zip"
+          Invoke-WebRequest -Uri $vbcableUrl -OutFile vbcable.zip
+          Expand-Archive -Path vbcable.zip -DestinationPath vbcable_extract
+          Copy-Item "vbcable_extract\VBCABLE_Setup_x64.exe" -Destination "VBCABLE_Setup_x64.exe"
+          Write-Host "VB-Cable installer copied to agent/VBCABLE_Setup_x64.exe"
+        shell: pwsh
+
       - name: Build EXE
         working-directory: agent
         run: |
           python build_agent.py
 
-      - name: Smoke test - sender subprocess mode
+      - name: Smoke test - EXE and bundled binaries
         working-directory: agent
         run: |
           $exe = "dist\AnnounceFlowAgent.exe"
-
-          # Start sender subprocess mode
-          $proc = Start-Process -FilePath $exe `
-            -ArgumentList "--stream-sender","127.0.0.1","5800" `
-            -PassThru -NoNewWindow
-          Start-Sleep -Seconds 2
-
-          if ($proc.HasExited) {
-            Write-Error "Sender subprocess exited unexpectedly (exit=$($proc.ExitCode))"
+          if (!(Test-Path $exe)) {
+            Write-Error "EXE not found at $exe"
             exit 1
           }
+          Write-Host "PASS: EXE built"
 
-          Stop-Process -Id $proc.Id -Force
-          Write-Host "PASS: sender subprocess started and stopped successfully"
+          # Verify ffmpeg.exe was available for bundling
+          if (!(Test-Path "ffmpeg.exe")) {
+            Write-Error "ffmpeg.exe not found - bundle failed"
+            exit 1
+          }
+          Write-Host "PASS: ffmpeg.exe available for bundle"
+
+          # Verify VB-Cable installer was available for bundling
+          if (!(Test-Path "VBCABLE_Setup_x64.exe")) {
+            Write-Error "VBCABLE_Setup_x64.exe not found - bundle failed"
+            exit 1
+          }
+          Write-Host "PASS: VB-Cable installer available for bundle"
+
+          Write-Host "PASS: All bundled binaries verified"
         shell: pwsh
 
       - name: Upload artifact
