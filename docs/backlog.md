@@ -170,8 +170,8 @@ Bu dosya V1 disi ama sonraki fazlarda degerli teknik isleri toplar.
 
 - ID: `BL-FAZ6-FROZEN-EXE`
 - Oncelik: `P0`
-- Neden/Risk: CI runner'da Python kurulu; Python'suz temiz Windows ortaminda sender subprocess'in calismasi dogrulanmadi.
-- Kabul Kriteri: Python yuklu olmayan Windows makinede `AnnounceFlowAgent.exe --stream-sender 127.0.0.1 5800` baslatilir, en az 10 saniye calisir, terminate ile durur.
+- Neden/Risk: CI runner'da Python kurulu; Python'suz temiz Windows ortaminda bundled ffmpeg ile stream sender'in calismasi dogrulanmadi.
+- Kabul Kriteri: Python yuklu olmayan Windows makinede `AnnounceFlowAgent.exe` baslatilir, "Yayini Baslat" ile ffmpeg sender process spawn edilir, en az 10 saniye calisir, "Yayini Durdur" ile durur.
 - Durum: `Acik`
 - Release'i Bloklar mi?: `Evet`
 

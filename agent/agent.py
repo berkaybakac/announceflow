@@ -12,7 +12,6 @@ from tkinter import ttk, filedialog, messagebox
 from typing import Optional, Dict, Any
 from concurrent.futures import ThreadPoolExecutor
 import threading
-import sys
 import requests
 from urllib.parse import urlparse
 
@@ -1002,9 +1001,18 @@ class AgentGUI:
             if result == "ok":
                 messagebox.showinfo("Başarılı", "Canlı yayın başlatıldı!")
             elif result == "sender_fail":
-                messagebox.showerror(
-                    "Hata", "Ses göndericisi başlatılamadı. Yayın geri alındı."
-                )
+                if self._stream_client.last_error == "no_loopback_device":
+                    messagebox.showerror(
+                        "Hata",
+                        "Ses yakalama cihazı bulunamadı.\n\n"
+                        "VB-Cable otomatik kurulumu da başarısız oldu.\n"
+                        "Bilgisayarı yeniden başlatıp tekrar deneyin.\n\n"
+                        "Yayın geri alındı.",
+                    )
+                else:
+                    messagebox.showerror(
+                        "Hata", "Ses göndericisi başlatılamadı. Yayın geri alındı."
+                    )
             else:
                 messagebox.showerror("Hata", "Yayın başlatılamadı.")
 
@@ -1066,11 +1074,4 @@ def main():
 
 
 if __name__ == "__main__":
-    if "--stream-sender" in sys.argv:
-        from stream_client import run_sender_mode
-        idx = sys.argv.index("--stream-sender")
-        host = sys.argv[idx + 1] if len(sys.argv) > idx + 1 else "127.0.0.1"
-        port = int(sys.argv[idx + 2]) if len(sys.argv) > idx + 2 else 5800
-        run_sender_mode(host, port)
-        sys.exit(0)
     main()
