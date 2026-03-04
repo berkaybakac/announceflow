@@ -155,6 +155,35 @@ Bu dosya V1 disi ama sonraki fazlarda degerli teknik isleri toplar.
 - Eventual consistency notu: V1.1'de DB uyuşmazlığı riski urun dogasi geregi kabul edilir; actor model ile V1.2'de kapanir.
 - V1.1'i Bloklar mi?: `Hayir`
 
+## Faz 6 / Release Oncesi Zorunlu
+
+### BL-FAZ6-SOAK - 72 saat soak/stability testi
+
+- ID: `BL-FAZ6-SOAK`
+- Oncelik: `P0`
+- Neden/Risk: Uzun sureli calisma altinda bellek sizintisi, process zombie, ses cakismasi gibi sorunlar ancak soak testle ortaya cikar.
+- Kabul Kriteri: En az 72 saat kesintisiz canli stream + scheduler yuklu calismada cokme/kilitlenme/ses cakismasi yok.
+- Durum: `Acik`
+- Release'i Bloklar mi?: `Evet`
+
+### BL-FAZ6-FROZEN-EXE - Frozen Windows EXE gercek ortam dogrulamasi
+
+- ID: `BL-FAZ6-FROZEN-EXE`
+- Oncelik: `P0`
+- Neden/Risk: CI runner'da Python kurulu; Python'suz temiz Windows ortaminda sender subprocess'in calismasi dogrulanmadi.
+- Kabul Kriteri: Python yuklu olmayan Windows makinede `AnnounceFlowAgent.exe --stream-sender 127.0.0.1 5800` baslatilir, en az 10 saniye calisir, terminate ile durur.
+- Durum: `Acik`
+- Release'i Bloklar mi?: `Evet`
+
+### BL-FAZ6-DEPPIN - Dependency version pinning
+
+- ID: `BL-FAZ6-DEPPIN`
+- Oncelik: `P1`
+- Neden/Risk: Sabitlenmemis dependency versiyonlari build tekrarlanabilirligini bozabilir.
+- Kabul Kriteri: `requirements.txt` veya esdeser dosyada tum production dependency'ler pinlenmis.
+- Durum: `Acik`
+- Release'i Bloklar mi?: `Evet`
+
 ## Stream V1 sonrasi backlog
 
 ### BL-STREAM-NET-01 - Ag dayaniklilik hardening
