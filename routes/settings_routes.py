@@ -5,6 +5,7 @@ API endpoints for settings management (credentials, working hours, prayer times)
 import logging
 import re
 from flask import Blueprint, request, jsonify
+from werkzeug.security import generate_password_hash
 from services.config_service import load_config, save_config
 from utils.helpers import login_required, _flash_redirect
 
@@ -43,7 +44,7 @@ def api_update_credentials():
             return _flash_redirect("Şifreler eşleşmiyor!", "error", "settings")
 
         logger.info("Admin password changed")
-        config["admin_password"] = password
+        config["admin_password"] = generate_password_hash(password)
 
     save_config(config)
     return _flash_redirect("Yönetici bilgileri güncellendi", "success", "settings")

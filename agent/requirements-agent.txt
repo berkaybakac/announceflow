@@ -1,0 +1,30 @@
+# AnnounceFlow Agent Dependencies (Windows)
+# Used by CI workflow and local agent development.
+
+# ---------------------------------------------------------
+# Network & API Clients
+# ---------------------------------------------------------
+requests==2.31.0     # HTTP Library for Python
+urllib3==2.0.7       # HTTP Library with thread-safe connection pooling
+certifi==2023.7.22   # Python package for providing Mozilla's CA Bundle
+charset-normalizer==3.3.0 # The Real First Class Charset/Encoding Detector
+idna==3.4            # Internationalized Domain Names in Applications
+
+# ---------------------------------------------------------
+# Secure Credential Storage
+# ---------------------------------------------------------
+keyring==24.0.0      # OS-native keychain integration (Win/Mac/Linux)
+
+# ---------------------------------------------------------
+# System Tray GUI
+# ---------------------------------------------------------
+pystray==0.19.5      # System tray icon
+Pillow==10.1.0       # Image processing (required by pystray)
+
+# ---------------------------------------------------------
+# Build Tools (PyInstaller)
+# ---------------------------------------------------------
+pyinstaller==6.3.0   # Bundle a Python application and all its dependencies
+pyinstaller-hooks-contrib==2023.10 # Community maintained hooks
+altgraph==0.17.4     # Python graph (network) package
+pefile==2023.2.7     # Python portable executable reader

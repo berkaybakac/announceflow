@@ -86,9 +86,17 @@ Bu dosya V1 disi ama sonraki fazlarda degerli teknik isleri toplar.
 - Kanit: [config_service.py:25](/Users/berkaybakac/announceflow/services/config_service.py:25), [web_panel.py:114](/Users/berkaybakac/announceflow/web_panel.py:114), [settings_routes.py:46](/Users/berkaybakac/announceflow/routes/settings_routes.py:46), [credential_manager.py:84](/Users/berkaybakac/announceflow/agent/credential_manager.py:84)
 - YAGNI Siniri: Kurumsal IAM/pairing katmani yok; yalnizca temel sifre ve credential sertlestirme.
 - Kabul Kriteri: Varsayilan sifre ile canli kullanim kalmaz; plaintext bagimliligi minimize edilir.
-- Durum: `Acik (Release Gate)`
-- Stream'i Bloklar mi?: `Hayir` — stream implementasyonunu teknik olarak engellemez
-- Release'i Bloklar mi?: `Evet` — V1.1 tag oncesi kapatilmalidir
+- Durum: `Kapatildi`
+- Kapanis Tarihi: `2026-03-04`
+- Dogrulama:
+  - Sifre hash: werkzeug generate_password_hash/check_password_hash ile hash'li saklama ve dogrulama
+  - Zorunlu degisiklik: admin123 ile login yapildiginda /change-password'a yonlendirme
+  - Legacy uyumluluk: plaintext config'ler hash check'e gecisli desteklenir
+  - Settings uzerinden sifre degistirme hash olarak kaydedilir
+  - Agent fallback dosyasi chmod 600 ile korunur
+  - 14 yeni test PASS (test_password_hash.py)
+- Stream'i Bloklar mi?: `Hayir (Kapatildi)`
+- Release'i Bloklar mi?: `Hayir (Kapatildi)`
 
 #### BL-STREAM-BLOCKER-05 - Release gate zayifligi (ortama bagli API testi)
 
@@ -181,8 +189,15 @@ Bu dosya V1 disi ama sonraki fazlarda degerli teknik isleri toplar.
 - Oncelik: `P1`
 - Neden/Risk: Sabitlenmemis dependency versiyonlari build tekrarlanabilirligini bozabilir.
 - Kabul Kriteri: `requirements.txt` veya esdeser dosyada tum production dependency'ler pinlenmis.
-- Durum: `Acik`
-- Release'i Bloklar mi?: `Evet`
+- Durum: `Kapatildi`
+- Kapanis Tarihi: `2026-03-04`
+- Dogrulama:
+  - requirements.txt: sadece server (Pi4) paketleri, tum versiyonlar == ile pinli
+  - agent/requirements-agent.txt: sadece agent (Windows) paketleri, tum versiyonlar == ile pinli
+  - CI workflow: `pip install -r agent/requirements-agent.txt` kullanir (unpinned install kaldirildi)
+  - typing-extensions>=4.10.0 -> ==4.10.0, keyring agent dosyasina tasindi ==24.0.0
+  - pystray ve Pillow artik agent requirements'ta pinli
+- Release'i Bloklar mi?: `Hayir (Kapatildi)`
 
 ## Stream V1 sonrasi backlog
 

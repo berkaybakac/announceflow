@@ -6,6 +6,7 @@ import os
 import logging
 import secrets
 import re
+from werkzeug.security import check_password_hash, generate_password_hash
 import json
 import shutil
 import time
@@ -102,6 +103,23 @@ def _log_slow_request(response):
 from utils.helpers import login_required
 
 
+# ============ AUTH HELPERS ============
+
+
+def _verify_password(plain: str, stored: str) -> bool:
+    """Verify password against stored value (hash or legacy plaintext)."""
+    if stored.startswith(("pbkdf2:", "scrypt:")):
+        return check_password_hash(stored, plain)
+    return plain == stored
+
+
+def _is_default_password(stored: str) -> bool:
+    """Check if stored password is still the default 'admin123'."""
+    if stored.startswith(("pbkdf2:", "scrypt:")):
+        return check_password_hash(stored, "admin123")
+    return stored == "admin123"
+
+
 # ============ AUTH ROUTES ============
 
 
@@ -115,9 +133,12 @@ def login():
         valid_user = config.get("admin_username", "admin")
         valid_pass = config.get("admin_password", "admin123")
 
-        if username == valid_user and password == valid_pass:
+        if username == valid_user and _verify_password(password, valid_pass):
             session["logged_in"] = True
             log_web("login", {"username": username})
+            if _is_default_password(valid_pass):
+                session["must_change_password"] = True
+                return redirect(url_for("change_password"))
             return redirect(url_for("index"))
         else:
             flash("Hatalı kullanıcı adı veya şifre!", "error")
@@ -125,9 +146,30 @@ def login():
     return render_template("login.html")
 
 
+@app.route("/change-password", methods=["GET", "POST"])
+@login_required
+def change_password():
+    if request.method == "POST":
+        password = request.form.get("password")
+        password_confirm = request.form.get("password_confirm")
+        if not password or len(password) < 6:
+            flash("Şifre en az 6 karakter olmalıdır!", "error")
+        elif password != password_confirm:
+            flash("Şifreler eşleşmiyor!", "error")
+        else:
+            config = load_config()
+            config["admin_password"] = generate_password_hash(password)
+            save_config(config)
+            session.pop("must_change_password", None)
+            flash("Şifre başarıyla değiştirildi!", "success")
+            return redirect(url_for("index"))
+    return render_template("change_password.html")
+
+
 @app.route("/logout")
 def logout():
     session.pop("logged_in", None)
+    session.pop("must_change_password", None)
     return redirect(url_for("login"))
 
 
