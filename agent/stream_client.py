@@ -10,19 +10,36 @@ V2: Replaced ffmpeg+VB-Cable with soundcard (WASAPI loopback).
     - No need to change default audio device
     - PC audio continues playing normally
 """
+import json
 import logging
+import os
 import socket
 import threading
-from typing import Optional
+import time
+import traceback
+from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
+stream_logger = logging.getLogger("agent.stream")
 
 STREAM_SENDER_PORT = 5800
 
 # Audio format must match _stream_receiver.py expectations
 _SAMPLE_RATE = 44100
-_CHANNELS = 1
 _BLOCK_SIZE = 4410  # ~100ms at 44100 Hz
+# Prefer stereo first: some Windows/WASAPI setups produce noise on mono-only open.
+_CHANNEL_CANDIDATES = (2, 1)
+
+
+def _utc_now() -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def _runtime_reports_dir() -> str:
+    base = os.environ.get("ANNOUNCEFLOW_AGENT_RUNTIME_DIR", "").strip()
+    if not base:
+        base = os.path.join(os.path.expanduser("~"), ".announceflow")
+    return os.path.join(base, "logs", "stream_attempts")
 
 
 class StreamClient:
@@ -40,6 +57,171 @@ class StreamClient:
         self._lock = threading.Lock()
         self._running = False
         self.last_error: Optional[str] = None
+        self.last_error_details: Optional[str] = None
+        self._attempt_seq = 0
+        self._attempt: Optional[Dict[str, Any]] = None
+        self._last_attempt: Optional[Dict[str, Any]] = None
+        self._finalized_attempt_id: Optional[str] = None
+
+    # --------------- Attempt Diagnostics ---------------
+
+    def _new_attempt(self, target_host: str, target_port: int) -> str:
+        self._attempt_seq += 1
+        attempt_id = f"{int(time.time() * 1000)}-{self._attempt_seq}"
+        self._attempt = {
+            "attempt_id": attempt_id,
+            "started_at": _utc_now(),
+            "ended_at": None,
+            "success": False,
+            "stage": "initialized",
+            "target_host": target_host,
+            "target_port": int(target_port),
+            "resolved_host": None,
+            "speaker_name": None,
+            "sample_rate": _SAMPLE_RATE,
+            "channels": None,
+            "packet_count": 0,
+            "first_packet_at": None,
+            "last_packet_at": None,
+            "error_code": None,
+            "error_type": None,
+            "error_message": None,
+            "traceback": None,
+            "stages": [],
+        }
+        self._finalized_attempt_id = None
+        self.last_error = None
+        self.last_error_details = None
+        return attempt_id
+
+    def _log_event(self, event: str, **data: Any) -> None:
+        attempt_id = None
+        if self._attempt:
+            attempt_id = self._attempt.get("attempt_id")
+        payload = {"ts": _utc_now(), "event": event, "attempt_id": attempt_id}
+        payload.update(data)
+        try:
+            stream_logger.info(json.dumps(payload, ensure_ascii=False))
+        except Exception:
+            # Never fail stream flow due to diagnostics logging.
+            pass
+
+    def _mark_stage(self, stage: str, **data: Any) -> None:
+        if not self._attempt:
+            return
+        entry = {"ts": _utc_now(), "stage": stage}
+        if data:
+            entry["data"] = data
+        self._attempt["stage"] = stage
+        self._attempt["stages"].append(entry)
+        self._log_event("stage", stage=stage, **data)
+
+    def _persist_attempt_report(self, snapshot: Dict[str, Any]) -> None:
+        try:
+            directory = _runtime_reports_dir()
+            os.makedirs(directory, exist_ok=True)
+            attempt_id = snapshot.get("attempt_id", "unknown")
+            path = os.path.join(directory, f"stream_attempt_{attempt_id}.json")
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(snapshot, f, ensure_ascii=False, indent=2)
+            self._log_event("attempt_report_written", path=path)
+        except Exception as exc:
+            # Do not break streaming, but keep this observable.
+            logger.warning("StreamClient: attempt report write failed: %s", exc)
+            self._log_event("attempt_report_write_failed", error=str(exc))
+
+    def _finalize_attempt(self, success: bool) -> None:
+        if not self._attempt:
+            return
+        attempt_id = self._attempt.get("attempt_id")
+        if self._finalized_attempt_id == attempt_id:
+            return
+        self._attempt["ended_at"] = _utc_now()
+        self._attempt["success"] = bool(success)
+        snapshot = dict(self._attempt)
+        self._last_attempt = snapshot
+        self._finalized_attempt_id = attempt_id
+        self._log_event(
+            "attempt_finalized",
+            success=bool(success),
+            error_code=snapshot.get("error_code"),
+            packet_count=snapshot.get("packet_count"),
+        )
+        self._persist_attempt_report(snapshot)
+
+    def _record_failure(
+        self,
+        error_code: str,
+        message: str,
+        *,
+        exc: Optional[BaseException] = None,
+        stage: Optional[str] = None,
+    ) -> None:
+        self.last_error = error_code
+        self.last_error_details = message
+        if self._attempt:
+            self._attempt["error_code"] = error_code
+            self._attempt["error_message"] = message
+            self._attempt["error_type"] = (
+                exc.__class__.__name__ if exc is not None else None
+            )
+            self._attempt["traceback"] = (
+                traceback.format_exc(limit=8) if exc is not None else None
+            )
+        self._mark_stage(stage or "failed", error_code=error_code)
+        self._log_event(
+            "failure",
+            error_code=error_code,
+            message=message,
+            error_type=exc.__class__.__name__ if exc is not None else None,
+        )
+
+    def get_attempt_snapshot(self) -> Dict[str, Any]:
+        """Return current/latest attempt snapshot for diagnostics."""
+        with self._lock:
+            data = self._attempt if self._attempt is not None else self._last_attempt
+            if data is None:
+                return {}
+            snapshot = dict(data)
+            snapshot["running"] = bool(
+                self._running
+                and self._thread is not None
+                and self._thread.is_alive()
+            )
+            snapshot["last_error"] = self.last_error
+            snapshot["last_error_details"] = self.last_error_details
+            return snapshot
+
+    def build_failure_report(self) -> str:
+        """Return a concise multi-line report for support/triage."""
+        snap = self.get_attempt_snapshot()
+        if not snap:
+            return "No stream attempt snapshot available."
+        lines = [
+            "=== Stream Attempt Report ===",
+            f"attempt_id={snap.get('attempt_id')}",
+            f"stage={snap.get('stage')}",
+            f"success={snap.get('success')}",
+            f"running={snap.get('running')}",
+            f"target={snap.get('target_host')}:{snap.get('target_port')}",
+            f"resolved_host={snap.get('resolved_host')}",
+            f"speaker={snap.get('speaker_name')}",
+            f"sample_rate={snap.get('sample_rate')}",
+            f"channels={snap.get('channels')}",
+            f"packet_count={snap.get('packet_count')}",
+            f"first_packet_at={snap.get('first_packet_at')}",
+            f"last_packet_at={snap.get('last_packet_at')}",
+            f"error_code={snap.get('error_code')}",
+            f"error_type={snap.get('error_type')}",
+            f"error_message={snap.get('error_message')}",
+        ]
+        return "\n".join(lines)
+
+    def record_external_failure(self, error_code: str, message: str) -> None:
+        """Allow caller to attach a failure to current attempt."""
+        with self._lock:
+            self._record_failure(error_code, message, stage="external_failure")
+            self._finalize_attempt(success=False)
 
     def start_sender(self, target_host: str, target_port: int) -> bool:
         """Start capturing system audio and sending to Pi4 via UDP.
@@ -55,43 +237,102 @@ class StreamClient:
             if self._running:
                 return True
 
-            # Verify soundcard can find a speaker for loopback
+            attempt_id = self._new_attempt(target_host, target_port)
+            self._mark_stage("host_resolve_start")
+
+            # Resolve host before starting capture thread.
+            # If resolution fails (mDNS/IPv6/corp DNS edge-cases), keep the original
+            # host and let UDP send path decide.
+            resolved = target_host
+            try:
+                resolved = socket.gethostbyname(target_host)
+                if self._attempt:
+                    self._attempt["resolved_host"] = resolved
+                self._mark_stage("host_resolved", resolved_host=resolved)
+            except Exception as exc:
+                if self._attempt:
+                    self._attempt["resolved_host"] = target_host
+                self._mark_stage(
+                    "host_resolve_warning",
+                    target_host=target_host,
+                    warning=str(exc),
+                )
+                self._log_event(
+                    "host_resolve_warning",
+                    target_host=target_host,
+                    warning=str(exc),
+                )
+                logger.warning(
+                    "StreamClient: host resolve failed for '%s', continuing with raw host: %s",
+                    target_host,
+                    exc,
+                )
+
+            self._mark_stage("audio_init_start")
+
+            # Verify soundcard can find a speaker for loopback.
             try:
                 import soundcard as sc
                 speaker = sc.default_speaker()
                 if speaker is None:
-                    self.last_error = "no_audio_device"
-                    logger.error("StreamClient: no default speaker found")
+                    self._record_failure(
+                        "no_audio_device",
+                        "No default speaker found for WASAPI loopback",
+                        stage="audio_init_failed",
+                    )
+                    self._finalize_attempt(success=False)
                     return False
+                if self._attempt:
+                    self._attempt["speaker_name"] = speaker.name
+                self._mark_stage("audio_init_ok", speaker=speaker.name)
                 logger.info(
-                    "StreamClient: will capture from '%s' via loopback",
+                    "StreamClient: will capture from '%s' via loopback (attempt_id=%s)",
                     speaker.name,
+                    attempt_id,
                 )
             except Exception as exc:
-                self.last_error = "no_audio_device"
-                logger.error("StreamClient: soundcard init failed: %s", exc)
+                self._record_failure(
+                    "no_audio_device",
+                    "soundcard initialization failed",
+                    exc=exc,
+                    stage="audio_init_failed",
+                )
+                self._finalize_attempt(success=False)
                 return False
 
             self._running = True
+            self._mark_stage("capture_thread_start")
             self._thread = threading.Thread(
                 target=self._capture_loop,
-                args=(target_host, target_port),
+                args=(resolved, target_port),
                 daemon=True,
             )
             self._thread.start()
 
             # Brief health check: let thread start and catch immediate errors
-            self._thread.join(timeout=0.3)
+            self._thread.join(timeout=0.35)
             if not self._running:
                 # Thread set _running to False → startup failed
-                logger.error("StreamClient: capture thread died on startup")
+                if self.last_error is None:
+                    self._record_failure(
+                        "capture_thread_died",
+                        "Capture thread died during startup health check",
+                        stage="capture_thread_died",
+                    )
+                self._finalize_attempt(success=False)
+                logger.error(
+                    "StreamClient: capture thread died on startup (attempt_id=%s)",
+                    attempt_id,
+                )
                 self._thread = None
                 return False
 
+            self._mark_stage("steady_capture")
             logger.info(
-                "StreamClient: sender started (target=%s:%d)",
-                target_host,
+                "StreamClient: sender started (target=%s:%d, attempt_id=%s)",
+                resolved,
                 target_port,
+                attempt_id,
             )
             return True
 
@@ -104,6 +345,7 @@ class StreamClient:
         with self._lock:
             if not self._running:
                 return True
+            self._mark_stage("stop_requested")
             self._running = False
 
         # Wait outside lock so capture loop can finish
@@ -111,6 +353,10 @@ class StreamClient:
             self._thread.join(timeout=3)
             self._thread = None
 
+        with self._lock:
+            if self.last_error is None:
+                self._mark_stage("stopped")
+                self._finalize_attempt(success=True)
         logger.info("StreamClient: sender stopped")
         return True
 
@@ -125,34 +371,113 @@ class StreamClient:
         Audio format: s16le, 44100 Hz, mono — matches _stream_receiver.py.
         """
         sock = None
+        sent_any_packet = False
         try:
             import numpy as np
             import soundcard as sc
 
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             speaker = sc.default_speaker()
+            if speaker is None:
+                raise RuntimeError("No default speaker available in capture loop")
 
-            with speaker.recorder(
-                samplerate=_SAMPLE_RATE,
-                channels=_CHANNELS,
-                blocksize=_BLOCK_SIZE,
-            ) as recorder:
-                logger.info("StreamClient: capture loop running")
-                while self._running:
-                    # soundcard returns float32 in [-1.0, 1.0]
-                    data = recorder.record(numframes=_BLOCK_SIZE)
-                    # Replace any NaN/Inf with 0, then convert to s16le PCM
-                    clean = np.nan_to_num(data, nan=0.0, posinf=1.0, neginf=-1.0)
-                    pcm = np.clip(clean * 32767, -32768, 32767).astype(
-                        np.dtype("<i2")
+            last_open_exc: Optional[BaseException] = None
+            for channels in _CHANNEL_CANDIDATES:
+                if not self._running:
+                    break
+                try:
+                    self._mark_stage("recorder_open_start", channels=channels)
+                    with speaker.recorder(
+                        samplerate=_SAMPLE_RATE,
+                        channels=channels,
+                        blocksize=_BLOCK_SIZE,
+                    ) as recorder:
+                        if self._attempt:
+                            self._attempt["channels"] = channels
+                            self._attempt["speaker_name"] = speaker.name
+                        self._mark_stage("recorder_open_ok", channels=channels)
+                        logger.info(
+                            "StreamClient: capture loop running (target=%s:%d, channels=%d)",
+                            host,
+                            port,
+                            channels,
+                        )
+                        while self._running:
+                            # soundcard returns float32 in [-1.0, 1.0]
+                            data = recorder.record(numframes=_BLOCK_SIZE)
+                            clean = np.nan_to_num(
+                                data, nan=0.0, posinf=1.0, neginf=-1.0
+                            )
+                            if getattr(clean, "ndim", 1) > 1:
+                                # Downmix stereo/multi-channel to mono.
+                                clean = clean.mean(axis=1)
+                            pcm = np.clip(clean * 32767, -32768, 32767).astype(
+                                np.dtype("<i2")
+                            )
+                            try:
+                                sock.sendto(pcm.tobytes(), (host, port))
+                            except OSError as send_exc:
+                                self._record_failure(
+                                    "udp_send_failed",
+                                    "Failed to send UDP audio packet",
+                                    exc=send_exc,
+                                    stage="udp_send_failed",
+                                )
+                                return
+
+                            now = _utc_now()
+                            sent_any_packet = True
+                            if self._attempt:
+                                self._attempt["packet_count"] += 1
+                                if self._attempt["first_packet_at"] is None:
+                                    self._attempt["first_packet_at"] = now
+                                    self._mark_stage("first_packet_send")
+                                self._attempt["last_packet_at"] = now
+                                if self._attempt["packet_count"] == 25:
+                                    self._mark_stage("steady_capture")
+                    # Recorder block exited gracefully.
+                    break
+                except Exception as open_exc:
+                    last_open_exc = open_exc
+                    logger.warning(
+                        "StreamClient: recorder open failed (channels=%s): %s",
+                        channels,
+                        open_exc,
                     )
-                    sock.sendto(pcm.tobytes(), (host, port))
+                    self._log_event(
+                        "recorder_open_retry",
+                        channels=channels,
+                        error=str(open_exc),
+                    )
+                    continue
+
+            if not sent_any_packet and last_open_exc is not None:
+                self._record_failure(
+                    "recorder_open_failed",
+                    "Failed to open loopback recorder for all channel candidates",
+                    exc=last_open_exc,
+                    stage="recorder_open_failed",
+                )
+                return
 
         except Exception as exc:
-            logger.error("StreamClient: capture loop error: %s", exc)
-            self.last_error = "capture_error"
+            self._record_failure(
+                "capture_error",
+                "Unexpected capture loop error",
+                exc=exc,
+                stage="capture_error",
+            )
         finally:
             if sock is not None:
                 sock.close()
             self._running = False
+            with self._lock:
+                success = self.last_error is None and sent_any_packet
+                if not success and self.last_error is None:
+                    self._record_failure(
+                        "capture_thread_died",
+                        "Capture loop ended before first packet",
+                        stage="capture_thread_died",
+                    )
+                self._finalize_attempt(success=success)
             logger.info("StreamClient: capture loop ended")

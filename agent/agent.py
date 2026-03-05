@@ -6,13 +6,16 @@ import os
 import json
 import socket
 import sys
+import tempfile
 import webbrowser
 import logging
+import time
 import tkinter as tk
 from tkinter import ttk, filedialog
 from typing import Optional, Dict, Any
 from concurrent.futures import ThreadPoolExecutor
 import threading
+from logging.handlers import RotatingFileHandler
 import requests
 from urllib.parse import urlparse
 try:
@@ -38,6 +41,114 @@ LOGIN_TIMEOUT = (2, 10)
 UPLOAD_TIMEOUT = (3, 30)
 
 logger = logging.getLogger(__name__)
+stream_logger = logging.getLogger("agent.stream")
+
+
+# --------------- Logging Setup ---------------
+
+def _resolve_agent_runtime_dir() -> str:
+    """Resolve writable runtime directory for logs/reports."""
+    if os.name == "nt":
+        local_app_data = os.environ.get("LOCALAPPDATA", "").strip()
+        if local_app_data:
+            return os.path.join(local_app_data, "AnnounceFlow")
+    return os.path.join(os.path.expanduser("~"), ".announceflow")
+
+
+AGENT_RUNTIME_DIR = _resolve_agent_runtime_dir()
+AGENT_LOG_DIR = os.path.join(AGENT_RUNTIME_DIR, "logs")
+AGENT_LOG_FILE = os.path.join(AGENT_LOG_DIR, "agent.log")
+AGENT_STREAM_LOG_FILE = os.path.join(AGENT_LOG_DIR, "agent_stream.log")
+
+
+def setup_agent_logging() -> None:
+    """Configure rotating logs for app-wide and stream-specific diagnostics."""
+    root = logging.getLogger()
+    if getattr(root, "_announceflow_agent_logging_ready", False):
+        return
+
+    root.setLevel(logging.INFO)
+    active_log_dir = AGENT_LOG_DIR
+    try:
+        os.makedirs(active_log_dir, exist_ok=True)
+    except OSError as exc:
+        fallback_log_dir = os.path.join(tempfile.gettempdir(), "AnnounceFlow", "logs")
+        try:
+            os.makedirs(fallback_log_dir, exist_ok=True)
+            active_log_dir = fallback_log_dir
+            logging.getLogger(__name__).warning(
+                "Agent log directory not writable (%s), using fallback %s",
+                exc,
+                fallback_log_dir,
+            )
+        except OSError as fallback_exc:
+            active_log_dir = ""
+            logging.getLogger(__name__).warning(
+                "Agent logs disabled; no writable log directory. primary=%s fallback=%s",
+                exc,
+                fallback_exc,
+            )
+
+    if active_log_dir:
+        runtime_dir = os.path.dirname(active_log_dir)
+        os.environ["ANNOUNCEFLOW_AGENT_RUNTIME_DIR"] = runtime_dir
+    else:
+        runtime_dir = AGENT_RUNTIME_DIR
+
+    formatter = logging.Formatter(
+        "%(asctime)s - %(levelname)s - [%(name)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+
+    agent_log_file = os.path.join(active_log_dir, "agent.log") if active_log_dir else None
+    stream_log_file = os.path.join(active_log_dir, "agent_stream.log") if active_log_dir else None
+
+    if agent_log_file:
+        try:
+            root_file_handler = RotatingFileHandler(
+                agent_log_file,
+                maxBytes=1_000_000,
+                backupCount=5,
+                encoding="utf-8",
+            )
+            root_file_handler.setFormatter(formatter)
+            root.addHandler(root_file_handler)
+        except OSError as exc:
+            logging.getLogger(__name__).warning(
+                "Failed to attach agent.log handler (%s)", exc
+            )
+
+    stream_handler_attached = False
+    if stream_log_file:
+        try:
+            stream_file_handler = RotatingFileHandler(
+                stream_log_file,
+                maxBytes=1_000_000,
+                backupCount=8,
+                encoding="utf-8",
+            )
+            stream_file_handler.setFormatter(formatter)
+            stream_logger.setLevel(logging.INFO)
+            stream_logger.addHandler(stream_file_handler)
+            stream_handler_attached = True
+        except OSError as exc:
+            logging.getLogger(__name__).warning(
+                "Failed to attach agent_stream.log handler (%s)", exc
+            )
+
+    # Avoid duplicate writes to both stream file and root handlers.
+    stream_logger.propagate = not stream_handler_attached
+
+    if not getattr(root, "_announceflow_console_handler_attached", False):
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setFormatter(formatter)
+        root.addHandler(console_handler)
+        root._announceflow_console_handler_attached = True
+
+    root._announceflow_agent_logging_ready = True
+    logger.info("Agent runtime dir: %s", runtime_dir)
+    logger.info("Agent logging initialized: %s", agent_log_file or "disabled")
+    logger.info("Agent stream logging initialized: %s", stream_log_file or "disabled")
 
 # --------------- Theme Colors ---------------
 
@@ -464,21 +575,61 @@ class AnnounceFlowAgent:
         )
         return bool(response and response.ok)
 
-    def start_stream(self) -> bool:
-        """Start stream: tell Pi4 to start receiver."""
+    def start_stream_with_details(self) -> Dict[str, Any]:
+        """Start stream receiver on server and return structured result."""
         response = self._request("POST", "/api/stream/start", auth_required=True)
+        if response is None:
+            return {"success": False, "error": "api_start_failed"}
         try:
-            return bool(response and response.ok and response.json().get("success"))
+            payload = response.json()
         except (ValueError, AttributeError):
-            return False
+            return {
+                "success": False,
+                "error": "api_start_invalid_response",
+                "http_status": getattr(response, "status_code", None),
+            }
+
+        ok = bool(response.ok and payload.get("success"))
+        result = {
+            "success": ok,
+            "http_status": getattr(response, "status_code", None),
+            "status": payload.get("status"),
+        }
+        if not ok:
+            result["error"] = payload.get("error", "api_start_failed")
+        return result
+
+    def stop_stream_with_details(self) -> Dict[str, Any]:
+        """Stop stream receiver on server and return structured result."""
+        response = self._request("POST", "/api/stream/stop", auth_required=True)
+        if response is None:
+            return {"success": False, "error": "api_stop_failed"}
+        try:
+            payload = response.json()
+        except (ValueError, AttributeError):
+            return {
+                "success": False,
+                "error": "api_stop_invalid_response",
+                "http_status": getattr(response, "status_code", None),
+            }
+
+        ok = bool(response.ok and payload.get("success"))
+        result = {
+            "success": ok,
+            "http_status": getattr(response, "status_code", None),
+            "status": payload.get("status"),
+        }
+        if not ok:
+            result["error"] = payload.get("error", "api_stop_failed")
+        return result
+
+    def start_stream(self) -> bool:
+        """Backward-compatible bool API for stream start."""
+        return bool(self.start_stream_with_details().get("success"))
 
     def stop_stream(self) -> bool:
-        """Stop stream: tell Pi4 to stop receiver."""
-        response = self._request("POST", "/api/stream/stop", auth_required=True)
-        try:
-            return bool(response and response.ok and response.json().get("success"))
-        except (ValueError, AttributeError):
-            return False
+        """Backward-compatible bool API for stream stop."""
+        return bool(self.stop_stream_with_details().get("success"))
 
     def upload_file(self, filepath, media_type="announcement"):
         """Upload a media file."""
@@ -1125,32 +1276,94 @@ class AgentGUI:
         )
 
         def _job():
-            api_ok = self.agent.start_stream()
-            if not api_ok:
-                return "api_fail"
+            api_result = self.agent.start_stream_with_details()
+            if not api_result.get("success"):
+                return {"result": "api_fail", "api": api_result}
+
             sender_ok = self._stream_client.start_sender(host, 5800)
             if not sender_ok:
-                self.agent.stop_stream()  # ROLLBACK
-                return "sender_fail"
-            return "ok"
+                rollback_result = self.agent.stop_stream_with_details()
+                return {
+                    "result": "sender_fail",
+                    "rollback": rollback_result,
+                    "attempt": self._stream_client.get_attempt_snapshot(),
+                    "report": self._stream_client.build_failure_report(),
+                }
 
-        def _on_done(result):
+            # Catch short-lived starts that die immediately after startup check.
+            time.sleep(0.8)
+            if not self._stream_client.is_alive():
+                self._stream_client.record_external_failure(
+                    "capture_thread_died",
+                    "Capture thread ended shortly after startup",
+                )
+                rollback_result = self.agent.stop_stream_with_details()
+                return {
+                    "result": "sender_fail",
+                    "rollback": rollback_result,
+                    "attempt": self._stream_client.get_attempt_snapshot(),
+                    "report": self._stream_client.build_failure_report(),
+                }
+            return {"result": "ok", "attempt": self._stream_client.get_attempt_snapshot()}
+
+        def _on_done(payload):
             restore()
             if not self._root_alive():
                 return
+
+            if not isinstance(payload, dict):
+                payload = {"result": payload}
+
+            result = payload.get("result")
             if result == "ok":
+                attempt = payload.get("attempt") or {}
+                attempt_id = attempt.get("attempt_id")
+                stream_logger.info(
+                    "stream_start_ok attempt_id=%s packet_count=%s",
+                    attempt_id,
+                    attempt.get("packet_count"),
+                )
                 self._show_status("Canlı yayın başlatıldı")
             elif result == "sender_fail":
+                attempt = payload.get("attempt") or {}
+                attempt_id = attempt.get("attempt_id")
+                error_code = attempt.get("error_code") or self._stream_client.last_error
                 error_messages = {
+                    "resolve_failed": "Sunucu adresi çözülemedi",
                     "no_audio_device": "Ses cihazı bulunamadı",
+                    "recorder_open_failed": "Ses yakalama başlatılamadı",
+                    "udp_send_failed": "Ağ üzerinden ses gönderilemedi",
+                    "capture_thread_died": "Ses yakalama başlatıldı ama anında durdu",
                     "capture_error": "Ses yakalama hatası oluştu",
                 }
                 msg = error_messages.get(
-                    self._stream_client.last_error, "Yayın başlatılamadı"
+                    error_code, "Yayın başlatılamadı"
                 )
-                self._show_status(msg, error=True)
+                stream_logger.error(
+                    "stream_start_sender_fail attempt_id=%s error_code=%s rollback=%s",
+                    attempt_id,
+                    error_code,
+                    (payload.get("rollback") or {}).get("success"),
+                )
+                logger.error("%s", payload.get("report"))
+                self._show_status(f"{msg} (detay log'a yazıldı)", error=True)
             else:
-                self._show_status("Sunucuya bağlanılamadı", error=True)
+                api = payload.get("api") or {}
+                api_error = api.get("error", "api_start_failed")
+                api_messages = {
+                    "api_start_failed": "Sunucuya bağlanılamadı",
+                    "api_start_invalid_response": "Sunucudan geçersiz cevap alındı",
+                    "receiver_start_failed": "Sunucu yayın alıcısını başlatamadı",
+                }
+                stream_logger.error(
+                    "stream_start_api_fail error_code=%s http_status=%s",
+                    api_error,
+                    api.get("http_status"),
+                )
+                self._show_status(
+                    f"{api_messages.get(api_error, 'Yayın başlatılamadı')} (detay log'a yazıldı)",
+                    error=True,
+                )
 
         self._submit_network_job(_job, on_success=_on_done)
 
@@ -1162,15 +1375,23 @@ class AgentGUI:
 
         def _job():
             self._stream_client.stop_sender()
-            return self.agent.stop_stream()
+            return self.agent.stop_stream_with_details()
 
-        def _on_done(success):
+        def _on_done(payload):
             restore()
             if not self._root_alive():
                 return
+            if not isinstance(payload, dict):
+                payload = {"success": bool(payload)}
+            success = bool(payload.get("success"))
             if success:
                 self._show_status("Yayın durduruldu")
             else:
+                stream_logger.error(
+                    "stream_stop_failed error_code=%s http_status=%s",
+                    payload.get("error"),
+                    payload.get("http_status"),
+                )
                 self._show_status("Yayın durdurulamadı", error=True)
 
         self._submit_network_job(_job, on_success=_on_done)
@@ -1208,6 +1429,8 @@ class AgentGUI:
 
 def main():
     """Main entry point."""
+    setup_agent_logging()
+    logger.info("AnnounceFlow Agent starting")
     agent = AnnounceFlowAgent()
     gui = AgentGUI(agent)
     gui.run()
