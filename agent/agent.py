@@ -41,23 +41,26 @@ logger = logging.getLogger(__name__)
 
 # --------------- Theme Colors ---------------
 
-_BG = "#2b2b2b"           # Main background (soft dark gray)
-_BG_HEADER = "#333333"    # Header background
-_BG_CARD = "#383838"      # Card/section background
-_FG = "#e0e0e0"           # Primary text
-_FG_DIM = "#9e9e9e"       # Dimmed text
-_GREEN = "#4caf50"        # Success / play
-_GREEN_HOVER = "#66bb6a"
-_RED = "#e53935"           # Stop / error
-_RED_HOVER = "#ef5350"
-_AMBER = "#ffa726"         # Stream / warning
-_AMBER_HOVER = "#ffb74d"
-_BLUE = "#42a5f5"          # Info / web
-_BLUE_HOVER = "#64b5f6"
-_INDIGO = "#7e57c2"        # Upload
-_INDIGO_HOVER = "#9575cd"
-_STATUS_SUCCESS = "#4caf50"
-_STATUS_ERROR = "#e53935"
+_BG = "#f4f7fb"              # Main background (light)
+_BG_HEADER = "#e6edf7"       # Header background
+_BG_CARD = "#ffffff"         # Card/section background
+_FG = "#1f2a37"              # Primary text
+_FG_DIM = "#5f6f82"          # Dimmed text
+_GREEN = "#2e7d32"           # Success / play
+_GREEN_HOVER = "#388e3c"
+_RED = "#c62828"             # Stop / error
+_RED_HOVER = "#d32f2f"
+_AMBER = "#b7791f"           # Stream / warning
+_AMBER_HOVER = "#c58a34"
+_BLUE = "#1f6fb2"            # Info / web
+_BLUE_HOVER = "#2780ca"
+_INDIGO = "#3f51b5"          # Upload
+_INDIGO_HOVER = "#5c6bc0"
+_STATUS_SUCCESS = "#2e7d32"
+_STATUS_ERROR = "#c62828"
+_DISABLED_BG = "#ccd6e3"
+_SLIDER_TRACK = "#d8e0ec"
+_STREAM_STOP = "#95661a"
 
 
 def load_agent_config():
@@ -134,11 +137,11 @@ class ModernButton(tk.Frame):
         """Enable or disable the button."""
         self._disabled = disabled
         if disabled:
-            self.config(bg="#555555")
+            self.config(bg=_DISABLED_BG)
             for child in self.winfo_children():
-                child.config(bg="#555555")
+                child.config(bg=_DISABLED_BG)
                 for subchild in child.winfo_children():
-                    subchild.config(bg="#555555")
+                    subchild.config(bg=_DISABLED_BG)
             self.config(cursor="")
         else:
             self.config(bg=self.bg_color, cursor="hand2")
@@ -248,14 +251,14 @@ class ModernSlider(tk.Frame):
         radius = bar_height // 2
         self.canvas.create_rectangle(
             pad + radius, track_top, track_right - radius, track_bottom,
-            fill="#505050", outline="",
+            fill=_SLIDER_TRACK, outline="",
         )
         self.canvas.create_oval(
-            pad, track_top, pad + bar_height, track_bottom, fill="#505050", outline=""
+            pad, track_top, pad + bar_height, track_bottom, fill=_SLIDER_TRACK, outline=""
         )
         self.canvas.create_oval(
             track_right - bar_height, track_top, track_right, track_bottom,
-            fill="#505050", outline="",
+            fill=_SLIDER_TRACK, outline="",
         )
 
         ratio = (self.value - self.from_) / max(1, self.to - self.from_)
@@ -975,7 +978,7 @@ class AgentGUI:
 
         self._btn_stream_stop = ModernButton(
             stream_btns, text="Yayını Durdur", command=self.stop_stream,
-            bg_color="#8d6e27", hover_color=_AMBER, icon_name="stop",
+            bg_color=_STREAM_STOP, hover_color=_AMBER, icon_name="stop",
             font_size=10, pady=8,
         )
         self._btn_stream_stop.pack(side="left", fill="x", expand=True, padx=(4, 0))
