@@ -71,54 +71,6 @@
     </div>
 </div>
 
-<!-- Canlı Yayın Kontrolü -->
-<div class="card animate-in" style="margin-top: 24px;" x-data="streamControl()" x-init="init()">
-    <div class="card-header">
-        <h3 class="card-title" style="display: flex; align-items: center; gap: 8px;">
-            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"
-                style="width: 20px; height: 20px; color: var(--text-secondary);">
-                <path stroke-linecap="round" stroke-linejoin="round"
-                    d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" />
-            </svg>
-            Canlı Yayın (Stream)
-        </h3>
-        <div style="display: flex; align-items: center; gap: 10px;">
-            <span class="badge" :class="isActive ? 'badge-success' : 'badge-warning'"
-                x-text="isActive ? 'Aktif' : 'Pasif'" style="font-size: 0.8rem;"></span>
-        </div>
-    </div>
-
-    <p style="color: var(--text-muted); margin-bottom: 16px;">
-        Bilgisayardan hoparlöre canlı ses yayını. Anons sırasında otomatik durur, bitince devam eder.
-    </p>
-
-    <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
-        <button class="btn btn-primary" @click="start()" :disabled="loading || isActive">
-            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 18px; height: 18px;">
-                <path stroke-linecap="round" stroke-linejoin="round"
-                    d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971l-11.54 6.347a1.125 1.125 0 01-1.667-.985V5.653z" />
-            </svg>
-            <span x-text="loading && !isActive ? 'Başlatılıyor...' : 'Yayını Başlat'"></span>
-        </button>
-        <button class="btn btn-outline" @click="stop()" :disabled="loading || !isActive"
-            style="border-color: #ef4444; color: #ef4444;">
-            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 18px; height: 18px;">
-                <path stroke-linecap="round" stroke-linejoin="round"
-                    d="M5.25 7.5A2.25 2.25 0 017.5 5.25h9a2.25 2.25 0 012.25 2.25v9a2.25 2.25 0 01-2.25 2.25h-9a2.25 2.25 0 01-2.25-2.25v-9z" />
-            </svg>
-            <span x-text="loading && isActive ? 'Durduruluyor...' : 'Yayını Durdur'"></span>
-        </button>
-    </div>
-
-    <template x-if="lastError">
-        <div
-            style="margin-top: 12px; padding: 10px; background: var(--bg-input); border-radius: 8px; border-left: 3px solid #ef4444;">
-            <span style="color: #ef4444; font-size: 0.85rem;" x-text="lastError"></span>
-        </div>
-    </template>
-
-</div>
-
 <!-- Arka Plan Müzik Bölümü -->
 <div class="card animate-in" style="margin-top: 24px;" x-data="{ showSongList: false }">
     <div class="card-header">
@@ -633,78 +585,6 @@
     window.addEventListener('beforeunload', stopNowPlayingPolling);
 
     runNowPlayingPoll();
-
-    // ============ CANLI YAYIN (STREAM) KONTROLÜ ============
-
-    function streamControl() {
-        return {
-            isActive: false,
-            state: 'idle',
-            senderConnected: false,
-            loading: false,
-            lastError: null,
-            pollTimer: null,
-
-            init() {
-                this.fetchStatus();
-                this.pollTimer = setInterval(() => this.fetchStatus(), 5000);
-            },
-
-            async fetchStatus() {
-                try {
-                    const resp = await fetch('/api/stream/status');
-                    if (!resp.ok) return;
-                    const data = await resp.json();
-                    this.isActive = data.active || false;
-                    this.state = data.state || 'idle';
-                    this.senderConnected = data.active && data.state === 'live';
-                    this.lastError = data.last_error || null;
-                } catch (e) {
-                    // Silent fail on poll
-                }
-            },
-
-            async start() {
-                this.loading = true;
-                this.lastError = null;
-                try {
-                    const resp = await fetchAction('/api/stream/start', { method: 'POST' }, 15000);
-                    const data = await resp.json().catch(() => ({}));
-                    if (resp.ok && data.success) {
-                        await this.fetchStatus();
-                    } else {
-                        this.lastError = data.error || 'Yayın başlatılamadı';
-                    }
-                } catch (e) {
-                    this.lastError = 'Sunucuya ulaşılamadı';
-                } finally {
-                    this.loading = false;
-                }
-            },
-
-            async stop() {
-                this.loading = true;
-                this.lastError = null;
-                try {
-                    const resp = await fetchAction('/api/stream/stop', { method: 'POST' }, 15000);
-                    const data = await resp.json().catch(() => ({}));
-                    if (resp.ok && data.success) {
-                        await this.fetchStatus();
-                    } else {
-                        this.lastError = data.error || 'Yayın durdurulamadı';
-                    }
-                } catch (e) {
-                    this.lastError = 'Sunucuya ulaşılamadı';
-                } finally {
-                    this.loading = false;
-                }
-            },
-
-            destroy() {
-                if (this.pollTimer) clearInterval(this.pollTimer);
-            }
-        }
-    }
 
     // ============ ŞARKI LİSTESİ FONKSİYONLARI ============
 
