@@ -88,6 +88,7 @@ class StreamClient:
             "target_port": int(target_port),
             "resolved_host": None,
             "speaker_name": None,
+            "capture_device_name": None,
             "sample_rate": _SAMPLE_RATE,
             "channels": None,
             "packet_count": 0,
@@ -104,6 +105,76 @@ class StreamClient:
         self.last_error = None
         self.last_error_details = None
         return attempt_id
+
+    def _resolve_capture_device(self, sc_module: Any, speaker: Any):
+        """Resolve a recorder-capable loopback capture device.
+
+        soundcard API differs across versions:
+        - Some expose speaker.recorder(...)
+        - Others require get_microphone(..., include_loopback=True)
+        """
+        errors = []
+
+        speaker_recorder = getattr(speaker, "recorder", None)
+        if callable(speaker_recorder):
+            return speaker, errors
+
+        speaker_name = str(getattr(speaker, "name", "") or "")
+        speaker_id = getattr(speaker, "id", None)
+
+        get_microphone = getattr(sc_module, "get_microphone", None)
+        if callable(get_microphone):
+            candidates = []
+            if speaker_id not in (None, ""):
+                candidates.append(str(speaker_id))
+            if speaker_name:
+                candidates.append(speaker_name)
+            seen = set()
+            for ident in candidates:
+                if ident in seen:
+                    continue
+                seen.add(ident)
+                try:
+                    mic = get_microphone(id=ident, include_loopback=True)
+                    if mic is not None and callable(getattr(mic, "recorder", None)):
+                        return mic, errors
+                    if mic is not None:
+                        errors.append(f"loopback microphone '{ident}' has no recorder()")
+                except Exception as exc:
+                    errors.append(f"get_microphone('{ident}') failed: {exc}")
+
+        all_microphones = getattr(sc_module, "all_microphones", None)
+        if callable(all_microphones):
+            microphones = []
+            try:
+                microphones = list(all_microphones(include_loopback=True))
+            except TypeError:
+                try:
+                    microphones = list(all_microphones())
+                except Exception as exc:
+                    errors.append(f"all_microphones() failed: {exc}")
+            except Exception as exc:
+                errors.append(f"all_microphones(include_loopback=True) failed: {exc}")
+
+            if microphones:
+                picked = None
+                if speaker_name:
+                    low_speaker = speaker_name.lower()
+                    for mic in microphones:
+                        mic_name = str(getattr(mic, "name", "") or "").lower()
+                        if low_speaker in mic_name or mic_name in low_speaker:
+                            picked = mic
+                            break
+                if picked is None:
+                    picked = microphones[0]
+                if callable(getattr(picked, "recorder", None)):
+                    return picked, errors
+                errors.append(
+                    f"loopback microphone '{getattr(picked, 'name', 'unknown')}' has no recorder()"
+                )
+
+        errors.append("No WASAPI loopback capture device with recorder() found")
+        return None, errors
 
     def _log_event(self, event: str, **data: Any) -> None:
         attempt_id = None
@@ -215,6 +286,7 @@ class StreamClient:
             f"target={snap.get('target_host')}:{snap.get('target_port')}",
             f"resolved_host={snap.get('resolved_host')}",
             f"speaker={snap.get('speaker_name')}",
+            f"capture_device={snap.get('capture_device_name')}",
             f"sample_rate={snap.get('sample_rate')}",
             f"channels={snap.get('channels')}",
             f"packet_count={snap.get('packet_count')}",
@@ -299,12 +371,42 @@ class StreamClient:
                     )
                     self._finalize_attempt(success=False)
                     return False
+                capture_device, resolve_errors = self._resolve_capture_device(sc, speaker)
+                if capture_device is None:
+                    if self._attempt is not None:
+                        for err in resolve_errors[-6:]:
+                            self._attempt["open_errors"].append(
+                                {
+                                    "ts": _utc_now(),
+                                    "channels": None,
+                                    "error_type": "CaptureDeviceResolveError",
+                                    "error": err,
+                                }
+                            )
+                    self._record_failure(
+                        "recorder_open_failed",
+                        "No compatible WASAPI loopback recorder found",
+                        stage="audio_init_failed",
+                    )
+                    self._finalize_attempt(success=False)
+                    return False
                 if self._attempt:
                     self._attempt["speaker_name"] = speaker.name
-                self._mark_stage("audio_init_ok", speaker=speaker.name)
+                    self._attempt["capture_device_name"] = getattr(
+                        capture_device, "name", None
+                    )
+                self._mark_stage(
+                    "audio_init_ok",
+                    speaker=speaker.name,
+                    capture_device=getattr(capture_device, "name", None),
+                )
                 logger.info(
-                    "StreamClient: will capture from '%s' via loopback (attempt_id=%s)",
+                    (
+                        "StreamClient: will capture from speaker '%s' via loopback "
+                        "device '%s' (attempt_id=%s)"
+                    ),
                     speaker.name,
+                    getattr(capture_device, "name", "unknown"),
                     attempt_id,
                 )
             except Exception as exc:
@@ -397,6 +499,24 @@ class StreamClient:
             speaker = sc.default_speaker()
             if speaker is None:
                 raise RuntimeError("No default speaker available in capture loop")
+            capture_device, resolve_errors = self._resolve_capture_device(sc, speaker)
+            if capture_device is None:
+                if self._attempt is not None:
+                    for err in resolve_errors[-6:]:
+                        self._attempt["open_errors"].append(
+                            {
+                                "ts": _utc_now(),
+                                "channels": None,
+                                "error_type": "CaptureDeviceResolveError",
+                                "error": err,
+                            }
+                        )
+                self._record_failure(
+                    "recorder_open_failed",
+                    "No compatible WASAPI loopback recorder found",
+                    stage="recorder_open_failed",
+                )
+                return
 
             last_open_exc: Optional[BaseException] = None
             for channels in _CHANNEL_CANDIDATES:
@@ -404,7 +524,7 @@ class StreamClient:
                     break
                 try:
                     self._mark_stage("recorder_open_start", channels=channels)
-                    with speaker.recorder(
+                    with capture_device.recorder(
                         samplerate=_SAMPLE_RATE,
                         channels=channels,
                         blocksize=_BLOCK_SIZE,
@@ -412,6 +532,9 @@ class StreamClient:
                         if self._attempt:
                             self._attempt["channels"] = channels
                             self._attempt["speaker_name"] = speaker.name
+                            self._attempt["capture_device_name"] = getattr(
+                                capture_device, "name", None
+                            )
                         self._mark_stage("recorder_open_ok", channels=channels)
                         logger.info(
                             "StreamClient: capture loop running (target=%s:%d, channels=%d)",
