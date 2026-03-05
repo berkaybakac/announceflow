@@ -19,6 +19,16 @@ _sc_mock = MagicMock()
 _fake_speaker = MagicMock()
 _fake_speaker.name = "Test Speaker"
 _sc_mock.default_speaker.return_value = _fake_speaker
+_fake_loopback_mic = MagicMock()
+_fake_loopback_mic.name = "Test Loopback Mic"
+
+
+class _NoRecorderSpeaker:
+    """Real-world-like speaker object without recorder()."""
+
+    def __init__(self, name="NoRecorder Speaker", speaker_id="speaker-1"):
+        self.name = name
+        self.id = speaker_id
 
 # numpy mock for environments where numpy is not installed
 try:
@@ -62,7 +72,12 @@ def _patch_dependencies(monkeypatch):
     # Reset mocks between tests
     _sc_mock.reset_mock()
     _sc_mock.default_speaker.return_value = _fake_speaker
+    _sc_mock.get_microphone.return_value = _fake_loopback_mic
+    _sc_mock.get_microphone.side_effect = None
+    _sc_mock.all_microphones.return_value = [_fake_loopback_mic]
+    _sc_mock.all_microphones.side_effect = None
     _fake_speaker.reset_mock()
+    _fake_loopback_mic.reset_mock()
     yield
 
 
@@ -104,6 +119,25 @@ class TestStartSender:
             assert client.start_sender("127.0.0.1", 5800) is True
             client.stop_sender()
 
+    def test_start_sender_uses_loopback_microphone_when_speaker_has_no_recorder(self):
+        """When speaker lacks recorder(), client should resolve loopback microphone."""
+        client = StreamClient()
+        _sc_mock.default_speaker.return_value = _NoRecorderSpeaker(
+            "NoRecorder Speaker", "speaker-xyz"
+        )
+
+        def fake_capture(host, port):
+            while client._running:
+                time.sleep(0.01)
+
+        with patch.object(client, "_capture_loop", side_effect=fake_capture):
+            result = client.start_sender("127.0.0.1", 5800)
+            assert result is True
+            assert _sc_mock.get_microphone.called
+            snap = client.get_attempt_snapshot()
+            assert snap["capture_device_name"] == "Test Loopback Mic"
+            client.stop_sender()
+
 
 # --------------- 2. start_sender no audio device ---------------
 
@@ -127,6 +161,19 @@ class TestStartSender:
 
         # Reset
         _sc_mock.default_speaker.side_effect = None
+
+    def test_start_sender_fails_when_no_loopback_recorder_resolved(self):
+        """No speaker.recorder + no loopback device => recorder_open_failed."""
+        _sc_mock.default_speaker.return_value = _NoRecorderSpeaker("No Loopback Speaker")
+        _sc_mock.get_microphone.side_effect = RuntimeError("loopback lookup failed")
+        _sc_mock.all_microphones.return_value = []
+
+        client = StreamClient()
+        assert client.start_sender("127.0.0.1", 5800) is False
+        assert client.last_error == "recorder_open_failed"
+        snap = client.get_attempt_snapshot()
+        assert snap["error_code"] == "recorder_open_failed"
+        _sc_mock.get_microphone.side_effect = None
 
 
 # --------------- 3. start_sender capture thread dies on startup ---------------
@@ -296,6 +343,47 @@ class TestCaptureLoop:
             client._capture_loop("host", 5800)
 
         mock_socket.close.assert_called_once()
+
+    @pytest.mark.skipif(not _np_available, reason="numpy not installed")
+    def test_capture_loop_uses_loopback_microphone_when_speaker_has_no_recorder(self):
+        """Regression: real _Speaker may not expose recorder(); use loopback microphone."""
+        import numpy as np
+
+        client = StreamClient()
+        packets_sent = []
+        _sc_mock.default_speaker.return_value = _NoRecorderSpeaker(
+            "NoRecorder Speaker", "speaker-xyz"
+        )
+
+        fake_recorder = MagicMock()
+        fake_audio = np.zeros((4410, 1), dtype=np.float32)
+        call_count = 0
+
+        def fake_record(numframes):
+            nonlocal call_count
+            call_count += 1
+            if call_count >= 2:
+                client._running = False
+            return fake_audio
+
+        fake_recorder.record = fake_record
+        fake_recorder.__enter__ = MagicMock(return_value=fake_recorder)
+        fake_recorder.__exit__ = MagicMock(return_value=False)
+        _fake_loopback_mic.recorder.return_value = fake_recorder
+
+        mock_socket = MagicMock()
+
+        def capture_sendto(data, addr):
+            packets_sent.append((data, addr))
+
+        mock_socket.sendto = capture_sendto
+
+        with patch("stream_client.socket.socket", return_value=mock_socket):
+            client._running = True
+            client._capture_loop("192.168.1.10", 5800)
+
+        assert _sc_mock.get_microphone.called
+        assert len(packets_sent) == 2
 
 
 # --------------- 7. last_error tracking ---------------
