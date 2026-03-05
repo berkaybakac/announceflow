@@ -134,6 +134,7 @@ After=network.target
 [Service]
 Type=simple
 User=${PI_USER}
+SupplementaryGroups=audio
 WorkingDirectory=${DEST_DIR}
 ExecStart=/usr/bin/python3 ${DEST_DIR}/main.py
 Restart=always
