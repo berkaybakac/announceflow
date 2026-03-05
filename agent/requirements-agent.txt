@@ -22,6 +22,12 @@ pystray==0.19.5      # System tray icon
 Pillow==10.1.0       # Image processing (required by pystray)
 
 # ---------------------------------------------------------
+# Audio Capture (WASAPI loopback)
+# ---------------------------------------------------------
+soundcard==0.4.4     # WASAPI loopback audio capture (no extra drivers needed)
+numpy==1.24.4        # PCM format conversion (float32 → s16le)
+
+# ---------------------------------------------------------
 # Build Tools (PyInstaller)
 # ---------------------------------------------------------
 pyinstaller==6.3.0   # Bundle a Python application and all its dependencies
