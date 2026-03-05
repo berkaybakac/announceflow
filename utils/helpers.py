@@ -24,8 +24,6 @@ def login_required(f):
             return redirect(
                 "/login"
             )  # Direct path, not url_for (avoid app context dependency)
-        if session.get("must_change_password") and f.__name__ != "change_password":
-            return redirect("/change-password")
         return f(*args, **kwargs)
 
     return wrapped
