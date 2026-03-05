@@ -115,6 +115,23 @@ class StreamClient:
         """
         errors = []
 
+        def _is_loopback_mic(mic: Any, speaker_name: str) -> bool:
+            """Best-effort loopback detection to avoid selecting physical microphones."""
+            try:
+                if bool(getattr(mic, "isloopback", False)):
+                    return True
+            except Exception:
+                pass
+            mic_name = str(getattr(mic, "name", "") or "").strip()
+            low_name = mic_name.lower()
+            if "loopback" in low_name:
+                return True
+            if speaker_name:
+                low_speaker = speaker_name.lower()
+                if low_speaker and (low_speaker in low_name or low_name in low_speaker):
+                    return True
+            return False
+
         speaker_recorder = getattr(speaker, "recorder", None)
         if callable(speaker_recorder):
             return speaker, errors
@@ -157,21 +174,25 @@ class StreamClient:
                 errors.append(f"all_microphones(include_loopback=True) failed: {exc}")
 
             if microphones:
-                picked = None
-                if speaker_name:
-                    low_speaker = speaker_name.lower()
-                    for mic in microphones:
-                        mic_name = str(getattr(mic, "name", "") or "").lower()
-                        if low_speaker in mic_name or mic_name in low_speaker:
-                            picked = mic
-                            break
-                if picked is None:
-                    picked = microphones[0]
-                if callable(getattr(picked, "recorder", None)):
-                    return picked, errors
-                errors.append(
-                    f"loopback microphone '{getattr(picked, 'name', 'unknown')}' has no recorder()"
-                )
+                # Only accept likely loopback microphones to prevent accidentally opening
+                # a physical mic (which can trigger Windows communications ducking/mute).
+                loopback_candidates = [
+                    mic for mic in microphones if _is_loopback_mic(mic, speaker_name)
+                ]
+                if loopback_candidates:
+                    picked = loopback_candidates[0]
+                    if callable(getattr(picked, "recorder", None)):
+                        return picked, errors
+                    errors.append(
+                        (
+                            "loopback microphone "
+                            f"'{getattr(picked, 'name', 'unknown')}' has no recorder()"
+                        )
+                    )
+                else:
+                    errors.append(
+                        "No loopback microphone matched default speaker in all_microphones()"
+                    )
 
         errors.append("No WASAPI loopback capture device with recorder() found")
         return None, errors

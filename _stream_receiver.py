@@ -10,6 +10,7 @@ Transport: UDP on configurable port (default 5800)
 Usage: python _stream_receiver.py [port] [alsa_device]
 """
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -29,6 +30,84 @@ def _resolve_alsa_device():
 
     Priority: CLI arg > ANNOUNCEFLOW_ALSA_DEVICE env > probe candidates.
     """
+    def _probe_candidate(candidate: str) -> bool:
+        """Return True when ALSA device accepts a short raw-silence playback."""
+        try:
+            probe = subprocess.run(
+                [
+                    "aplay",
+                    "-q",
+                    "-D",
+                    candidate,
+                    "-t",
+                    "raw",
+                    "-f",
+                    "S16_LE",
+                    "-r",
+                    "44100",
+                    "-c",
+                    "1",
+                    "-d",
+                    "1",
+                    "/dev/zero",
+                ],
+                capture_output=True,
+                timeout=4,
+            )
+            return probe.returncode == 0
+        except (OSError, subprocess.TimeoutExpired):
+            return False
+
+    def _detect_preferred_card_candidates():
+        """Derive good ALSA card candidates from `aplay -l` output."""
+        try:
+            probe = subprocess.run(
+                ["aplay", "-l"],
+                capture_output=True,
+                text=True,
+                timeout=3,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return []
+
+        if probe.returncode != 0:
+            return []
+
+        cards = []
+        for line in (probe.stdout or "").splitlines():
+            m = re.search(r"card\s+(\d+)\s*:\s*([^\[]+)\[([^\]]+)\]", line, re.IGNORECASE)
+            if not m:
+                continue
+            card_idx = m.group(1)
+            card_id = (m.group(2) or "").strip()
+            card_desc = (m.group(3) or "").strip()
+            cards.append((card_idx, card_id, card_desc))
+
+        if not cards:
+            return []
+
+        candidates = []
+        # Prefer analog 3.5mm headphones card when present.
+        for idx, card_id, card_desc in cards:
+            low = f"{card_id} {card_desc}".lower()
+            if "headphone" in low:
+                candidates.append(f"plughw:{idx},0")
+                break
+        # Then include all discovered cards in order.
+        for idx, _, _ in cards:
+            candidates.append(f"plughw:{idx},0")
+        return candidates
+
+    def _uniq(items):
+        seen = set()
+        result = []
+        for item in items:
+            if not item or item in seen:
+                continue
+            seen.add(item)
+            result.append(item)
+        return result
+
     # CLI argument (passed by StreamManager)
     if len(sys.argv) > 2:
         return sys.argv[2]
@@ -48,19 +127,21 @@ def _resolve_alsa_device():
         card_part = env_card if "," in env_card else f"{env_card},0"
         return f"plughw:{card_part}"
 
-    # Probe candidates (same order as player.py)
-    for candidate in ["plughw:2,0", "plughw:0,0", "default"]:
-        try:
-            probe = subprocess.run(
-                ["aplay", "-D", candidate, "-d", "0", "/dev/zero"],
-                capture_output=True,
-                timeout=3,
-            )
-            if probe.returncode == 0:
-                return candidate
-        except (OSError, subprocess.TimeoutExpired):
-            continue
+    # Probe candidates (prefer detected concrete cards; keep default last).
+    candidates = _uniq(
+        _detect_preferred_card_candidates()
+        + ["plughw:2,0", "plughw:0,0", "default"]
+    )
+    first_non_default = next((c for c in candidates if c != "default"), None)
 
+    for candidate in candidates:
+        if _probe_candidate(candidate):
+            return candidate
+
+    # Avoid default when probing failed for all: default was observed to fail with
+    # "cannot open audio device default (Unknown error 524)" on Pi deployments.
+    if first_non_default:
+        return first_non_default
     return "default"
 
 
@@ -87,6 +168,13 @@ def main():
         log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
     os.makedirs(log_dir, exist_ok=True)
     stderr_log = open(os.path.join(log_dir, "stream_receiver_ffmpeg.log"), "a")
+    try:
+        stderr_log.write(
+            f"[receiver] resolved_alsa_device={alsa_device} port={port}\n"
+        )
+        stderr_log.flush()
+    except Exception:
+        pass
 
     proc = subprocess.Popen(
         cmd,
