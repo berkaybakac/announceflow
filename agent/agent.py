@@ -5,10 +5,11 @@ System tray application for quick access and management.
 import os
 import json
 import socket
+import sys
 import webbrowser
 import logging
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
+from tkinter import ttk, filedialog
 from typing import Optional, Dict, Any
 from concurrent.futures import ThreadPoolExecutor
 import threading
@@ -38,6 +39,26 @@ UPLOAD_TIMEOUT = (3, 30)
 
 logger = logging.getLogger(__name__)
 
+# --------------- Theme Colors ---------------
+
+_BG = "#2b2b2b"           # Main background (soft dark gray)
+_BG_HEADER = "#333333"    # Header background
+_BG_CARD = "#383838"      # Card/section background
+_FG = "#e0e0e0"           # Primary text
+_FG_DIM = "#9e9e9e"       # Dimmed text
+_GREEN = "#4caf50"        # Success / play
+_GREEN_HOVER = "#66bb6a"
+_RED = "#e53935"           # Stop / error
+_RED_HOVER = "#ef5350"
+_AMBER = "#ffa726"         # Stream / warning
+_AMBER_HOVER = "#ffb74d"
+_BLUE = "#42a5f5"          # Info / web
+_BLUE_HOVER = "#64b5f6"
+_INDIGO = "#7e57c2"        # Upload
+_INDIGO_HOVER = "#9575cd"
+_STATUS_SUCCESS = "#4caf50"
+_STATUS_ERROR = "#e53935"
+
 
 def load_agent_config():
     """Load agent configuration."""
@@ -57,7 +78,6 @@ def get_icon(name, size=(24, 24)):
     """Load and resize icon from assets."""
     if not _HAS_PIL:
         return None
-    # PyInstaller bundles data into _MEIPASS temp dir
     base = getattr(sys, '_MEIPASS', os.path.dirname(__file__))
     icon_path = os.path.join(base, 'assets', 'icons', f'{name}.png')
     try:
@@ -66,18 +86,20 @@ def get_icon(name, size=(24, 24)):
             img = img.resize(size, Image.Resampling.LANCZOS)
             return ImageTk.PhotoImage(img)
     except Exception as e:
-        logger.error(f"Error loading icon {name}: {e}")
+        logger.error("Error loading icon %s: %s", name, e)
     return None
 
 class ModernButton(tk.Frame):
     """Custom button for cross-platform consistency with PNG icon support."""
 
-    def __init__(self, parent, text, command, bg_color, hover_color, icon_name=None, **kwargs):
+    def __init__(self, parent, text, command, bg_color, hover_color, icon_name=None,
+                 font_size=11, pady=10, **kwargs):
         super().__init__(parent, bg=bg_color, cursor="hand2", **kwargs)
         self.command = command
         self.bg_color = bg_color
         self.hover_color = hover_color
-        
+        self._disabled = False
+
         # Keep reference to image to prevent garbage collection
         self.icon_image = None
         if icon_name:
@@ -85,15 +107,16 @@ class ModernButton(tk.Frame):
 
         # Internal container to center content
         content_frame = tk.Frame(self, bg=bg_color)
-        content_frame.pack(expand=True, fill="both", padx=20, pady=12)
-        
+        content_frame.pack(expand=True, fill="both", padx=16, pady=pady)
+
         self.icon_label = None
         if self.icon_image:
             self.icon_label = tk.Label(content_frame, image=self.icon_image, bg=bg_color)
-            self.icon_label.pack(side="left", padx=(0, 10))
-            
+            self.icon_label.pack(side="left", padx=(0, 8))
+
         self.text_label = tk.Label(
-            content_frame, text=text, bg=bg_color, fg="white", font=("Segoe UI", 11, "bold")
+            content_frame, text=text, bg=bg_color, fg="white",
+            font=("Segoe UI", font_size, "bold")
         )
         self.text_label.pack(side="left" if self.icon_image else "top")
 
@@ -101,13 +124,36 @@ class ModernButton(tk.Frame):
         widgets_to_bind = [self, content_frame, self.text_label]
         if self.icon_label:
             widgets_to_bind.append(self.icon_label)
-            
+
         for widget in widgets_to_bind:
             widget.bind("<Enter>", self.on_enter)
             widget.bind("<Leave>", self.on_leave)
             widget.bind("<Button-1>", self.on_click)
 
+    def set_disabled(self, disabled: bool):
+        """Enable or disable the button."""
+        self._disabled = disabled
+        if disabled:
+            self.config(bg="#555555")
+            for child in self.winfo_children():
+                child.config(bg="#555555")
+                for subchild in child.winfo_children():
+                    subchild.config(bg="#555555")
+            self.config(cursor="")
+        else:
+            self.config(bg=self.bg_color, cursor="hand2")
+            for child in self.winfo_children():
+                child.config(bg=self.bg_color)
+                for subchild in child.winfo_children():
+                    subchild.config(bg=self.bg_color)
+
+    def set_text(self, text: str):
+        """Update button text."""
+        self.text_label.config(text=text)
+
     def on_enter(self, event):
+        if self._disabled:
+            return
         self.config(bg=self.hover_color)
         for child in self.winfo_children():
             child.config(bg=self.hover_color)
@@ -115,6 +161,8 @@ class ModernButton(tk.Frame):
                 subchild.config(bg=self.hover_color)
 
     def on_leave(self, event):
+        if self._disabled:
+            return
         self.config(bg=self.bg_color)
         for child in self.winfo_children():
             child.config(bg=self.bg_color)
@@ -122,6 +170,8 @@ class ModernButton(tk.Frame):
                 subchild.config(bg=self.bg_color)
 
     def on_click(self, event):
+        if self._disabled:
+            return
         if self.command:
             self.command()
 
@@ -130,7 +180,7 @@ class ModernSlider(tk.Frame):
     """Modern volume slider with Canvas - thick bar with speaker icons."""
 
     def __init__(self, parent, from_=0, to=100, value=80, command=None, **kwargs):
-        super().__init__(parent, bg="#1a1a1a")
+        super().__init__(parent, bg=_BG)
         self.from_ = from_
         self.to = to
         self.value = value
@@ -141,52 +191,40 @@ class ModernSlider(tk.Frame):
         self.img_loud = get_icon('vol_high', size=(20, 20))
 
         # Main container with icons
-        container = tk.Frame(self, bg="#1a1a1a")
+        container = tk.Frame(self, bg=_BG)
         container.pack(fill="x", expand=True)
 
         # Left speaker icon (mute)
-        self.left_icon = tk.Label(
-            container, bg="#1a1a1a"
-        )
+        self.left_icon = tk.Label(container, bg=_BG)
         if self.img_mute:
             self.left_icon.config(image=self.img_mute)
         else:
-            self.left_icon.config(text="🔈", fg="#a1a1aa", font=("Segoe UI", 14))
-            
+            self.left_icon.config(text="🔈", fg=_FG_DIM, font=("Segoe UI", 14))
+
         self.left_icon.pack(side="left", padx=(0, 10))
 
         # Canvas for slider
         self.canvas = tk.Canvas(
-            container,
-            width=220,
-            height=50,
-            bg="#1a1a1a",
-            highlightthickness=0,
-            cursor="hand2",
+            container, width=220, height=50, bg=_BG,
+            highlightthickness=0, cursor="hand2",
         )
         self.canvas.pack(side="left", fill="x", expand=True)
 
         # Right speaker icon (loud) + percentage
-        right_frame = tk.Frame(container, bg="#1a1a1a")
+        right_frame = tk.Frame(container, bg=_BG)
         right_frame.pack(side="left", padx=(10, 0))
 
-        self.right_icon = tk.Label(
-            right_frame, bg="#1a1a1a"
-        )
+        self.right_icon = tk.Label(right_frame, bg=_BG)
         if self.img_loud:
             self.right_icon.config(image=self.img_loud)
         else:
-            self.right_icon.config(text="🔊", fg="#a1a1aa", font=("Segoe UI", 14))
-            
+            self.right_icon.config(text="🔊", fg=_FG_DIM, font=("Segoe UI", 14))
+
         self.right_icon.pack(side="left")
 
         self.percent_label = tk.Label(
-            right_frame,
-            text=f"{int(value)}%",
-            font=("Segoe UI", 12, "bold"),
-            bg="#1a1a1a",
-            fg="#22c55e",
-            width=4,
+            right_frame, text=f"{int(value)}%",
+            font=("Segoe UI", 12, "bold"), bg=_BG, fg=_GREEN, width=4,
         )
         self.percent_label.pack(side="left", padx=(5, 0))
 
@@ -200,78 +238,48 @@ class ModernSlider(tk.Frame):
         w = max(self.canvas.winfo_width(), 200)
         h = 50
 
-        # Track settings
         pad = 10
-        bar_height = 24  # Thicker bar
+        bar_height = 24
         track_y = h // 2
         track_top = track_y - bar_height // 2
         track_bottom = track_y + bar_height // 2
         track_right = w - pad
 
-        # Background track (rounded rectangle effect with overlapping shapes)
         radius = bar_height // 2
-        # Main rectangle
         self.canvas.create_rectangle(
-            pad + radius,
-            track_top,
-            track_right - radius,
-            track_bottom,
-            fill="#404040",
-            outline="",
+            pad + radius, track_top, track_right - radius, track_bottom,
+            fill="#505050", outline="",
         )
-        # Left cap
         self.canvas.create_oval(
-            pad, track_top, pad + bar_height, track_bottom, fill="#404040", outline=""
+            pad, track_top, pad + bar_height, track_bottom, fill="#505050", outline=""
         )
-        # Right cap
         self.canvas.create_oval(
-            track_right - bar_height,
-            track_top,
-            track_right,
-            track_bottom,
-            fill="#404040",
-            outline="",
+            track_right - bar_height, track_top, track_right, track_bottom,
+            fill="#505050", outline="",
         )
 
-        # Fill (progress)
         ratio = (self.value - self.from_) / max(1, self.to - self.from_)
         fill_width = ratio * (track_right - pad - bar_height)
         fill_x = pad + bar_height // 2 + fill_width
 
-        if ratio > 0.02:  # Only draw if there's something to show
-            # Fill rectangle
+        if ratio > 0.02:
             self.canvas.create_rectangle(
-                pad + radius,
-                track_top,
-                min(fill_x, track_right - radius),
-                track_bottom,
-                fill="#22c55e",
-                outline="",
+                pad + radius, track_top, min(fill_x, track_right - radius), track_bottom,
+                fill=_GREEN, outline="",
             )
-            # Fill left cap
             self.canvas.create_oval(
-                pad,
-                track_top,
-                pad + bar_height,
-                track_bottom,
-                fill="#22c55e",
-                outline="",
+                pad, track_top, pad + bar_height, track_bottom,
+                fill=_GREEN, outline="",
             )
 
-        # Handle/knob
         handle_x = pad + bar_height // 2 + fill_width
         handle_radius = 14
         self.canvas.create_oval(
-            handle_x - handle_radius,
-            track_y - handle_radius,
-            handle_x + handle_radius,
-            track_y + handle_radius,
-            fill="white",
-            outline="#22c55e",
-            width=3,
+            handle_x - handle_radius, track_y - handle_radius,
+            handle_x + handle_radius, track_y + handle_radius,
+            fill="white", outline=_GREEN, width=3,
         )
 
-        # Update percentage label
         self.percent_label.config(text=f"{int(self.value)}%")
 
     def _on_click(self, event):
@@ -299,7 +307,7 @@ class AnnounceFlowAgent:
     def __init__(self):
         self.config = load_agent_config()
         self.api_base = self.config.get("api_base", API_BASE)
-        self.session = None  # Will store session cookie
+        self.session = None
         self._session_lock = threading.RLock()
 
     def close(self):
@@ -313,13 +321,8 @@ class AnnounceFlowAgent:
                 self.session = None
 
     def _request(
-        self,
-        method: str,
-        path: str,
-        *,
-        auth_required: bool = True,
-        timeout=DEFAULT_TIMEOUT,
-        **kwargs,
+        self, method: str, path: str, *,
+        auth_required: bool = True, timeout=DEFAULT_TIMEOUT, **kwargs,
     ) -> Optional[requests.Response]:
         """Issue HTTP request with explicit timeout and optional auth session."""
         url = f"{self.api_base}{path}"
@@ -335,15 +338,7 @@ class AnnounceFlowAgent:
             return None
 
     def login(self, username: str, password: str) -> Dict[str, Any]:
-        """
-        Login to the API with detailed error handling.
-
-        Returns:
-            dict with 'success' (bool) and optional 'error' key:
-            - 'invalid_credentials': wrong username/password
-            - 'connection_error': cannot reach server
-            - 'timeout': request timed out
-        """
+        """Login to the API with detailed error handling."""
         session = None
         try:
             session = requests.Session()
@@ -353,7 +348,6 @@ class AnnounceFlowAgent:
                 allow_redirects=True,
                 timeout=LOGIN_TIMEOUT,
             )
-            # Check if we got a session cookie (login successful)
             if "session" in session.cookies:
                 with self._session_lock:
                     old_session = self.session
@@ -365,29 +359,25 @@ class AnnounceFlowAgent:
                         pass
                 return {"success": True}
             session.close()
-            # No session cookie = invalid credentials
             return {"success": False, "error": "invalid_credentials"}
         except requests.exceptions.ConnectionError:
             if session is not None:
                 session.close()
-            print(f"Connection error: Cannot reach {self.api_base}")
+            logger.error("Connection error: Cannot reach %s", self.api_base)
             return {"success": False, "error": "connection_error"}
         except requests.exceptions.Timeout:
             if session is not None:
                 session.close()
-            print("Connection timeout")
+            logger.error("Connection timeout to %s", self.api_base)
             return {"success": False, "error": "timeout"}
         except Exception as e:
             if session is not None:
                 session.close()
-            print(f"Login error: {e}")
+            logger.error("Login error: %s", e)
             return {"success": False, "error": "unknown"}
 
     def discover_server(self, port=5001):
-        """Scan local network for AnnounceFlow server on given port.
-        Returns the working URL or None.
-        """
-        # Find local IP to determine subnet
+        """Scan local network for AnnounceFlow server on given port."""
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             s.connect(("8.8.8.8", 80))
@@ -396,13 +386,11 @@ class AnnounceFlowAgent:
         except Exception:
             return None
 
-        # Get subnet (e.g., 192.168.0)
         parts = local_ip.split(".")
         if len(parts) != 4:
             return None
         subnet = ".".join(parts[:3])
 
-        # Scan common IPs (1-254)
         for i in range(1, 255):
             ip = f"{subnet}.{i}"
             if ip == local_ip:
@@ -413,7 +401,6 @@ class AnnounceFlowAgent:
                 result = sock.connect_ex((ip, port))
                 sock.close()
                 if result == 0:
-                    # Port open, verify it's AnnounceFlow
                     try:
                         url = f"http://{ip}:{port}"
                         resp = requests.get(f"{url}/api/health", timeout=DEFAULT_TIMEOUT)
@@ -448,10 +435,7 @@ class AnnounceFlowAgent:
     def play_file(self, media_id):
         """Play a media file."""
         response = self._request(
-            "POST",
-            "/api/play",
-            auth_required=True,
-            json={"media_id": media_id},
+            "POST", "/api/play", auth_required=True, json={"media_id": media_id},
         )
         return bool(response and response.ok)
 
@@ -473,10 +457,7 @@ class AnnounceFlowAgent:
     def set_volume(self, volume):
         """Set volume level."""
         response = self._request(
-            "POST",
-            "/api/volume",
-            auth_required=True,
-            json={"volume": volume},
+            "POST", "/api/volume", auth_required=True, json={"volume": volume},
         )
         return bool(response and response.ok)
 
@@ -503,16 +484,12 @@ class AnnounceFlowAgent:
                 files = {"file": (os.path.basename(filepath), f)}
                 data = {"media_type": media_type}
                 response = self._request(
-                    "POST",
-                    "/api/media/upload",
-                    auth_required=True,
-                    timeout=UPLOAD_TIMEOUT,
-                    files=files,
-                    data=data,
+                    "POST", "/api/media/upload", auth_required=True,
+                    timeout=UPLOAD_TIMEOUT, files=files, data=data,
                 )
             return bool(response and response.ok)
         except Exception as e:
-            print(f"Upload error: {e}")
+            logger.error("Upload error: %s", e)
             return False
 
 
@@ -562,6 +539,8 @@ class NetworkWorker:
 class AgentGUI:
     """GUI for the agent."""
 
+    _STATUS_DISPLAY_MS = 4000  # How long status messages stay visible
+
     def __init__(self, agent):
         self.agent = agent
         self.root: Optional[tk.Tk] = None
@@ -571,13 +550,21 @@ class AgentGUI:
         self._volume_update_job = None
         self._pending_volume: Optional[int] = None
         self._stream_client = StreamClient()
+        self._status_clear_job = None
+        # Button references for loading state
+        self._btn_music_start: Optional[ModernButton] = None
+        self._btn_music_stop: Optional[ModernButton] = None
+        self._btn_stream_start: Optional[ModernButton] = None
+        self._btn_stream_stop: Optional[ModernButton] = None
+        self._btn_upload: Optional[ModernButton] = None
 
     def run(self):
         """Run the GUI application."""
         self.root = tk.Tk()
-        self.root.title("AnnounceFlow Agent")
-        self.root.geometry("400x700")
-        self.root.configure(bg="#1a1a1a")
+        self.root.title("AnnounceFlow")
+        self.root.geometry("420x760")
+        self.root.minsize(400, 700)
+        self.root.configure(bg=_BG)
         self.network_worker = NetworkWorker(self.root)
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
@@ -585,9 +572,7 @@ class AgentGUI:
         style = ttk.Style()
         style.theme_use("clam")
         style.configure("TButton", padding=10, font=("Segoe UI", 10))
-        style.configure(
-            "TLabel", background="#1a1a1a", foreground="white", font=("Segoe UI", 10)
-        )
+        style.configure("TLabel", background=_BG, foreground=_FG, font=("Segoe UI", 10))
         style.configure("TEntry", padding=5)
 
         # Try auto-login if credentials are saved
@@ -612,22 +597,71 @@ class AgentGUI:
     def _handle_network_error(self, exc: Exception):
         """Default UI bridge for unexpected worker exceptions."""
         logger.exception("Network worker job failed: %s", exc)
-
         if not self._root_alive():
             return
+        self._show_status("Ağ hatası oluştu. Tekrar deneyin.", error=True)
 
-        user_message = "Ağ işlemi sırasında beklenmeyen bir hata oluştu. Lütfen tekrar deneyin."
-        if hasattr(self, "status_label"):
+    # --------------- Status Bar ---------------
+
+    def _show_status(self, message: str, error: bool = False):
+        """Show a status message in the status bar (no pop-up)."""
+        if not self._root_alive():
+            return
+        if not hasattr(self, "_status_label"):
+            return
+        try:
+            if not self._status_label.winfo_exists():
+                return
+        except tk.TclError:
+            return
+
+        color = _STATUS_ERROR if error else _STATUS_SUCCESS
+        self._status_label.config(text=message, fg=color)
+
+        # Clear previous timer
+        if self._status_clear_job is not None:
             try:
-                if self.status_label.winfo_exists():
-                    self.status_label.config(text=user_message, fg="#ef4444")
+                self.root.after_cancel(self._status_clear_job)
             except tk.TclError:
                 pass
 
-        try:
-            messagebox.showerror("Ağ Hatası", user_message)
-        except tk.TclError:
-            pass
+        # Auto-clear after delay
+        delay = 6000 if error else self._STATUS_DISPLAY_MS
+        self._status_clear_job = self.root.after(delay, self._clear_status)
+
+    def _clear_status(self):
+        """Clear the status bar text."""
+        self._status_clear_job = None
+        if not self._root_alive():
+            return
+        if hasattr(self, "_status_label"):
+            try:
+                if self._status_label.winfo_exists():
+                    self._status_label.config(text="")
+            except tk.TclError:
+                pass
+
+    # --------------- Loading State Helpers ---------------
+
+    def _with_loading(self, btn: Optional[ModernButton], original_text: str,
+                      loading_text: str = "İşleniyor..."):
+        """Context: disable button, run job, re-enable."""
+        if btn:
+            btn.set_disabled(True)
+            btn.set_text(loading_text)
+
+        def restore():
+            if btn and self._root_alive():
+                try:
+                    if btn.winfo_exists():
+                        btn.set_disabled(False)
+                        btn.set_text(original_text)
+                except tk.TclError:
+                    pass
+
+        return restore
+
+    # --------------- Window Lifecycle ---------------
 
     def on_close(self):
         """Bounded-time, idempotent UI shutdown."""
@@ -657,6 +691,8 @@ class AgentGUI:
             except tk.TclError:
                 pass
 
+    # --------------- Auto Login ---------------
+
     def _try_auto_login(self):
         """Attempt auto-login with saved credentials."""
         if not has_credentials(self.agent.api_base):
@@ -670,25 +706,16 @@ class AgentGUI:
 
         # Show loading state
         self.clear_frame()
-        loading_frame = tk.Frame(self.root, bg="#1a1a1a")
+        loading_frame = tk.Frame(self.root, bg=_BG)
         loading_frame.pack(expand=True)
 
         tk.Label(
-            loading_frame, text="🎵", font=("Segoe UI", 48), bg="#1a1a1a", fg="white"
-        ).pack(pady=20)
+            loading_frame, text="AnnounceFlow",
+            font=("Segoe UI", 20, "bold"), bg=_BG, fg=_FG,
+        ).pack(pady=(40, 10))
         tk.Label(
-            loading_frame,
-            text="AnnounceFlow Agent",
-            font=("Segoe UI", 16, "bold"),
-            bg="#1a1a1a",
-            fg="white",
-        ).pack()
-        tk.Label(
-            loading_frame,
-            text="Otomatik giriş yapılıyor...",
-            bg="#1a1a1a",
-            fg="#f59e0b",
-            font=("Segoe UI", 10),
+            loading_frame, text="Otomatik giriş yapılıyor...",
+            bg=_BG, fg=_AMBER, font=("Segoe UI", 10),
         ).pack(pady=20)
 
         username, password = creds
@@ -711,6 +738,8 @@ class AgentGUI:
 
         self._submit_network_job(_job, on_success=_on_done)
 
+    # --------------- Login Frame ---------------
+
     def show_login_frame(self, error_message: str = None):
         """Show login screen."""
         if self.root and self._volume_update_job is not None:
@@ -723,37 +752,31 @@ class AgentGUI:
 
         self.clear_frame()
 
-        frame = tk.Frame(self.root, bg="#1a1a1a")
+        frame = tk.Frame(self.root, bg=_BG)
         frame.pack(expand=True)
 
-        # Logo
-        logo_label = tk.Label(
-            frame, text="🎵", font=("Segoe UI", 48), bg="#1a1a1a", fg="white"
-        )
-        logo_label.pack(pady=20)
+        # Title
+        tk.Label(
+            frame, text="AnnounceFlow",
+            font=("Segoe UI", 20, "bold"), bg=_BG, fg=_FG,
+        ).pack(pady=(30, 5))
 
-        title_label = tk.Label(
-            frame,
-            text="AnnounceFlow Agent",
-            font=("Segoe UI", 16, "bold"),
-            bg="#1a1a1a",
-            fg="white",
-        )
-        title_label.pack()
+        tk.Label(
+            frame, text="Ses Yönetim Sistemi",
+            font=("Segoe UI", 10), bg=_BG, fg=_FG_DIM,
+        ).pack(pady=(0, 25))
 
         # Server URL
-        url_frame = tk.Frame(frame, bg="#1a1a1a")
-        url_frame.pack(pady=20, fill="x", padx=40)
+        url_frame = tk.Frame(frame, bg=_BG)
+        url_frame.pack(pady=0, fill="x", padx=40)
 
-        tk.Label(url_frame, text="Sunucu Adresi:", bg="#1a1a1a", fg="#a1a1aa").pack(
-            anchor="w"
-        )
+        tk.Label(url_frame, text="Sunucu Adresi:", bg=_BG, fg=_FG_DIM).pack(anchor="w")
         self.url_entry = tk.Entry(url_frame, font=("Segoe UI", 10), width=35)
         self.url_entry.insert(0, self.agent.api_base)
         self.url_entry.pack(fill="x", pady=5)
 
         # Username
-        tk.Label(url_frame, text="Kullanıcı Adı:", bg="#1a1a1a", fg="#a1a1aa").pack(
+        tk.Label(url_frame, text="Kullanıcı Adı:", bg=_BG, fg=_FG_DIM).pack(
             anchor="w", pady=(10, 0)
         )
         self.username_entry = tk.Entry(url_frame, font=("Segoe UI", 10), width=35)
@@ -761,7 +784,7 @@ class AgentGUI:
         self.username_entry.pack(fill="x", pady=5)
 
         # Password
-        tk.Label(url_frame, text="Şifre:", bg="#1a1a1a", fg="#a1a1aa").pack(
+        tk.Label(url_frame, text="Şifre:", bg=_BG, fg=_FG_DIM).pack(
             anchor="w", pady=(10, 0)
         )
         self.password_entry = tk.Entry(
@@ -771,38 +794,29 @@ class AgentGUI:
 
         # Remember Me checkbox
         self.remember_var = tk.BooleanVar(value=True)
-        remember_frame = tk.Frame(url_frame, bg="#1a1a1a")
+        remember_frame = tk.Frame(url_frame, bg=_BG)
         remember_frame.pack(fill="x", pady=(10, 0))
 
         remember_cb = tk.Checkbutton(
-            remember_frame,
-            text="Beni Hatırla",
-            variable=self.remember_var,
-            bg="#1a1a1a",
-            fg="#a1a1aa",
-            selectcolor="#2a2a2a",
-            activebackground="#1a1a1a",
-            activeforeground="#a1a1aa",
+            remember_frame, text="Beni Hatırla", variable=self.remember_var,
+            bg=_BG, fg=_FG_DIM, selectcolor=_BG_CARD,
+            activebackground=_BG, activeforeground=_FG_DIM,
             font=("Segoe UI", 9),
         )
         remember_cb.pack(anchor="w")
 
         # Login button
         login_btn = ModernButton(
-            frame,
-            text="Giriş Yap",
-            command=self.do_login,
-            bg_color="#6366f1",
-            hover_color="#818cf8",
+            frame, text="Giriş Yap", command=self.do_login,
+            bg_color=_INDIGO, hover_color=_INDIGO_HOVER,
         )
         login_btn.pack(pady=20, fill="x", padx=40)
 
-        self.status_label = tk.Label(frame, text="", bg="#1a1a1a", fg="#ef4444")
+        self.status_label = tk.Label(frame, text="", bg=_BG, fg=_RED)
         self.status_label.pack()
 
-        # Show error message if provided (e.g., password changed)
         if error_message:
-            self.status_label.config(text=error_message, fg="#f59e0b")
+            self.status_label.config(text=error_message, fg=_AMBER)
 
     def do_login(self):
         """Handle login."""
@@ -815,7 +829,7 @@ class AgentGUI:
         self.agent.config["api_base"] = url
         save_agent_config(self.agent.config)
 
-        self.status_label.config(text="Bağlanılıyor...", fg="#f59e0b")
+        self.status_label.config(text="Bağlanılıyor...", fg=_AMBER)
 
         def _job():
             first = self.agent.login(username, password)
@@ -863,100 +877,149 @@ class AgentGUI:
             error = result.get("error", "unknown")
             if error == "invalid_credentials":
                 self.status_label.config(
-                    text="Giriş başarısız! Bilgileri kontrol edin.", fg="#ef4444"
+                    text="Giriş başarısız! Bilgileri kontrol edin.", fg=_RED
                 )
                 return
             if error == "connection_error":
-                self.status_label.config(text="Sunucu agda bulunamadi!", fg="#ef4444")
+                self.status_label.config(text="Sunucu ağda bulunamadı!", fg=_RED)
                 return
             if error == "timeout":
-                self.status_label.config(
-                    text="Bağlantı zaman aşımına uğradı!", fg="#ef4444"
-                )
+                self.status_label.config(text="Bağlantı zaman aşımına uğradı!", fg=_RED)
                 return
-            self.status_label.config(text="Beklenmeyen bir hata oluştu.", fg="#ef4444")
+            self.status_label.config(text="Beklenmeyen bir hata oluştu.", fg=_RED)
 
         self._submit_network_job(_job, on_success=_on_done)
+
+    # --------------- Main Frame ---------------
 
     def show_main_frame(self):
         """Show main control panel."""
         self.clear_frame()
 
-        # Header
-        header = tk.Frame(self.root, bg="#262626", pady=15)
+        # Header with logout link
+        header = tk.Frame(self.root, bg=_BG_HEADER, pady=12)
         header.pack(fill="x")
 
-        tk.Label(
-            header,
-            text="🎵 AnnounceFlow",
-            font=("Segoe UI", 14, "bold"),
-            bg="#262626",
-            fg="white",
-        ).pack()
-        tk.Label(
-            header,
-            text=f"Bağlı: {self.agent.api_base}",
-            font=("Segoe UI", 9),
-            bg="#262626",
-            fg="#a1a1aa",
-        ).pack()
+        header_content = tk.Frame(header, bg=_BG_HEADER)
+        header_content.pack(fill="x", padx=16)
 
-        # Main content
-        content = tk.Frame(self.root, bg="#1a1a1a", padx=20, pady=20)
+        tk.Label(
+            header_content, text="AnnounceFlow",
+            font=("Segoe UI", 14, "bold"), bg=_BG_HEADER, fg=_FG,
+        ).pack(side="left")
+
+        # Logout as small text link in header
+        logout_label = tk.Label(
+            header_content, text="Çıkış", font=("Segoe UI", 9, "underline"),
+            bg=_BG_HEADER, fg=_FG_DIM, cursor="hand2",
+        )
+        logout_label.pack(side="right")
+        logout_label.bind("<Button-1>", lambda e: self.logout())
+        logout_label.bind("<Enter>", lambda e: logout_label.config(fg=_RED))
+        logout_label.bind("<Leave>", lambda e: logout_label.config(fg=_FG_DIM))
+
+        # Connection info
+        tk.Label(
+            header, text=self.agent.api_base,
+            font=("Segoe UI", 8), bg=_BG_HEADER, fg=_FG_DIM,
+        ).pack(anchor="w", padx=16)
+
+        # Scrollable content
+        content = tk.Frame(self.root, bg=_BG, padx=16, pady=12)
         content.pack(fill="both", expand=True)
 
-        # Default volume; server sync runs asynchronously.
-        current_vol = 80
-
-        # Quick Actions
+        # ── Music Section ──
+        music_section = tk.Frame(content, bg=_BG_CARD, padx=12, pady=10)
+        music_section.pack(fill="x", pady=(0, 8))
 
         tk.Label(
-            content,
-            text="Hızlı İşlemler",
-            font=("Segoe UI", 12, "bold"),
-            bg="#1a1a1a",
-            fg="white",
-        ).pack(anchor="w", pady=(0, 10))
+            music_section, text="Müzik Kontrolü",
+            font=("Segoe UI", 11, "bold"), bg=_BG_CARD, fg=_FG,
+        ).pack(anchor="w", pady=(0, 8))
 
-        btn_frame = tk.Frame(content, bg="#1a1a1a")
-        btn_frame.pack(fill="x", pady=10)
+        music_btns = tk.Frame(music_section, bg=_BG_CARD)
+        music_btns.pack(fill="x")
 
-        # Colored buttons for better visibility
-        btn_configs = [
-            ("Müzikleri Başlat", self.start_music, "#22c55e", "#4ade80", "play"),
-            ("Durdur", self.stop_music, "#ef4444", "#f87171", "stop"),
-            ("Yayını Başlat", self.start_stream, "#f59e0b", "#fbbf24", "stream"),
-            ("Yayını Durdur", self.stop_stream, "#d97706", "#f59e0b", "stop"),
-            ("Anons Yükle", self.upload_announcement, "#6366f1", "#818cf8", "upload"),
-            ("Web Panel", self.open_web_panel, "#3b82f6", "#60a5fa", "web"),
-        ]
-
-        for text, command, bg_color, hover_color, icon_name in btn_configs:
-            btn = ModernButton(
-                btn_frame,
-                text=text,
-                command=command,
-                bg_color=bg_color,
-                hover_color=hover_color,
-                icon_name=icon_name
-            )
-            btn.pack(fill="x", pady=8)
-
-        # Volume Control
-        tk.Label(
-            content,
-            text="Ses Seviyesi",
-            font=("Segoe UI", 12, "bold"),
-            bg="#1a1a1a",
-            fg="white",
-        ).pack(anchor="w", pady=(25, 10))
-
-        # Modern volume slider with icons
-        self.volume_slider = ModernSlider(
-            content, from_=0, to=100, value=current_vol, command=self.on_volume_change
+        self._btn_music_start = ModernButton(
+            music_btns, text="Başlat", command=self.start_music,
+            bg_color=_GREEN, hover_color=_GREEN_HOVER, icon_name="play",
+            font_size=10, pady=8,
         )
-        self.volume_slider.pack(fill="x", pady=(0, 10))
+        self._btn_music_start.pack(side="left", fill="x", expand=True, padx=(0, 4))
 
+        self._btn_music_stop = ModernButton(
+            music_btns, text="Durdur", command=self.stop_music,
+            bg_color=_RED, hover_color=_RED_HOVER, icon_name="stop",
+            font_size=10, pady=8,
+        )
+        self._btn_music_stop.pack(side="left", fill="x", expand=True, padx=(4, 0))
+
+        # ── Stream Section ──
+        stream_section = tk.Frame(content, bg=_BG_CARD, padx=12, pady=10)
+        stream_section.pack(fill="x", pady=(0, 8))
+
+        tk.Label(
+            stream_section, text="Canlı Yayın",
+            font=("Segoe UI", 11, "bold"), bg=_BG_CARD, fg=_FG,
+        ).pack(anchor="w", pady=(0, 8))
+
+        stream_btns = tk.Frame(stream_section, bg=_BG_CARD)
+        stream_btns.pack(fill="x")
+
+        self._btn_stream_start = ModernButton(
+            stream_btns, text="Yayını Başlat", command=self.start_stream,
+            bg_color=_AMBER, hover_color=_AMBER_HOVER, icon_name="stream",
+            font_size=10, pady=8,
+        )
+        self._btn_stream_start.pack(side="left", fill="x", expand=True, padx=(0, 4))
+
+        self._btn_stream_stop = ModernButton(
+            stream_btns, text="Yayını Durdur", command=self.stop_stream,
+            bg_color="#8d6e27", hover_color=_AMBER, icon_name="stop",
+            font_size=10, pady=8,
+        )
+        self._btn_stream_stop.pack(side="left", fill="x", expand=True, padx=(4, 0))
+
+        # ── Tools Section ──
+        tools_section = tk.Frame(content, bg=_BG_CARD, padx=12, pady=10)
+        tools_section.pack(fill="x", pady=(0, 8))
+
+        tk.Label(
+            tools_section, text="Araçlar",
+            font=("Segoe UI", 11, "bold"), bg=_BG_CARD, fg=_FG,
+        ).pack(anchor="w", pady=(0, 8))
+
+        tools_btns = tk.Frame(tools_section, bg=_BG_CARD)
+        tools_btns.pack(fill="x")
+
+        self._btn_upload = ModernButton(
+            tools_btns, text="Anons Yükle", command=self.upload_announcement,
+            bg_color=_INDIGO, hover_color=_INDIGO_HOVER, icon_name="upload",
+            font_size=10, pady=8,
+        )
+        self._btn_upload.pack(side="left", fill="x", expand=True, padx=(0, 4))
+
+        ModernButton(
+            tools_btns, text="Web Panel", command=self.open_web_panel,
+            bg_color=_BLUE, hover_color=_BLUE_HOVER, icon_name="web",
+            font_size=10, pady=8,
+        ).pack(side="left", fill="x", expand=True, padx=(4, 0))
+
+        # ── Volume Section ──
+        vol_section = tk.Frame(content, bg=_BG_CARD, padx=12, pady=10)
+        vol_section.pack(fill="x", pady=(0, 8))
+
+        tk.Label(
+            vol_section, text="Ses Seviyesi",
+            font=("Segoe UI", 11, "bold"), bg=_BG_CARD, fg=_FG,
+        ).pack(anchor="w", pady=(0, 4))
+
+        self.volume_slider = ModernSlider(
+            vol_section, from_=0, to=100, value=80, command=self.on_volume_change
+        )
+        self.volume_slider.pack(fill="x")
+
+        # Sync volume from server
         def _load_health():
             return self.agent.get_health()
 
@@ -972,43 +1035,50 @@ class AgentGUI:
 
         self._submit_network_job(_load_health, on_success=_apply_health)
 
-        # Logout (Modern)
-        ModernButton(
-            content,
-            text="Çıkış Yap",
-            command=self.logout,
-            bg_color="#ef4444",
-            hover_color="#f87171",
-        ).pack(fill="x", pady=(40, 0))
+        # ── Status Bar ──
+        status_frame = tk.Frame(self.root, bg=_BG_HEADER, pady=6)
+        status_frame.pack(fill="x", side="bottom")
+
+        self._status_label = tk.Label(
+            status_frame, text="", font=("Segoe UI", 9),
+            bg=_BG_HEADER, fg=_FG_DIM,
+        )
+        self._status_label.pack()
+
+    # --------------- Actions ---------------
 
     def start_music(self):
         """Start background music playlist (loop)."""
+        restore = self._with_loading(self._btn_music_start, "Başlat", "Başlatılıyor...")
+
         def _on_done(success):
+            restore()
             if not self._root_alive():
                 return
             if success:
-                messagebox.showinfo("Başarılı", "Arka plan müzik başlatıldı!")
+                self._show_status("Müzik başlatıldı")
             else:
-                messagebox.showerror("Hata", "Müzik başlatılamadı.")
+                self._show_status("Müzik başlatılamadı", error=True)
 
         self._submit_network_job(
-            lambda: self.agent.start_playlist(),
-            on_success=_on_done,
+            lambda: self.agent.start_playlist(), on_success=_on_done,
         )
 
     def stop_music(self):
         """Stop current playback."""
+        restore = self._with_loading(self._btn_music_stop, "Durdur", "Durduruluyor...")
+
         def _on_done(success):
+            restore()
             if not self._root_alive():
                 return
             if success:
-                messagebox.showinfo("Başarılı", "Müzik durduruldu.")
+                self._show_status("Müzik durduruldu")
             else:
-                messagebox.showerror("Hata", "İşlem başarısız.")
+                self._show_status("Müzik durdurulamadı", error=True)
 
         self._submit_network_job(
-            lambda: self.agent.stop_playlist(),
-            on_success=_on_done,
+            lambda: self.agent.stop_playlist(), on_success=_on_done,
         )
 
     def upload_announcement(self):
@@ -1019,13 +1089,16 @@ class AgentGUI:
         )
 
         if filepath:
+            restore = self._with_loading(self._btn_upload, "Anons Yükle", "Yükleniyor...")
+
             def _on_done(success):
+                restore()
                 if not self._root_alive():
                     return
                 if success:
-                    messagebox.showinfo("Başarılı", "Anons dosyası yüklendi!")
+                    self._show_status("Anons yüklendi")
                 else:
-                    messagebox.showerror("Hata", "Dosya yüklenemedi.")
+                    self._show_status("Dosya yüklenemedi", error=True)
 
             self._submit_network_job(
                 lambda: self.agent.upload_file(filepath, "announcement"),
@@ -1044,6 +1117,9 @@ class AgentGUI:
     def start_stream(self):
         """Start live stream to Pi4."""
         host = self._resolve_stream_host()
+        restore = self._with_loading(
+            self._btn_stream_start, "Yayını Başlat", "Bağlanıyor..."
+        )
 
         def _job():
             api_ok = self.agent.start_stream()
@@ -1056,41 +1132,43 @@ class AgentGUI:
             return "ok"
 
         def _on_done(result):
+            restore()
             if not self._root_alive():
                 return
             if result == "ok":
-                messagebox.showinfo("Başarılı", "Canlı yayın başlatıldı!")
+                self._show_status("Canlı yayın başlatıldı")
             elif result == "sender_fail":
-                if self._stream_client.last_error == "no_loopback_device":
-                    messagebox.showerror(
-                        "Hata",
-                        "Ses yakalama cihazı bulunamadı.\n\n"
-                        "VB-Cable otomatik kurulumu da başarısız oldu.\n"
-                        "Bilgisayarı yeniden başlatıp tekrar deneyin.\n\n"
-                        "Yayın geri alındı.",
-                    )
-                else:
-                    messagebox.showerror(
-                        "Hata", "Ses göndericisi başlatılamadı. Yayın geri alındı."
-                    )
+                error_messages = {
+                    "no_audio_device": "Ses cihazı bulunamadı",
+                    "capture_error": "Ses yakalama hatası oluştu",
+                }
+                msg = error_messages.get(
+                    self._stream_client.last_error, "Yayın başlatılamadı"
+                )
+                self._show_status(msg, error=True)
             else:
-                messagebox.showerror("Hata", "Yayın başlatılamadı.")
+                self._show_status("Sunucuya bağlanılamadı", error=True)
 
         self._submit_network_job(_job, on_success=_on_done)
 
     def stop_stream(self):
         """Stop live stream."""
+        restore = self._with_loading(
+            self._btn_stream_stop, "Yayını Durdur", "Durduruluyor..."
+        )
+
         def _job():
             self._stream_client.stop_sender()
             return self.agent.stop_stream()
 
         def _on_done(success):
+            restore()
             if not self._root_alive():
                 return
             if success:
-                messagebox.showinfo("Başarılı", "Yayın durduruldu.")
+                self._show_status("Yayın durduruldu")
             else:
-                messagebox.showerror("Hata", "Yayın durdurma işlemi başarısız.")
+                self._show_status("Yayın durdurulamadı", error=True)
 
         self._submit_network_job(_job, on_success=_on_done)
 
@@ -1113,7 +1191,6 @@ class AgentGUI:
 
     def logout(self):
         """Logout and return to login screen."""
-        # Clear stored credentials on logout
         delete_credentials(self.agent.api_base)
         self.agent.close()
         self.logged_in = False
