@@ -24,7 +24,7 @@ Pillow==10.1.0       # Image processing (required by pystray)
 # ---------------------------------------------------------
 # Build Tools (PyInstaller)
 # ---------------------------------------------------------
-pyinstaller==6.3.0   # Bundle a Python application and all its dependencies
-pyinstaller-hooks-contrib==2023.10 # Community maintained hooks
+pyinstaller==6.11.1  # Bundle a Python application and all its dependencies
+pyinstaller-hooks-contrib==2024.11 # Community maintained hooks
 altgraph==0.17.4     # Python graph (network) package
 pefile==2023.2.7     # Python portable executable reader
