@@ -5,8 +5,8 @@ WASAPI loopback audio capture and UDP sender.
 Captures system audio via WASAPI loopback (no extra drivers needed)
 and sends raw PCM over UDP to the Pi4 receiver.
 
-V2: Replaced ffmpeg+VB-Cable with soundcard (WASAPI loopback).
-    - No driver installation required
+Current transport uses soundcard-based WASAPI loopback.
+    - No extra driver installation required
     - No need to change default audio device
     - PC audio continues playing normally
 """
@@ -33,6 +33,16 @@ _CHANNEL_CANDIDATES = (2, 1)
 
 def _utc_now() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def _format_exception(exc: Optional[BaseException]) -> Optional[str]:
+    """Render exception with traceback when available."""
+    if exc is None:
+        return None
+    tb = exc.__traceback__
+    if tb is not None:
+        return "".join(traceback.format_exception(exc.__class__, exc, tb, limit=8))
+    return f"{exc.__class__.__name__}: {exc}"
 
 
 def _runtime_reports_dir() -> str:
@@ -87,6 +97,7 @@ class StreamClient:
             "error_type": None,
             "error_message": None,
             "traceback": None,
+            "open_errors": [],
             "stages": [],
         }
         self._finalized_attempt_id = None
@@ -165,9 +176,7 @@ class StreamClient:
             self._attempt["error_type"] = (
                 exc.__class__.__name__ if exc is not None else None
             )
-            self._attempt["traceback"] = (
-                traceback.format_exc(limit=8) if exc is not None else None
-            )
+            self._attempt["traceback"] = _format_exception(exc)
         self._mark_stage(stage or "failed", error_code=error_code)
         self._log_event(
             "failure",
@@ -214,7 +223,15 @@ class StreamClient:
             f"error_code={snap.get('error_code')}",
             f"error_type={snap.get('error_type')}",
             f"error_message={snap.get('error_message')}",
+            f"open_error_count={len(snap.get('open_errors') or [])}",
         ]
+        open_errors = snap.get("open_errors") or []
+        if open_errors:
+            last_open = open_errors[-1]
+            lines.append(
+                "last_open_error="
+                f"{last_open.get('error_type')}:{last_open.get('error')}"
+            )
         return "\n".join(lines)
 
     def record_external_failure(self, error_code: str, message: str) -> None:
@@ -439,6 +456,15 @@ class StreamClient:
                     break
                 except Exception as open_exc:
                     last_open_exc = open_exc
+                    if self._attempt is not None:
+                        self._attempt["open_errors"].append(
+                            {
+                                "ts": _utc_now(),
+                                "channels": channels,
+                                "error_type": open_exc.__class__.__name__,
+                                "error": str(open_exc),
+                            }
+                        )
                     logger.warning(
                         "StreamClient: recorder open failed (channels=%s): %s",
                         channels,
