@@ -113,12 +113,6 @@ def _verify_password(plain: str, stored: str) -> bool:
     return plain == stored
 
 
-def _is_default_password(stored: str) -> bool:
-    """Check if stored password is still the default 'admin123'."""
-    if stored.startswith(("pbkdf2:", "scrypt:")):
-        return check_password_hash(stored, "admin123")
-    return stored == "admin123"
-
 
 # ============ AUTH ROUTES ============
 
@@ -136,9 +130,6 @@ def login():
         if username == valid_user and _verify_password(password, valid_pass):
             session["logged_in"] = True
             log_web("login", {"username": username})
-            if _is_default_password(valid_pass):
-                session["must_change_password"] = True
-                return redirect(url_for("change_password"))
             return redirect(url_for("index"))
         else:
             flash("Hatalı kullanıcı adı veya şifre!", "error")
@@ -160,7 +151,6 @@ def change_password():
             config = load_config()
             config["admin_password"] = generate_password_hash(password)
             save_config(config)
-            session.pop("must_change_password", None)
             flash("Şifre başarıyla değiştirildi!", "success")
             return redirect(url_for("index"))
     return render_template("change_password.html")
@@ -169,7 +159,6 @@ def change_password():
 @app.route("/logout")
 def logout():
     session.pop("logged_in", None)
-    session.pop("must_change_password", None)
     return redirect(url_for("login"))
 
 
