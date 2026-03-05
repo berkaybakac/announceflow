@@ -186,6 +186,41 @@ python -m pytest tests/test_api.py -v
 
 Test coverage includes: health endpoint, authentication flow, volume control, player state, media library operations, playlist control, and page rendering.
 
+### Windows Agent Diagnostic Bundle
+
+If stream start fails on a Windows 10/11 target machine, collect logs from that same machine.
+
+Option A (helper files, easiest):
+
+Copy these files to the Windows machine:
+
+- `AnnounceFlowAgent.exe`
+- `collect_windows_agent_logs.ps1`
+- `collect_windows_agent_logs.cmd` (optional shortcut)
+
+Run either:
+
+```cmd
+collect_windows_agent_logs.cmd
+```
+
+or:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\collect_windows_agent_logs.ps1 -LastMinutes 60
+```
+
+Option B (no extra file copy, direct one-liner in PowerShell):
+
+```powershell
+$logs="$env:LOCALAPPDATA\AnnounceFlow\logs"; $out="$env:TEMP\AnnounceFlowDiag"; New-Item -ItemType Directory -Force -Path $out | Out-Null; $ts=Get-Date -Format "yyyyMMdd_HHmmss"; $zip="$out\agent_logs_$ts.zip"; Compress-Archive -Path "$logs\*" -DestinationPath $zip -Force; Write-Host $zip
+```
+
+Output:
+
+- Zip file under `%TEMP%\AnnounceFlowDiag\`
+- Includes `agent_stream.log`, `agent.log`, and `stream_attempt_*.json` (if present)
+
 ---
 
 ## Environment Configuration

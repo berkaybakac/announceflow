@@ -80,8 +80,11 @@ def main():
         alsa_device,
     ]
 
-    # Log ffmpeg stderr for debugging
-    log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+    # Log ffmpeg stderr for debugging.
+    # Tests can isolate this via ANNOUNCEFLOW_LOG_DIR.
+    log_dir = os.environ.get("ANNOUNCEFLOW_LOG_DIR", "").strip()
+    if not log_dir:
+        log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
     os.makedirs(log_dir, exist_ok=True)
     stderr_log = open(os.path.join(log_dir, "stream_receiver_ffmpeg.log"), "a")
 
