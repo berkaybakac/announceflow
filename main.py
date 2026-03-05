@@ -75,7 +75,10 @@ def _load_release_stamp(path: str = "release_stamp.json") -> dict:
 
 def setup_logging():
     """Configure logging with file and console handlers."""
-    log_file = "announceflow.log"
+    log_file = os.environ.get("ANNOUNCEFLOW_APP_LOG_FILE", "").strip() or "announceflow.log"
+    log_dir = os.path.dirname(os.path.abspath(log_file))
+    if log_dir:
+        os.makedirs(log_dir, exist_ok=True)
 
     logger = logging.getLogger()
     if logger.hasHandlers():

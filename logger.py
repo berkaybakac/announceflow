@@ -68,8 +68,12 @@ class EventCategory:
 
 
 # Log directory
-LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
-EVENT_LOG_FILE = os.path.join(LOG_DIR, "events.jsonl")
+_DEFAULT_LOG_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+LOG_DIR = os.environ.get("ANNOUNCEFLOW_LOG_DIR", "").strip() or _DEFAULT_LOG_DIR
+EVENT_LOG_FILE = (
+    os.environ.get("ANNOUNCEFLOW_EVENT_LOG_FILE", "").strip()
+    or os.path.join(LOG_DIR, "events.jsonl")
+)
 
 # Ensure log directory exists
 os.makedirs(LOG_DIR, exist_ok=True)
