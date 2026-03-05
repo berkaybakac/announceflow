@@ -192,11 +192,13 @@ If stream start fails on a Windows 10/11 target machine, collect logs from that 
 
 Option A (helper files, easiest):
 
-Copy these files to the Windows machine:
+Copy these files from your Mac repo to the Windows machine:
 
-- `AnnounceFlowAgent.exe`
-- `collect_windows_agent_logs.ps1`
-- `collect_windows_agent_logs.cmd` (optional shortcut)
+- `agent/dist/AnnounceFlowAgent.exe`
+- `scripts/preflight_windows_audio.ps1`
+- `scripts/preflight_windows_audio.cmd`
+- `scripts/collect_windows_agent_logs.ps1`
+- `scripts/collect_windows_agent_logs.cmd`
 
 Run either:
 
@@ -220,6 +222,30 @@ Output:
 
 - Zip file under `%TEMP%\AnnounceFlowDiag\`
 - Includes `agent_stream.log`, `agent.log`, and `stream_attempt_*.json` (if present)
+
+### Stream Preflight Checks
+
+Before manual end-to-end testing, run platform checks:
+
+- Windows target machine (Audio services + default device + local log path):
+
+```cmd
+preflight_windows_audio.cmd
+```
+
+or:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\preflight_windows_audio.ps1
+```
+
+- Pi receiver machine (ffmpeg/ALSA/receiver smoke):
+
+```bash
+./scripts/preflight_pi_receiver.sh /home/admin/announceflow
+```
+
+The scripts print PASS/WARN/FAIL and generate a report file path.
 
 ---
 
