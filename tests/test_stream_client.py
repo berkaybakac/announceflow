@@ -1,5 +1,6 @@
 """StreamClient lifecycle tests (WASAPI loopback via soundcard)."""
 import os
+import socket
 import sys
 import threading
 import time
@@ -99,8 +100,8 @@ class TestStartSender:
                 time.sleep(0.01)
 
         with patch.object(client, "_capture_loop", side_effect=fake_capture):
-            assert client.start_sender("host", 5800) is True
-            assert client.start_sender("host", 5800) is True
+            assert client.start_sender("127.0.0.1", 5800) is True
+            assert client.start_sender("127.0.0.1", 5800) is True
             client.stop_sender()
 
 
@@ -112,7 +113,7 @@ class TestStartSender:
         _sc_mock.default_speaker.return_value = None
 
         client = StreamClient()
-        assert client.start_sender("host", 5800) is False
+        assert client.start_sender("127.0.0.1", 5800) is False
         assert client.last_error == "no_audio_device"
         assert client.is_alive() is False
 
@@ -121,7 +122,7 @@ class TestStartSender:
         _sc_mock.default_speaker.side_effect = RuntimeError("No WASAPI")
 
         client = StreamClient()
-        assert client.start_sender("host", 5800) is False
+        assert client.start_sender("127.0.0.1", 5800) is False
         assert client.last_error == "no_audio_device"
 
         # Reset
@@ -140,7 +141,7 @@ class TestStartSender:
             client._running = False
 
         with patch.object(client, "_capture_loop", side_effect=dying_capture):
-            result = client.start_sender("host", 5800)
+            result = client.start_sender("127.0.0.1", 5800)
             assert result is False
             assert client.is_alive() is False
 
@@ -158,7 +159,7 @@ class TestStopSender:
                 time.sleep(0.01)
 
         with patch.object(client, "_capture_loop", side_effect=fake_capture):
-            client.start_sender("host", 5800)
+            client.start_sender("127.0.0.1", 5800)
             assert client.stop_sender() is True
             assert client.is_alive() is False
 
@@ -186,7 +187,7 @@ class TestIsAlive:
                 time.sleep(0.01)
 
         with patch.object(client, "_capture_loop", side_effect=fake_capture):
-            client.start_sender("host", 5800)
+            client.start_sender("127.0.0.1", 5800)
             assert client.is_alive() is True
             client.stop_sender()
 
@@ -199,7 +200,7 @@ class TestIsAlive:
                 time.sleep(0.01)
 
         with patch.object(client, "_capture_loop", side_effect=fake_capture):
-            client.start_sender("host", 5800)
+            client.start_sender("127.0.0.1", 5800)
             client.stop_sender()
             assert client.is_alive() is False
 
@@ -308,11 +309,11 @@ class TestLastError:
     def test_last_error_set_on_no_device(self):
         _sc_mock.default_speaker.return_value = None
         client = StreamClient()
-        client.start_sender("host", 5800)
+        client.start_sender("127.0.0.1", 5800)
         assert client.last_error == "no_audio_device"
 
     def test_last_error_cleared_on_success(self):
-        """Successful start doesn't clear previous error (by design)."""
+        """Successful start should clear stale error state from previous failures."""
         client = StreamClient()
 
         def fake_capture(host, port):
@@ -322,11 +323,109 @@ class TestLastError:
         with patch.object(client, "_capture_loop", side_effect=fake_capture):
             # First fail
             _sc_mock.default_speaker.return_value = None
-            client.start_sender("host", 5800)
+            client.start_sender("127.0.0.1", 5800)
             assert client.last_error == "no_audio_device"
 
             # Then succeed
             _sc_mock.default_speaker.return_value = _fake_speaker
-            client.start_sender("host", 5800)
-            # last_error still has previous value (not reset on success)
+            client.start_sender("127.0.0.1", 5800)
+            assert client.last_error is None
             client.stop_sender()
+
+
+# --------------- 8. diagnostics and error-code coverage ---------------
+
+
+class TestDiagnostics:
+    def test_attempt_snapshot_success_path(self):
+        """Successful start/stop should finalize attempt snapshot with success=True."""
+        client = StreamClient()
+
+        def fake_capture(host, port):
+            while client._running:
+                time.sleep(0.01)
+
+        with patch.object(client, "_capture_loop", side_effect=fake_capture):
+            assert client.start_sender("127.0.0.1", 5800) is True
+            snap_running = client.get_attempt_snapshot()
+            assert snap_running["attempt_id"]
+            assert snap_running["target_host"] == "127.0.0.1"
+            assert snap_running["resolved_host"] == "127.0.0.1"
+            assert snap_running["stage"] in {"steady_capture", "capture_thread_start"}
+
+            client.stop_sender()
+            snap_done = client.get_attempt_snapshot()
+            assert snap_done["success"] is True
+            assert snap_done["error_code"] is None
+
+    def test_start_sender_resolve_failure_falls_back_to_raw_host(self):
+        """Host resolve errors should not block startup; sender falls back to raw host."""
+        client = StreamClient()
+        def fake_capture(host, port):
+            while client._running:
+                time.sleep(0.01)
+
+        with patch(
+            "stream_client.socket.gethostbyname",
+            side_effect=socket.gaierror("name not known"),
+        ), patch.object(client, "_capture_loop", side_effect=fake_capture):
+            assert client.start_sender("nonexistent.local", 5800) is True
+            snap = client.get_attempt_snapshot()
+            assert snap["resolved_host"] == "nonexistent.local"
+            assert snap["error_code"] is None
+            stages = [entry["stage"] for entry in snap["stages"]]
+            assert "host_resolve_warning" in stages
+            client.stop_sender()
+
+    @pytest.mark.skipif(not _np_available, reason="numpy not installed")
+    def test_capture_loop_udp_send_failure_sets_udp_send_failed(self):
+        """Network send errors must produce udp_send_failed code."""
+        import numpy as np
+
+        client = StreamClient()
+        fake_recorder = MagicMock()
+        fake_recorder.record = MagicMock(return_value=np.zeros((4410, 1), dtype=np.float32))
+        fake_recorder.__enter__ = MagicMock(return_value=fake_recorder)
+        fake_recorder.__exit__ = MagicMock(return_value=False)
+        _fake_speaker.recorder.return_value = fake_recorder
+
+        mock_socket = MagicMock()
+        mock_socket.sendto.side_effect = OSError("network is unreachable")
+
+        with patch("stream_client.socket.socket", return_value=mock_socket):
+            client._new_attempt("127.0.0.1", 5800)
+            client._running = True
+            client._capture_loop("127.0.0.1", 5800)
+
+        assert client.last_error == "udp_send_failed"
+        snap = client.get_attempt_snapshot()
+        assert snap["error_code"] == "udp_send_failed"
+        assert snap["success"] is False
+
+    def test_capture_loop_recorder_open_failure_sets_specific_code(self):
+        """Recorder open failure should map to recorder_open_failed code."""
+        client = StreamClient()
+        _fake_speaker.recorder.side_effect = RuntimeError("open failed")
+
+        mock_socket = MagicMock()
+        with patch("stream_client.socket.socket", return_value=mock_socket):
+            client._new_attempt("127.0.0.1", 5800)
+            client._running = True
+            client._capture_loop("127.0.0.1", 5800)
+
+        assert client.last_error == "recorder_open_failed"
+        snap = client.get_attempt_snapshot()
+        assert snap["error_code"] == "recorder_open_failed"
+        assert snap["success"] is False
+
+        _fake_speaker.recorder.side_effect = None
+
+    def test_build_failure_report_includes_attempt_and_error_code(self):
+        """Failure report should contain attempt_id and error code for triage."""
+        client = StreamClient()
+        _sc_mock.default_speaker.return_value = None
+        client.start_sender("127.0.0.1", 5800)
+
+        report = client.build_failure_report()
+        assert "attempt_id=" in report
+        assert "error_code=no_audio_device" in report

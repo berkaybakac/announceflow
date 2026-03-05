@@ -326,3 +326,106 @@ class TestStreamApiJsonSafety:
         agent._request = MagicMock(return_value=response)
 
         assert agent.stop_stream() is False
+
+
+class TestStreamApiDetailedWrappers:
+    """Coverage for start_stream_with_details/stop_stream_with_details."""
+
+    def test_start_stream_with_details_success_payload(self):
+        agent_mod = _import_agent()
+        agent = agent_mod.AnnounceFlowAgent.__new__(agent_mod.AnnounceFlowAgent)
+        response = MagicMock()
+        response.ok = True
+        response.status_code = 200
+        response.json.return_value = {"success": True, "status": {"state": "live"}}
+        agent._request = MagicMock(return_value=response)
+
+        result = agent.start_stream_with_details()
+        assert result["success"] is True
+        assert result["http_status"] == 200
+        assert result["status"]["state"] == "live"
+
+    def test_start_stream_with_details_connection_failure(self):
+        agent_mod = _import_agent()
+        agent = agent_mod.AnnounceFlowAgent.__new__(agent_mod.AnnounceFlowAgent)
+        agent._request = MagicMock(return_value=None)
+
+        result = agent.start_stream_with_details()
+        assert result == {"success": False, "error": "api_start_failed"}
+
+    def test_stop_stream_with_details_invalid_json(self):
+        agent_mod = _import_agent()
+        agent = agent_mod.AnnounceFlowAgent.__new__(agent_mod.AnnounceFlowAgent)
+        response = MagicMock()
+        response.ok = True
+        response.status_code = 200
+        response.json.side_effect = ValueError("No JSON")
+        agent._request = MagicMock(return_value=response)
+
+        result = agent.stop_stream_with_details()
+        assert result["success"] is False
+        assert result["error"] == "api_stop_invalid_response"
+        assert result["http_status"] == 200
+
+
+class TestGuiUsesDetailedStreamApi:
+    """Ensure GUI stream jobs use detailed API wrappers."""
+
+    def test_start_stream_job_uses_start_stream_with_details(self):
+        gui = _make_gui()
+        gui.agent.start_stream_with_details.return_value = {
+            "success": False,
+            "error": "api_start_failed",
+        }
+        gui.agent.start_stream.return_value = True  # Should never be called
+
+        captured_job = None
+
+        def fake_submit(fn, *, on_success=None, on_error=None):
+            nonlocal captured_job
+            captured_job = fn
+
+        gui.network_worker = MagicMock()
+        gui._closing = False
+        gui.root = MagicMock()
+        gui.root.winfo_exists.return_value = True
+
+        original_submit = gui._submit_network_job
+        gui._submit_network_job = fake_submit
+        gui.start_stream()
+        gui._submit_network_job = original_submit
+
+        assert captured_job is not None
+        result = captured_job()
+        assert result["result"] == "api_fail"
+        gui.agent.start_stream_with_details.assert_called_once()
+        gui.agent.start_stream.assert_not_called()
+
+    @patch("agent.time.sleep", return_value=None)
+    def test_stop_stream_job_uses_stop_stream_with_details(self, _mock_sleep):
+        gui = _make_gui()
+        gui.agent.stop_stream_with_details.return_value = {"success": True}
+        gui.agent.stop_stream.return_value = False  # Should never be called
+
+        captured_job = None
+
+        def fake_submit(fn, *, on_success=None, on_error=None):
+            nonlocal captured_job
+            captured_job = fn
+
+        gui.network_worker = MagicMock()
+        gui._closing = False
+        gui.root = MagicMock()
+        gui.root.winfo_exists.return_value = True
+
+        original_submit = gui._submit_network_job
+        gui._submit_network_job = fake_submit
+        gui.stop_stream()
+        gui._submit_network_job = original_submit
+
+        assert captured_job is not None
+        payload = captured_job()
+        assert payload["success"] is True
+        gui._stream_client.stop_sender.assert_called_once()
+        gui.agent.stop_stream_with_details.assert_called_once()
+        gui.agent.stop_stream.assert_not_called()
