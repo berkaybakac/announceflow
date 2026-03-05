@@ -21,6 +21,7 @@ _fake_speaker.name = "Test Speaker"
 _sc_mock.default_speaker.return_value = _fake_speaker
 _fake_loopback_mic = MagicMock()
 _fake_loopback_mic.name = "Test Loopback Mic"
+_fake_loopback_mic.isloopback = True
 
 
 class _NoRecorderSpeaker:
@@ -173,6 +174,24 @@ class TestStartSender:
         assert client.last_error == "recorder_open_failed"
         snap = client.get_attempt_snapshot()
         assert snap["error_code"] == "recorder_open_failed"
+        _sc_mock.get_microphone.side_effect = None
+
+    def test_start_sender_rejects_non_loopback_microphone_fallback(self):
+        """Do not pick a plain physical mic as capture fallback."""
+        _sc_mock.default_speaker.return_value = _NoRecorderSpeaker("Main Speakers")
+        _sc_mock.get_microphone.side_effect = RuntimeError("loopback lookup failed")
+        non_loopback = MagicMock()
+        non_loopback.name = "Internal Microphone"
+        non_loopback.isloopback = False
+        _sc_mock.all_microphones.return_value = [non_loopback]
+
+        client = StreamClient()
+        assert client.start_sender("127.0.0.1", 5800) is False
+        assert client.last_error == "recorder_open_failed"
+        snap = client.get_attempt_snapshot()
+        errs = "\n".join((e.get("error") or "") for e in (snap.get("open_errors") or []))
+        assert "No loopback microphone matched default speaker" in errs
+
         _sc_mock.get_microphone.side_effect = None
 
 
