@@ -90,6 +90,7 @@
 {% endblock %}
 
 {% block content %}
+{% set play_action_label = 'Çal' %}
 <div class="page-header">
     <h1 class="page-title" style="display: inline-flex; align-items: center; gap: 10px;">
         <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 28px; height: 28px; color: var(--primary);">
@@ -307,7 +308,7 @@
                                 <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 14px; height: 14px;">
                                     <path stroke-linecap="round" stroke-linejoin="round" d="M15.91 11.672a.375.375 0 010 .656l-5.603 3.113a.375.375 0 01-.557-.328V8.887c0-.286.307-.466.557-.327l5.603 3.112z" />
                                 </svg>
-                                Dinle
+                                {{ play_action_label }}
                             </button>
                             <button class="btn btn-outline-danger btn-sm" onclick="stopPlayback('{{ file.id }}')">
                                 <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 14px; height: 14px;">
@@ -388,7 +389,7 @@
                                 <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 14px; height: 14px;">
                                     <path stroke-linecap="round" stroke-linejoin="round" d="M15.91 11.672a.375.375 0 010 .656l-5.603 3.113a.375.375 0 01-.557-.328V8.887c0-.286.307-.466.557-.327l5.603 3.112z" />
                                 </svg>
-                                Çal
+                                {{ play_action_label }}
                             </button>
                             <button class="btn btn-outline-danger btn-sm" onclick="stopPlayback('{{ file.id }}')">
                                 <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 14px; height: 14px;">
