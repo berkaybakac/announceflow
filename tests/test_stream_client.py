@@ -417,6 +417,9 @@ class TestDiagnostics:
         snap = client.get_attempt_snapshot()
         assert snap["error_code"] == "recorder_open_failed"
         assert snap["success"] is False
+        assert "open failed" in (snap.get("traceback") or "")
+        assert len(snap.get("open_errors") or []) >= 1
+        assert (snap.get("open_errors") or [])[-1]["error"] == "open failed"
 
         _fake_speaker.recorder.side_effect = None
 
