@@ -50,6 +50,13 @@ def build():
     cmd.insert(-1, "--add-binary")
     cmd.insert(-1, ffmpeg_data)
 
+    # Bundle PNG icons if available
+    icons_dir = os.path.join(os.path.dirname(__file__), "assets", "icons")
+    if os.path.isdir(icons_dir):
+        icons_data = f"{icons_dir}{sep}assets/icons"
+        cmd.insert(-1, "--add-data")
+        cmd.insert(-1, icons_data)
+
     # Bundle VB-Cable installer if available
     vbcable_path = os.path.join(os.path.dirname(__file__), "VBCABLE_Setup_x64.exe")
     if os.path.isfile(vbcable_path):

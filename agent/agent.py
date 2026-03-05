@@ -14,6 +14,11 @@ from concurrent.futures import ThreadPoolExecutor
 import threading
 import requests
 from urllib.parse import urlparse
+try:
+    from PIL import Image, ImageTk
+    _HAS_PIL = True
+except ImportError:
+    _HAS_PIL = False
 
 # Credential management
 from credential_manager import (
@@ -48,33 +53,73 @@ def save_agent_config(config):
         json.dump(config, f, indent=2)
 
 
-class ModernButton(tk.Frame):
-    """Custom button for cross-platform consistency (especially Mac)."""
+def get_icon(name, size=(24, 24)):
+    """Load and resize icon from assets."""
+    if not _HAS_PIL:
+        return None
+    # PyInstaller bundles data into _MEIPASS temp dir
+    base = getattr(sys, '_MEIPASS', os.path.dirname(__file__))
+    icon_path = os.path.join(base, 'assets', 'icons', f'{name}.png')
+    try:
+        if os.path.exists(icon_path):
+            img = Image.open(icon_path)
+            img = img.resize(size, Image.Resampling.LANCZOS)
+            return ImageTk.PhotoImage(img)
+    except Exception as e:
+        logger.error(f"Error loading icon {name}: {e}")
+    return None
 
-    def __init__(self, parent, text, command, bg_color, hover_color, **kwargs):
+class ModernButton(tk.Frame):
+    """Custom button for cross-platform consistency with PNG icon support."""
+
+    def __init__(self, parent, text, command, bg_color, hover_color, icon_name=None, **kwargs):
         super().__init__(parent, bg=bg_color, cursor="hand2", **kwargs)
         self.command = command
         self.bg_color = bg_color
         self.hover_color = hover_color
+        
+        # Keep reference to image to prevent garbage collection
+        self.icon_image = None
+        if icon_name:
+            self.icon_image = get_icon(icon_name)
 
-        self.label = tk.Label(
-            self, text=text, bg=bg_color, fg="white", font=("Segoe UI", 11, "bold")
+        # Internal container to center content
+        content_frame = tk.Frame(self, bg=bg_color)
+        content_frame.pack(expand=True, fill="both", padx=20, pady=12)
+        
+        self.icon_label = None
+        if self.icon_image:
+            self.icon_label = tk.Label(content_frame, image=self.icon_image, bg=bg_color)
+            self.icon_label.pack(side="left", padx=(0, 10))
+            
+        self.text_label = tk.Label(
+            content_frame, text=text, bg=bg_color, fg="white", font=("Segoe UI", 11, "bold")
         )
-        self.label.pack(expand=True, fill="both", padx=20, pady=15)
+        self.text_label.pack(side="left" if self.icon_image else "top")
 
-        # Bind events
-        for widget in (self, self.label):
+        # Bind events for all sub-components
+        widgets_to_bind = [self, content_frame, self.text_label]
+        if self.icon_label:
+            widgets_to_bind.append(self.icon_label)
+            
+        for widget in widgets_to_bind:
             widget.bind("<Enter>", self.on_enter)
             widget.bind("<Leave>", self.on_leave)
             widget.bind("<Button-1>", self.on_click)
 
     def on_enter(self, event):
         self.config(bg=self.hover_color)
-        self.label.config(bg=self.hover_color)
+        for child in self.winfo_children():
+            child.config(bg=self.hover_color)
+            for subchild in child.winfo_children():
+                subchild.config(bg=self.hover_color)
 
     def on_leave(self, event):
         self.config(bg=self.bg_color)
-        self.label.config(bg=self.bg_color)
+        for child in self.winfo_children():
+            child.config(bg=self.bg_color)
+            for subchild in child.winfo_children():
+                subchild.config(bg=self.bg_color)
 
     def on_click(self, event):
         if self.command:
@@ -91,14 +136,23 @@ class ModernSlider(tk.Frame):
         self.value = value
         self.command = command
 
+        # Load SVG/PNG Icons for slider
+        self.img_mute = get_icon('vol_mute', size=(20, 20))
+        self.img_loud = get_icon('vol_high', size=(20, 20))
+
         # Main container with icons
         container = tk.Frame(self, bg="#1a1a1a")
         container.pack(fill="x", expand=True)
 
         # Left speaker icon (mute)
         self.left_icon = tk.Label(
-            container, text="🔈", font=("Segoe UI", 14), bg="#1a1a1a", fg="#a1a1aa"
+            container, bg="#1a1a1a"
         )
+        if self.img_mute:
+            self.left_icon.config(image=self.img_mute)
+        else:
+            self.left_icon.config(text="🔈", fg="#a1a1aa", font=("Segoe UI", 14))
+            
         self.left_icon.pack(side="left", padx=(0, 10))
 
         # Canvas for slider
@@ -117,8 +171,13 @@ class ModernSlider(tk.Frame):
         right_frame.pack(side="left", padx=(10, 0))
 
         self.right_icon = tk.Label(
-            right_frame, text="🔊", font=("Segoe UI", 14), bg="#1a1a1a", fg="#a1a1aa"
+            right_frame, bg="#1a1a1a"
         )
+        if self.img_loud:
+            self.right_icon.config(image=self.img_loud)
+        else:
+            self.right_icon.config(text="🔊", fg="#a1a1aa", font=("Segoe UI", 14))
+            
         self.right_icon.pack(side="left")
 
         self.percent_label = tk.Label(
@@ -864,21 +923,22 @@ class AgentGUI:
 
         # Colored buttons for better visibility
         btn_configs = [
-            ("🎵 Müzikleri Başlat", self.start_music, "#22c55e", "#4ade80"),
-            ("⏹️ Durdur", self.stop_music, "#ef4444", "#f87171"),
-            ("📡 Yayını Başlat", self.start_stream, "#f59e0b", "#fbbf24"),
-            ("📡 Yayını Durdur", self.stop_stream, "#d97706", "#f59e0b"),
-            ("📤 Anons Yükle", self.upload_announcement, "#6366f1", "#818cf8"),
-            ("🌐 Web Panel", self.open_web_panel, "#3b82f6", "#60a5fa"),
+            ("Müzikleri Başlat", self.start_music, "#22c55e", "#4ade80", "play"),
+            ("Durdur", self.stop_music, "#ef4444", "#f87171", "stop"),
+            ("Yayını Başlat", self.start_stream, "#f59e0b", "#fbbf24", "stream"),
+            ("Yayını Durdur", self.stop_stream, "#d97706", "#f59e0b", "stop"),
+            ("Anons Yükle", self.upload_announcement, "#6366f1", "#818cf8", "upload"),
+            ("Web Panel", self.open_web_panel, "#3b82f6", "#60a5fa", "web"),
         ]
 
-        for text, command, bg_color, hover_color in btn_configs:
+        for text, command, bg_color, hover_color, icon_name in btn_configs:
             btn = ModernButton(
                 btn_frame,
                 text=text,
                 command=command,
                 bg_color=bg_color,
                 hover_color=hover_color,
+                icon_name=icon_name
             )
             btn.pack(fill="x", pady=8)
 
