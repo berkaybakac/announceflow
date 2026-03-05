@@ -61,3 +61,5 @@ README.backup.md
 /docs/**
 !/docs/
 !/docs/backlog.md
+agent/VBCABLE_Driver_Pack45/
+agent/VBCABLE_Setup_x64.exe

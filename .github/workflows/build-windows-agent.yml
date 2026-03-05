@@ -41,7 +41,7 @@ jobs:
       - name: Download VB-Cable installer
         working-directory: agent
         run: |
-          $vbcableUrl = "https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack43.zip"
+          $vbcableUrl = "https://download.vb-audio.com/Download_CABLE/VBCABLE_Driver_Pack45.zip"
           Invoke-WebRequest -Uri $vbcableUrl -OutFile vbcable.zip
           Expand-Archive -Path vbcable.zip -DestinationPath vbcable_extract
           Copy-Item "vbcable_extract\VBCABLE_Setup_x64.exe" -Destination "VBCABLE_Setup_x64.exe"
