@@ -26,9 +26,30 @@ STREAM_SENDER_PORT = 5800
 
 # Audio format must match _stream_receiver.py expectations
 _SAMPLE_RATE = 44100
-_BLOCK_SIZE = 4410  # ~100ms at 44100 Hz
+def _env_int(name: str, default: int, minimum: int, maximum: int) -> int:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    if value < minimum:
+        return minimum
+    if value > maximum:
+        return maximum
+    return value
+
+
+_BLOCK_SIZE = _env_int(
+    "ANNOUNCEFLOW_STREAM_BLOCK_SIZE",
+    735,   # ~16ms at 44100 Hz (1470 bytes < 1500 MTU, avoids IP fragmentation)
+    220,   # ~5ms
+    8820,  # ~200ms
+)
 # Prefer stereo first: some Windows/WASAPI setups produce noise on mono-only open.
 _CHANNEL_CANDIDATES = (2, 1)
+_TELEMETRY_INTERVAL_SEC = 10.0
 
 
 def _utc_now() -> str:
@@ -75,11 +96,14 @@ class StreamClient:
 
     # --------------- Attempt Diagnostics ---------------
 
-    def _new_attempt(self, target_host: str, target_port: int) -> str:
+    def _new_attempt(
+        self, target_host: str, target_port: int, correlation_id: Optional[str] = None
+    ) -> str:
         self._attempt_seq += 1
         attempt_id = f"{int(time.time() * 1000)}-{self._attempt_seq}"
         self._attempt = {
             "attempt_id": attempt_id,
+            "correlation_id": correlation_id,
             "started_at": _utc_now(),
             "ended_at": None,
             "success": False,
@@ -199,9 +223,16 @@ class StreamClient:
 
     def _log_event(self, event: str, **data: Any) -> None:
         attempt_id = None
+        correlation_id = None
         if self._attempt:
             attempt_id = self._attempt.get("attempt_id")
-        payload = {"ts": _utc_now(), "event": event, "attempt_id": attempt_id}
+            correlation_id = self._attempt.get("correlation_id")
+        payload = {
+            "ts": _utc_now(),
+            "event": event,
+            "attempt_id": attempt_id,
+            "correlation_id": correlation_id,
+        }
         payload.update(data)
         try:
             stream_logger.info(json.dumps(payload, ensure_ascii=False))
@@ -301,6 +332,7 @@ class StreamClient:
         lines = [
             "=== Stream Attempt Report ===",
             f"attempt_id={snap.get('attempt_id')}",
+            f"correlation_id={snap.get('correlation_id')}",
             f"stage={snap.get('stage')}",
             f"success={snap.get('success')}",
             f"running={snap.get('running')}",
@@ -333,12 +365,15 @@ class StreamClient:
             self._record_failure(error_code, message, stage="external_failure")
             self._finalize_attempt(success=False)
 
-    def start_sender(self, target_host: str, target_port: int) -> bool:
+    def start_sender(
+        self, target_host: str, target_port: int, correlation_id: Optional[str] = None
+    ) -> bool:
         """Start capturing system audio and sending to Pi4 via UDP.
 
         Args:
             target_host: Pi4 IP address or hostname.
             target_port: Port the receiver is listening on.
+            correlation_id: Optional session id shared with server logs.
 
         Returns:
             True if sender started (or was already running), False on error.
@@ -347,7 +382,7 @@ class StreamClient:
             if self._running:
                 return True
 
-            attempt_id = self._new_attempt(target_host, target_port)
+            attempt_id = self._new_attempt(target_host, target_port, correlation_id)
             self._mark_stage("host_resolve_start")
 
             # Resolve host before starting capture thread.
@@ -557,12 +592,26 @@ class StreamClient:
                                 capture_device, "name", None
                             )
                         self._mark_stage("recorder_open_ok", channels=channels)
+                        _pkt_bytes = _BLOCK_SIZE * 1 * 2  # mono * 16-bit
                         logger.info(
-                            "StreamClient: capture loop running (target=%s:%d, channels=%d)",
+                            "StreamClient: capture started "
+                            "speaker=%s capture_device=%s "
+                            "rate=%d channels=%d(capture)->1(mono) "
+                            "block=%d frames (%dms, %d bytes/pkt, %s MTU) "
+                            "target=%s:%d",
+                            getattr(speaker, "name", "?"),
+                            getattr(capture_device, "name", "?"),
+                            _SAMPLE_RATE,
+                            channels,
+                            _BLOCK_SIZE,
+                            int(_BLOCK_SIZE * 1000 / _SAMPLE_RATE),
+                            _pkt_bytes,
+                            "under" if _pkt_bytes <= 1472 else "OVER",
                             host,
                             port,
-                            channels,
                         )
+                        last_telemetry_mono = time.monotonic()
+                        last_telemetry_packets = 0
                         while self._running:
                             # soundcard returns float32 in [-1.0, 1.0]
                             data = recorder.record(numframes=_BLOCK_SIZE)
@@ -596,6 +645,30 @@ class StreamClient:
                                 self._attempt["last_packet_at"] = now
                                 if self._attempt["packet_count"] == 25:
                                     self._mark_stage("steady_capture")
+                                now_mono = time.monotonic()
+                                elapsed = now_mono - last_telemetry_mono
+                                if elapsed >= _TELEMETRY_INTERVAL_SEC:
+                                    total_packets = int(self._attempt["packet_count"])
+                                    delta_packets = max(
+                                        0, total_packets - last_telemetry_packets
+                                    )
+                                    packets_per_sec = (
+                                        round(delta_packets / elapsed, 2)
+                                        if elapsed > 0
+                                        else 0.0
+                                    )
+                                    self._log_event(
+                                        "capture_telemetry",
+                                        packet_count=total_packets,
+                                        delta_packets=delta_packets,
+                                        interval_seconds=round(elapsed, 3),
+                                        packets_per_sec=packets_per_sec,
+                                        channels=channels,
+                                        sample_rate=_SAMPLE_RATE,
+                                        block_size=_BLOCK_SIZE,
+                                    )
+                                    last_telemetry_mono = now_mono
+                                    last_telemetry_packets = total_packets
                     # Recorder block exited gracefully.
                     break
                 except Exception as open_exc:
