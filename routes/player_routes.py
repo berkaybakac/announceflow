@@ -207,9 +207,11 @@ def api_volume():
         return _json_error("Volume 0-100 arasında olmalı", 400)
 
     player = get_player()
+    prev_volume = player.get_volume()
     success = player.set_volume(volume)
     db.update_playback_state(volume=volume)
-    log_web("volume", {"volume": volume})
+    if prev_volume != volume:
+        log_web("volume", {"volume": volume})
 
     return _json_success({"success": success, "volume": volume})
 
