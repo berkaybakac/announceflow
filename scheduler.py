@@ -79,6 +79,7 @@ class Scheduler:
         self._last_reconcile_monotonic: float = 0.0
         self._last_policy_fingerprint: Optional[str] = None
         self._last_stream_silence_active: bool = False
+        self._stream_policy_bootstrapped: bool = False
         self._stream_resume_worker_lock = threading.Lock()
         self._stream_resume_worker_in_progress = False
 
@@ -515,11 +516,17 @@ class Scheduler:
             stream_service.force_stop_by_policy()
 
         silence_ended = self._last_stream_silence_active and not silence_active
-        sender_alive = stream_service.policy_sender_alive()
-        if should_resume_stream(silence_ended, sender_alive):
+        bootstrap_resume = (
+            not self._stream_policy_bootstrapped
+            and not silence_active
+            and stream_status.get("state") == "stopped_by_policy"
+        )
+        should_try_resume = silence_ended or bootstrap_resume
+        if should_try_resume and stream_status.get("state") == "stopped_by_policy":
             stream_service.resume_after_policy()
 
         self._last_stream_silence_active = silence_active
+        self._stream_policy_bootstrapped = True
 
     def _resume_stream_after_announcement_worker(self) -> None:
         """Resume stream after announcement playback completes."""

@@ -1,6 +1,6 @@
 """Phase 4 stream policy and runtime behavior tests."""
 
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -159,6 +159,47 @@ def test_resume_after_policy_reuses_existing_correlation_id(mock_manager, mock_p
     assert mock_manager.start_receiver.call_args_list[-1].kwargs == {
         "correlation_id": "cid-policy-1"
     }
+
+
+def test_policy_sender_alive_fallback_for_stopped_by_policy_context(
+    mock_manager, mock_player
+):
+    svc = _make_service(mock_manager, mock_player)
+    svc.start(correlation_id="cid-policy-fallback")
+    svc.force_stop_by_policy()
+
+    # Simulate drift where arm flag was dropped while policy-stop context remains.
+    svc._policy_resume_armed = False
+    svc._user_stopped = False
+
+    assert svc.policy_sender_alive() is True
+
+
+def test_resume_after_policy_logs_skip_reason_when_user_stopped(
+    mock_manager, mock_player
+):
+    svc = _make_service(mock_manager, mock_player)
+    svc.start(correlation_id="cid-policy-skip")
+    svc.force_stop_by_policy()
+
+    svc._policy_resume_armed = False
+    svc._user_stopped = True
+
+    with patch("services.stream_service.log_system") as mock_log_system:
+        result = svc.resume_after_policy()
+
+    assert result["success"] is True
+    assert result["status"]["state"] == "stopped_by_policy"
+    skip_calls = [
+        call
+        for call in mock_log_system.call_args_list
+        if call.args and call.args[0] == "stream_resume_skipped"
+    ]
+    assert len(skip_calls) == 1
+    payload = skip_calls[0].args[1]
+    assert payload["source"] == "policy_end"
+    assert payload["reason"] == "user_stopped"
+    assert payload["correlation_id"] == "cid-policy-skip"
 
 
 def test_resume_after_announcement_when_sender_dead(mock_manager, mock_player):
