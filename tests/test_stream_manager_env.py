@@ -1,7 +1,9 @@
 """StreamManager unit tests for correlation-id environment forwarding."""
 
+import threading
 import subprocess
 import time
+from unittest.mock import patch
 
 import pytest
 
@@ -43,6 +45,17 @@ class _TimeoutProc(_AliveProc):
     def kill(self):
         self.killed = True
         self._terminated = True
+
+
+class _DeadProc:
+    """Simulates a receiver process that exits immediately."""
+
+    def __init__(self, returncode=1):
+        self.pid = 9898
+        self.returncode = returncode
+
+    def poll(self):
+        return self.returncode
 
 
 @pytest.fixture
@@ -102,3 +115,70 @@ def test_stop_receiver_forces_kill_on_timeout(monkeypatch, fake_popen_timeout):
     while not fake_popen_timeout["proc"].killed and time.monotonic() < deadline:
         time.sleep(0.05)
     assert fake_popen_timeout["proc"].killed is True
+
+
+def test_start_receiver_concurrent_calls_spawn_once(monkeypatch):
+    proc = _AliveProc()
+    popen_calls = {"count": 0}
+    first_call_entered = threading.Event()
+    release_first_call = threading.Event()
+
+    def _fake_popen(cmd, stdout=None, stderr=None, env=None):
+        popen_calls["count"] += 1
+        first_call_entered.set()
+        release_first_call.wait(timeout=1)
+        return proc
+
+    monkeypatch.setattr("stream_manager.time.sleep", lambda _x: None)
+    monkeypatch.setattr("stream_manager.subprocess.Popen", _fake_popen)
+
+    mgr = StreamManager(port=5800)
+    results = []
+
+    t1 = threading.Thread(target=lambda: results.append(mgr.start_receiver()))
+    t2 = threading.Thread(target=lambda: results.append(mgr.start_receiver()))
+    t1.start()
+    assert first_call_entered.wait(timeout=1) is True
+    t2.start()
+    release_first_call.set()
+    t1.join(timeout=1)
+    t2.join(timeout=1)
+
+    assert sorted(results) == [True, True]
+    assert popen_calls["count"] == 1
+
+
+def test_start_failure_counter_warns_on_third_and_resets_on_success(monkeypatch):
+    outcomes = [
+        _DeadProc(11), _DeadProc(11),  # start #1 fails
+        _DeadProc(12), _DeadProc(12),  # start #2 fails
+        _DeadProc(13), _DeadProc(13),  # start #3 fails -> threshold warn
+        _AliveProc(),                   # start #4 succeeds
+    ]
+    popen_calls = {"count": 0}
+
+    def _fake_popen(cmd, stdout=None, stderr=None, env=None):
+        popen_calls["count"] += 1
+        return outcomes.pop(0)
+
+    monkeypatch.setattr("stream_manager.time.sleep", lambda _x: None)
+    monkeypatch.setattr("stream_manager.subprocess.Popen", _fake_popen)
+
+    mgr = StreamManager(port=5800)
+    with patch("stream_manager.logger.warning") as mock_warn:
+        assert mgr.start_receiver() is False
+        assert mgr.start_receiver() is False
+        assert mgr.start_receiver() is False
+
+        assert mgr._consecutive_start_failures == 3
+        threshold_calls = [
+            c
+            for c in mock_warn.call_args_list
+            if c.args and "consecutive start failures" in c.args[0]
+        ]
+        assert len(threshold_calls) == 1
+
+        assert mgr.start_receiver() is True
+        assert mgr._consecutive_start_failures == 0
+
+    assert popen_calls["count"] == 7
