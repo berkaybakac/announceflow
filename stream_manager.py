@@ -20,6 +20,10 @@ from typing import Optional
 logger = logging.getLogger(__name__)
 
 STREAM_RECEIVER_PORT = 5800
+STOP_QUICK_WAIT = 0.3
+STOP_BG_GRACE_SECONDS = 3
+STOP_KILL_WAIT_SECONDS = 1
+START_RETRY_DELAY = 0.25
 
 
 class StreamManager:
@@ -59,13 +63,29 @@ class StreamManager:
                 # Brief health check: catch immediate death (port conflict, script error)
                 time.sleep(0.05)
                 if self._process.poll() is not None:
-                    logger.error(
-                        "StreamManager: receiver died immediately (exit=%d, correlation_id=%s)",
-                        self._process.returncode,
+                    exit_code = self._process.returncode
+                    logger.warning(
+                        "StreamManager: receiver died immediately (exit=%d, correlation_id=%s), retrying once after %.0fms",
+                        exit_code,
                         correlation_id or "-",
+                        START_RETRY_DELAY * 1000,
                     )
-                    self._process = None
-                    return False
+                    time.sleep(START_RETRY_DELAY)
+                    self._process = subprocess.Popen(
+                        [sys.executable, receiver_script, str(self._port)],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                        env=child_env,
+                    )
+                    time.sleep(0.05)
+                    if self._process.poll() is not None:
+                        logger.error(
+                            "StreamManager: receiver died on retry (exit=%d, correlation_id=%s)",
+                            self._process.returncode,
+                            correlation_id or "-",
+                        )
+                        self._process = None
+                        return False
                 logger.info(
                     "StreamManager: receiver started (pid=%d, port=%d, correlation_id=%s)",
                     self._process.pid,
@@ -81,26 +101,54 @@ class StreamManager:
     def stop_receiver(self) -> bool:
         """Stop the stream receiver process.
 
+        Sends SIGTERM and waits briefly. If the process hasn't exited yet,
+        a background thread handles the remaining grace period + SIGKILL,
+        so the caller (HTTP handler) returns quickly.
+
         Returns:
             True if receiver stopped (or was already stopped), False on error.
         """
         with self._lock:
             if not self._is_alive_unlocked():
                 return True
+            proc = self._process
+            self._process = None
+
+        try:
+            proc.terminate()
             try:
-                self._process.terminate()
-                try:
-                    self._process.wait(timeout=3)
-                except subprocess.TimeoutExpired:
-                    self._process.kill()
-                    self._process.wait(timeout=1)
-                logger.info("StreamManager: receiver stopped")
-                return True
-            except Exception as exc:
-                logger.error("StreamManager: error stopping receiver: %s", exc)
-                return False
-            finally:
-                self._process = None
+                proc.wait(timeout=STOP_QUICK_WAIT)
+                logger.info("StreamManager: receiver stopped (quick)")
+            except subprocess.TimeoutExpired:
+                logger.info(
+                    "StreamManager: receiver still alive after %.1fs, background cleanup started",
+                    STOP_QUICK_WAIT,
+                )
+                t = threading.Thread(
+                    target=self._background_kill, args=(proc,), daemon=True
+                )
+                t.start()
+            return True
+        except Exception as exc:
+            logger.error("StreamManager: error stopping receiver: %s", exc)
+            return False
+
+    @staticmethod
+    def _background_kill(proc: subprocess.Popen):
+        """Wait for process to exit gracefully, then SIGKILL if needed."""
+        try:
+            proc.wait(timeout=STOP_BG_GRACE_SECONDS)
+            logger.info("StreamManager: receiver stopped (background grace)")
+        except subprocess.TimeoutExpired:
+            logger.warning(
+                "StreamManager: receiver did not exit in %.1fs, forcing kill",
+                STOP_BG_GRACE_SECONDS,
+            )
+            proc.kill()
+            try:
+                proc.wait(timeout=STOP_KILL_WAIT_SECONDS)
+            except subprocess.TimeoutExpired:
+                logger.error("StreamManager: receiver did not exit after SIGKILL")
 
     def is_alive(self) -> bool:
         """Check if the receiver process is currently running.

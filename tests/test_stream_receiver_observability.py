@@ -65,3 +65,38 @@ def test_process_ffmpeg_line_updates_counters():
     assert counters["first_output_at"] is not None
     assert counters["first_overrun_at"] is not None
     assert counters["last_overrun_at"] is not None
+
+
+def test_process_ffmpeg_line_emits_first_input_output_events(monkeypatch):
+    counters = _new_counters()
+    buf = io.StringIO()
+    emitted = []
+
+    def _capture(event, data):
+        emitted.append((event, data))
+
+    monkeypatch.setattr(receiver, "_safe_log_system", _capture)
+
+    receiver._process_ffmpeg_line(
+        "Input #0, s16le, from 'udp://0.0.0.0:5800':",
+        buf,
+        counters,
+        correlation_id="cid-1",
+        port=5800,
+        alsa_device="plughw:2,0",
+    )
+    receiver._process_ffmpeg_line(
+        "Output #0, alsa, to 'plughw:2,0':",
+        buf,
+        counters,
+        correlation_id="cid-1",
+        port=5800,
+        alsa_device="plughw:2,0",
+    )
+
+    assert [name for name, _ in emitted] == [
+        "stream_receiver_first_input",
+        "stream_receiver_first_output",
+    ]
+    assert emitted[0][1]["correlation_id"] == "cid-1"
+    assert emitted[1][1]["correlation_id"] == "cid-1"

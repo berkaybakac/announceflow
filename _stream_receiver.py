@@ -201,7 +201,15 @@ def _parse_extra_ffmpeg_args() -> list[str]:
         return []
 
 
-def _process_ffmpeg_line(line: str, log_file, counters: Dict[str, Any]) -> None:
+def _process_ffmpeg_line(
+    line: str,
+    log_file,
+    counters: Dict[str, Any],
+    *,
+    correlation_id: str = "",
+    port: Optional[int] = None,
+    alsa_device: str = "",
+) -> None:
     text = (line or "").strip()
     if not text:
         return
@@ -213,8 +221,28 @@ def _process_ffmpeg_line(line: str, log_file, counters: Dict[str, Any]) -> None:
     lower = text.lower()
     if counters.get("first_input_at") is None and "input #0" in lower:
         counters["first_input_at"] = event_ts
+        if correlation_id:
+            _safe_log_system(
+                "stream_receiver_first_input",
+                {
+                    "correlation_id": correlation_id,
+                    "port": port,
+                    "alsa_device": alsa_device,
+                    "at": event_ts,
+                },
+            )
     if counters.get("first_output_at") is None and "output #0" in lower:
         counters["first_output_at"] = event_ts
+        if correlation_id:
+            _safe_log_system(
+                "stream_receiver_first_output",
+                {
+                    "correlation_id": correlation_id,
+                    "port": port,
+                    "alsa_device": alsa_device,
+                    "at": event_ts,
+                },
+            )
 
     if "circular buffer overrun" in lower:
         counters["udp_overrun"] += 1
@@ -231,23 +259,32 @@ def _process_ffmpeg_line(line: str, log_file, counters: Dict[str, Any]) -> None:
         counters["connection_errors"] += 1
 
 
-def _drain_ffmpeg_stderr(pipe, log_file, counters: Dict[str, Any]) -> None:
+def _drain_ffmpeg_stderr(
+    pipe,
+    log_file,
+    counters: Dict[str, Any],
+    *,
+    correlation_id: str = "",
+    port: Optional[int] = None,
+    alsa_device: str = "",
+) -> None:
     if pipe is None:
         return
 
-    carry = ""
     try:
-        while True:
-            chunk = pipe.read(1024)
+        for chunk in iter(pipe.readline, ""):
             if not chunk:
                 break
-            carry += chunk.replace("\r", "\n")
-            while "\n" in carry:
-                line, carry = carry.split("\n", 1)
-                _process_ffmpeg_line(line, log_file, counters)
-
-        if carry:
-            _process_ffmpeg_line(carry, log_file, counters)
+            normalized = chunk.replace("\r", "\n")
+            for line in normalized.splitlines():
+                _process_ffmpeg_line(
+                    line,
+                    log_file,
+                    counters,
+                    correlation_id=correlation_id,
+                    port=port,
+                    alsa_device=alsa_device,
+                )
     except Exception as exc:
         log_file.write(f"{_local_log_ts()} [receiver] stderr_drain_error={exc}\n")
         log_file.flush()
@@ -341,6 +378,11 @@ def main():
     drain_thread = threading.Thread(
         target=_drain_ffmpeg_stderr,
         args=(proc.stderr, stderr_log, counters),
+        kwargs={
+            "correlation_id": correlation_id,
+            "port": port,
+            "alsa_device": alsa_device,
+        },
         daemon=True,
     )
     drain_thread.start()
@@ -361,16 +403,20 @@ def main():
     signal.signal(signal.SIGINT, _handle_signal)
 
     return_code: Optional[int] = None
+    stderr_drain_timeout = False
     try:
         proc.wait()
         return_code = proc.returncode
     finally:
-        try:
-            if proc.stderr:
-                proc.stderr.close()
-        except Exception:
-            pass
-        drain_thread.join(timeout=2)
+        # Keep this short to avoid manager-side forced kill before summary logging.
+        drain_thread.join(timeout=0.5)
+        stderr_drain_timeout = drain_thread.is_alive()
+        if stderr_drain_timeout:
+            stderr_log.write(
+                f"{_local_log_ts()} [receiver] stderr_drain_timeout=1 "
+                f"correlation_id={correlation_id}\n"
+            )
+            stderr_log.flush()
 
         duration_seconds = round(time.monotonic() - started_mono, 3)
         summary = {
@@ -388,6 +434,7 @@ def main():
             "last_overrun_at": counters["last_overrun_at"],
             "duration_seconds": duration_seconds,
             "return_code": return_code,
+            "stderr_drain_timeout": stderr_drain_timeout,
             "ended_at": _utc_iso_ms(),
         }
 
@@ -397,12 +444,21 @@ def main():
             f"udp_overrun={counters['udp_overrun']} demux_errors={counters['demux_errors']} "
             f"immediate_exit={counters['immediate_exit']} "
             f"audio_device_errors={counters['audio_device_errors']} "
-            f"connection_errors={counters['connection_errors']}\n"
+            f"connection_errors={counters['connection_errors']} "
+            f"stderr_drain_timeout={int(stderr_drain_timeout)}\n"
         )
         stderr_log.flush()
-        stderr_log.close()
 
         _safe_log_system("stream_receiver_summary", summary)
+
+        if stderr_drain_timeout:
+            _safe_log_error(
+                "stream_receiver_stderr_drain_timeout",
+                {
+                    "correlation_id": correlation_id,
+                    "duration_seconds": duration_seconds,
+                },
+            )
 
         if counters["udp_overrun"] > 0:
             _safe_log_error(
@@ -422,6 +478,16 @@ def main():
                     "return_code": return_code,
                 },
             )
+
+        try:
+            if proc.stderr:
+                proc.stderr.close()
+        except Exception:
+            pass
+        try:
+            stderr_log.close()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
