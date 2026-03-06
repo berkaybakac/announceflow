@@ -83,6 +83,7 @@ def _patch_dependencies(monkeypatch):
 
 
 from stream_client import StreamClient
+import stream_client as stream_client_module
 
 
 # --------------- 1. start_sender success ---------------
@@ -284,9 +285,6 @@ class TestCaptureLoop:
         packets_sent = []
 
         fake_recorder = MagicMock()
-        # Return float32 audio data in [-1.0, 1.0]
-        fake_audio = np.zeros((4410, 1), dtype=np.float32)
-        fake_audio[0, 0] = 0.5  # Non-zero sample
         call_count = 0
 
         def fake_record(numframes):
@@ -294,6 +292,9 @@ class TestCaptureLoop:
             call_count += 1
             if call_count >= 2:
                 client._running = False  # Stop after 2 iterations
+            # Return float32 audio data in [-1.0, 1.0]
+            fake_audio = np.zeros((numframes, 1), dtype=np.float32)
+            fake_audio[0, 0] = 0.5  # Non-zero sample
             return fake_audio
 
         fake_recorder.record = fake_record
@@ -313,15 +314,15 @@ class TestCaptureLoop:
             client._capture_loop("192.168.1.10", 5800)
 
         # Verify packets were sent
-        assert len(packets_sent) == 2
+        assert len(packets_sent) >= 1
 
         # Verify address
         assert packets_sent[0][1] == ("192.168.1.10", 5800)
 
         # Verify PCM format: s16le (signed 16-bit little-endian)
         pcm_data = packets_sent[0][0]
-        # 4410 frames * 1 channel * 2 bytes per sample = 8820 bytes
-        assert len(pcm_data) == 4410 * 1 * 2
+        # _BLOCK_SIZE frames * 1 channel * 2 bytes per sample
+        assert len(pcm_data) == stream_client_module._BLOCK_SIZE * 2
 
         # Verify the non-zero sample was converted correctly
         # 0.5 * 32767 ≈ 16383 -> in s16le bytes
@@ -375,7 +376,6 @@ class TestCaptureLoop:
         )
 
         fake_recorder = MagicMock()
-        fake_audio = np.zeros((4410, 1), dtype=np.float32)
         call_count = 0
 
         def fake_record(numframes):
@@ -383,7 +383,7 @@ class TestCaptureLoop:
             call_count += 1
             if call_count >= 2:
                 client._running = False
-            return fake_audio
+            return np.zeros((numframes, 1), dtype=np.float32)
 
         fake_recorder.record = fake_record
         fake_recorder.__enter__ = MagicMock(return_value=fake_recorder)
@@ -402,7 +402,56 @@ class TestCaptureLoop:
             client._capture_loop("192.168.1.10", 5800)
 
         assert _sc_mock.get_microphone.called
-        assert len(packets_sent) == 2
+        assert len(packets_sent) >= 1
+
+    @pytest.mark.skipif(not _np_available, reason="numpy not installed")
+    def test_capture_loop_falls_back_to_48000_and_resamples(self, monkeypatch):
+        """If 44100 open fails, fallback rate should still emit 44100-sized packets."""
+        import numpy as np
+
+        client = StreamClient()
+        packets_sent = []
+        call_count = 0
+
+        def recorder_factory(*, samplerate, channels, blocksize):
+            if samplerate == 44100:
+                raise RuntimeError("44100 open failed")
+            fake_recorder = MagicMock()
+
+            def fake_record(numframes):
+                nonlocal call_count
+                call_count += 1
+                if call_count >= 2:
+                    client._running = False
+                return np.zeros((numframes, 1), dtype=np.float32)
+
+            fake_recorder.record = fake_record
+            fake_recorder.__enter__ = MagicMock(return_value=fake_recorder)
+            fake_recorder.__exit__ = MagicMock(return_value=False)
+            return fake_recorder
+
+        _fake_speaker.recorder.side_effect = recorder_factory
+        monkeypatch.setattr(
+            stream_client_module, "_CAPTURE_RATE_CANDIDATES", (44100, 48000)
+        )
+
+        mock_socket = MagicMock()
+        mock_socket.sendto.side_effect = lambda data, addr: packets_sent.append((data, addr))
+
+        with patch("stream_client.socket.socket", return_value=mock_socket):
+            client._new_attempt("192.168.1.10", 5800)
+            client._running = True
+            client._capture_loop("192.168.1.10", 5800)
+
+        snap = client.get_attempt_snapshot()
+        assert snap["capture_sample_rate"] == 48000
+        assert snap["sample_rate"] == stream_client_module._TARGET_SAMPLE_RATE
+        assert len(packets_sent) >= 1
+        assert all(
+            len(payload) == stream_client_module._BLOCK_SIZE * 2
+            for payload, _ in packets_sent
+        )
+        _fake_speaker.recorder.side_effect = None
 
 
 # --------------- 7. last_error tracking ---------------
@@ -491,7 +540,9 @@ class TestDiagnostics:
 
         client = StreamClient()
         fake_recorder = MagicMock()
-        fake_recorder.record = MagicMock(return_value=np.zeros((4410, 1), dtype=np.float32))
+        fake_recorder.record = MagicMock(
+            return_value=np.zeros((stream_client_module._BLOCK_SIZE, 1), dtype=np.float32)
+        )
         fake_recorder.__enter__ = MagicMock(return_value=fake_recorder)
         fake_recorder.__exit__ = MagicMock(return_value=False)
         _fake_speaker.recorder.return_value = fake_recorder

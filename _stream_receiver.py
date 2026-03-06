@@ -219,6 +219,20 @@ def _process_ffmpeg_line(
     log_file.flush()
 
     lower = text.lower()
+    repeat_match = re.search(r"last message repeated\s+(\d+)\s+times", lower)
+    if repeat_match:
+        repeated_count = int(repeat_match.group(1))
+        repeat_context = counters.get("repeat_context")
+        if repeat_context == "udp_overrun":
+            counters["udp_overrun"] += repeated_count
+            counters["last_overrun_at"] = event_ts
+        elif repeat_context == "alsa_xrun":
+            counters["alsa_xrun"] += repeated_count
+            counters["last_xrun_at"] = event_ts
+        return
+
+    counters["repeat_context"] = None
+
     if counters.get("first_input_at") is None and "input #0" in lower:
         counters["first_input_at"] = event_ts
         if correlation_id:
@@ -249,6 +263,13 @@ def _process_ffmpeg_line(
         counters["last_overrun_at"] = event_ts
         if counters.get("first_overrun_at") is None:
             counters["first_overrun_at"] = event_ts
+        counters["repeat_context"] = "udp_overrun"
+    if "alsa buffer xrun" in lower:
+        counters["alsa_xrun"] += 1
+        counters["last_xrun_at"] = event_ts
+        if counters.get("first_xrun_at") is None:
+            counters["first_xrun_at"] = event_ts
+        counters["repeat_context"] = "alsa_xrun"
     if "error during demuxing" in lower:
         counters["demux_errors"] += 1
     if "immediate exit requested" in lower:
@@ -337,6 +358,7 @@ def main():
 
     counters: Dict[str, Any] = {
         "udp_overrun": 0,
+        "alsa_xrun": 0,
         "demux_errors": 0,
         "immediate_exit": 0,
         "audio_device_errors": 0,
@@ -345,6 +367,9 @@ def main():
         "first_output_at": None,
         "first_overrun_at": None,
         "last_overrun_at": None,
+        "first_xrun_at": None,
+        "last_xrun_at": None,
+        "repeat_context": None,
     }
 
     stderr_log.write(
@@ -424,6 +449,7 @@ def main():
             "port": port,
             "alsa_device": alsa_device,
             "udp_overrun": counters["udp_overrun"],
+            "alsa_xrun": counters["alsa_xrun"],
             "demux_errors": counters["demux_errors"],
             "immediate_exit": counters["immediate_exit"],
             "audio_device_errors": counters["audio_device_errors"],
@@ -432,6 +458,8 @@ def main():
             "first_output_at": counters["first_output_at"],
             "first_overrun_at": counters["first_overrun_at"],
             "last_overrun_at": counters["last_overrun_at"],
+            "first_xrun_at": counters["first_xrun_at"],
+            "last_xrun_at": counters["last_xrun_at"],
             "duration_seconds": duration_seconds,
             "return_code": return_code,
             "stderr_drain_timeout": stderr_drain_timeout,
@@ -441,7 +469,8 @@ def main():
         stderr_log.write(
             f"{_local_log_ts()} [receiver] summary correlation_id={correlation_id} "
             f"return_code={return_code} duration_seconds={duration_seconds} "
-            f"udp_overrun={counters['udp_overrun']} demux_errors={counters['demux_errors']} "
+            f"udp_overrun={counters['udp_overrun']} alsa_xrun={counters['alsa_xrun']} "
+            f"demux_errors={counters['demux_errors']} "
             f"immediate_exit={counters['immediate_exit']} "
             f"audio_device_errors={counters['audio_device_errors']} "
             f"connection_errors={counters['connection_errors']} "
@@ -466,6 +495,16 @@ def main():
                 {
                     "correlation_id": correlation_id,
                     "overrun_count": counters["udp_overrun"],
+                    "duration_seconds": duration_seconds,
+                },
+            )
+
+        if counters["alsa_xrun"] > 0:
+            _safe_log_error(
+                "stream_receiver_alsa_xrun",
+                {
+                    "correlation_id": correlation_id,
+                    "xrun_count": counters["alsa_xrun"],
                     "duration_seconds": duration_seconds,
                 },
             )

@@ -8,6 +8,7 @@ import _stream_receiver as receiver
 def _new_counters():
     return {
         "udp_overrun": 0,
+        "alsa_xrun": 0,
         "demux_errors": 0,
         "immediate_exit": 0,
         "audio_device_errors": 0,
@@ -16,6 +17,9 @@ def _new_counters():
         "first_output_at": None,
         "first_overrun_at": None,
         "last_overrun_at": None,
+        "first_xrun_at": None,
+        "last_xrun_at": None,
+        "repeat_context": None,
     }
 
 
@@ -48,6 +52,8 @@ def test_process_ffmpeg_line_updates_counters():
         buf,
         counters,
     )
+    receiver._process_ffmpeg_line("[alsa @ 0x1] ALSA buffer xrun.", buf, counters)
+    receiver._process_ffmpeg_line("Last message repeated 2 times", buf, counters)
     receiver._process_ffmpeg_line(
         "[in#0/s16le @ 0x2] Error during demuxing: Immediate exit requested",
         buf,
@@ -57,6 +63,7 @@ def test_process_ffmpeg_line_updates_counters():
     receiver._process_ffmpeg_line("connection refused", buf, counters)
 
     assert counters["udp_overrun"] == 1
+    assert counters["alsa_xrun"] == 3
     assert counters["demux_errors"] == 1
     assert counters["immediate_exit"] == 1
     assert counters["audio_device_errors"] == 1
@@ -65,6 +72,8 @@ def test_process_ffmpeg_line_updates_counters():
     assert counters["first_output_at"] is not None
     assert counters["first_overrun_at"] is not None
     assert counters["last_overrun_at"] is not None
+    assert counters["first_xrun_at"] is not None
+    assert counters["last_xrun_at"] is not None
 
 
 def test_process_ffmpeg_line_emits_first_input_output_events(monkeypatch):
