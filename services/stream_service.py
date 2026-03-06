@@ -275,6 +275,7 @@ class StreamService:
                 source_before_stream=self._status.source_before_stream,
                 last_error=None,
             )
+            log_system("stream_resumed", {"source": "announcement_end"})
             return {"success": True, "status": self._status.to_dict()}
 
     def force_stop_by_policy(self) -> dict:
@@ -322,6 +323,7 @@ class StreamService:
                 source_before_stream=self._status.source_before_stream,
                 last_error=None,
             )
+            log_system("stream_resumed", {"source": "policy_end"})
             return {"success": True, "status": self._status.to_dict()}
 
     def _restore_playlist(self):

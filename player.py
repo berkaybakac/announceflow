@@ -691,7 +691,9 @@ class AudioPlayer:
     def set_volume(self, volume: int) -> bool:
         """Set volume level (0-100) using logarithmic mapping for natural feel."""
         volume = max(0, min(100, volume))
+        prev_volume = self._volume
         self._volume = volume
+        _volume_changed = prev_volume != volume
 
         if AUDIO_BACKEND == "pygame":
             import pygame
@@ -717,22 +719,24 @@ class AudioPlayer:
                 if volume < 10:
                     # Mute for 0-9%
                     success = self._set_hardware_volume(["mute"])
-                    logger.info(f"Volume set to: {volume}% (muted, below threshold)")
-                    log_volume(
-                        "change", {"ui_volume": volume, "hw_volume": 0, "muted": True}
-                    )
+                    if _volume_changed:
+                        logger.info(f"Volume set to: {volume}% (muted, below threshold)")
+                        log_volume(
+                            "change", {"ui_volume": volume, "hw_volume": 0, "muted": True}
+                        )
                 else:
                     # Calibration: hw = 70 + sqrt((ui-10)/90) * 30
                     # UI 10% → HW 70%, UI 50% → HW 90%, UI 100% → HW 100%
                     hw_volume = int(round(70 + math.sqrt((volume - 10) / 90.0) * 30))
                     success = self._set_hardware_volume([f"{hw_volume}%", "unmute"])
-                    logger.info(
-                        f"Volume set to: {volume}% (HW calibrated: {hw_volume}%)"
-                    )
-                    log_volume(
-                        "change",
-                        {"ui_volume": volume, "hw_volume": hw_volume, "muted": False},
-                    )
+                    if _volume_changed:
+                        logger.info(
+                            f"Volume set to: {volume}% (HW calibrated: {hw_volume}%)"
+                        )
+                        log_volume(
+                            "change",
+                            {"ui_volume": volume, "hw_volume": hw_volume, "muted": False},
+                        )
 
                 if not success:
                     logger.warning("amixer failed for all card/control candidates")

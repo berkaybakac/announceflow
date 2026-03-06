@@ -339,9 +339,6 @@ def get_prayer_times(
     cached = cache.get(cache_key)
     if isinstance(cached, dict):
         logger.debug(f"Using cached prayer times for {city}/{district} ({today})")
-        _log_prayer_event(
-            "cache_hit", {"city": city, "district": district, "date": today}
-        )
         return cached, "cache_fresh"
 
     if allow_network and fetch_weekly_prayer_times(city, district):
