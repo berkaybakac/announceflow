@@ -73,7 +73,15 @@ class StreamService:
         self._active_correlation_id: Optional[str] = None
 
     def _is_policy_sender_alive_unlocked(self) -> bool:
-        return bool(self._policy_resume_armed and not self._user_stopped)
+        if self._user_stopped:
+            return False
+        if self._policy_resume_armed:
+            return True
+        # Fallback: if stream is policy-stopped and we still have a correlation-id,
+        # keep resume eligibility to avoid missing resume due to transient flag drift.
+        return bool(
+            self._status.state == "stopped_by_policy" and self._active_correlation_id
+        )
 
     def start(self, correlation_id: Optional[str] = None) -> dict:
         """Start a stream session (idempotent).
@@ -359,6 +367,8 @@ class StreamService:
                 source_before_stream=self._status.source_before_stream,
                 last_error=None,
             )
+            self._policy_resume_armed = True
+            self._user_stopped = False
             log_system(
                 "stream_force_stopped_by_policy",
                 {"correlation_id": self._active_correlation_id},
@@ -369,8 +379,33 @@ class StreamService:
         """Resume stream when silence policy ends and policy conditions allow it."""
         with self._lock:
             if self._status.state != "stopped_by_policy":
+                log_system(
+                    "stream_resume_skipped",
+                    {
+                        "source": "policy_end",
+                        "reason": "state_not_stopped_by_policy",
+                        "state": self._status.state,
+                        "active": self._status.active,
+                        "policy_resume_armed": self._policy_resume_armed,
+                        "user_stopped": self._user_stopped,
+                        "correlation_id": self._active_correlation_id,
+                    },
+                )
                 return {"success": True, "status": self._status.to_dict()}
             if not self._is_policy_sender_alive_unlocked():
+                reason = "user_stopped" if self._user_stopped else "sender_not_alive"
+                log_system(
+                    "stream_resume_skipped",
+                    {
+                        "source": "policy_end",
+                        "reason": reason,
+                        "state": self._status.state,
+                        "active": self._status.active,
+                        "policy_resume_armed": self._policy_resume_armed,
+                        "user_stopped": self._user_stopped,
+                        "correlation_id": self._active_correlation_id,
+                    },
+                )
                 return {"success": True, "status": self._status.to_dict()}
 
             if self._manager and not self._manager.start_receiver(
@@ -381,6 +416,14 @@ class StreamService:
                     state="error",
                     source_before_stream=self._status.source_before_stream,
                     last_error="receiver_start_failed",
+                )
+                log_error(
+                    "stream_resume_failed",
+                    {
+                        "source": "policy_end",
+                        "reason": "receiver_start_failed",
+                        "correlation_id": self._active_correlation_id,
+                    },
                 )
                 return {"success": False, "status": self._status.to_dict()}
 

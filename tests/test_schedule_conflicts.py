@@ -367,7 +367,7 @@ class SchedulerStreamRuntimeRulesTestCase(unittest.TestCase):
 
         stream_service.resume_after_policy.assert_called_once()
 
-    def test_silence_end_does_not_resume_when_sender_not_alive(self):
+    def test_silence_end_attempts_resume_when_policy_stopped(self):
         stream_service = MagicMock()
         stream_service.status.return_value = {"active": False, "state": "stopped_by_policy"}
         stream_service.policy_sender_alive.return_value = False
@@ -380,7 +380,35 @@ class SchedulerStreamRuntimeRulesTestCase(unittest.TestCase):
         ):
             self.scheduler._apply_stream_runtime_policy({"silence_active": False})
 
-        stream_service.resume_after_policy.assert_not_called()
+        stream_service.resume_after_policy.assert_called_once()
+
+    def test_restart_bootstrap_attempts_resume_when_policy_stopped_and_silence_inactive(self):
+        stream_service = MagicMock()
+        stream_service.status.return_value = {"active": False, "state": "stopped_by_policy"}
+
+        with patch.object(
+            scheduler_module,
+            "get_stream_service",
+            return_value=stream_service,
+        ):
+            self.scheduler._apply_stream_runtime_policy({"silence_active": False})
+
+        stream_service.resume_after_policy.assert_called_once()
+        assert self.scheduler._stream_policy_bootstrapped is True
+
+    def test_restart_bootstrap_does_not_retry_forever_when_state_still_stopped(self):
+        stream_service = MagicMock()
+        stream_service.status.return_value = {"active": False, "state": "stopped_by_policy"}
+
+        with patch.object(
+            scheduler_module,
+            "get_stream_service",
+            return_value=stream_service,
+        ):
+            self.scheduler._apply_stream_runtime_policy({"silence_active": False})
+            self.scheduler._apply_stream_runtime_policy({"silence_active": False})
+
+        stream_service.resume_after_policy.assert_called_once()
 
     def test_resume_worker_single_flight_guard(self):
         self.scheduler._stream_resume_worker_in_progress = True
