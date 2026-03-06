@@ -33,6 +33,24 @@ class StreamManager:
         self._process = None
         self._lock = threading.Lock()
         self._port = port
+        self._consecutive_start_failures = 0
+
+    def _record_start_failure_unlocked(
+        self,
+        *,
+        correlation_id: Optional[str],
+        exit_code: Optional[int] = None,
+    ) -> None:
+        """Track consecutive start failures and emit threshold warnings."""
+        self._consecutive_start_failures += 1
+        fails = self._consecutive_start_failures
+        if fails % 3 == 0:
+            logger.warning(
+                "StreamManager: consecutive start failures=%d (correlation_id=%s, last_exit=%s)",
+                fails,
+                correlation_id or "-",
+                "-" if exit_code is None else exit_code,
+            )
 
     def start_receiver(self, correlation_id: Optional[str] = None) -> bool:
         """Start the stream receiver process.
@@ -84,6 +102,10 @@ class StreamManager:
                             self._process.returncode,
                             correlation_id or "-",
                         )
+                        self._record_start_failure_unlocked(
+                            correlation_id=correlation_id,
+                            exit_code=self._process.returncode,
+                        )
                         self._process = None
                         return False
                 logger.info(
@@ -92,10 +114,12 @@ class StreamManager:
                     self._port,
                     correlation_id or "-",
                 )
+                self._consecutive_start_failures = 0
                 return True
             except (OSError, subprocess.SubprocessError) as exc:
                 logger.error("StreamManager: failed to start receiver: %s", exc)
                 self._process = None
+                self._record_start_failure_unlocked(correlation_id=correlation_id)
                 return False
 
     def stop_receiver(self) -> bool:
