@@ -102,6 +102,7 @@ def main() -> int:
                 "first_input_at": None,
                 "first_output_at": None,
                 "udp_overrun": 0,
+                "alsa_xrun": 0,
                 "demux_errors": 0,
                 "immediate_exit": 0,
                 "duration_seconds": None,
@@ -120,6 +121,7 @@ def main() -> int:
             row["first_input_at"] = _parse_ts(data.get("first_input_at"))
             row["first_output_at"] = _parse_ts(data.get("first_output_at"))
             row["udp_overrun"] = int(data.get("udp_overrun") or 0)
+            row["alsa_xrun"] = int(data.get("alsa_xrun") or 0)
             row["demux_errors"] = int(data.get("demux_errors") or 0)
             row["immediate_exit"] = int(data.get("immediate_exit") or 0)
             duration = data.get("duration_seconds")
@@ -131,6 +133,8 @@ def main() -> int:
             row["first_output_at"] = _parse_ts(data.get("at")) or ts
         elif event == "stream_receiver_udp_overrun":
             row["udp_overrun"] = max(row["udp_overrun"], int(data.get("overrun_count") or 0))
+        elif event == "stream_receiver_alsa_xrun":
+            row["alsa_xrun"] = max(row["alsa_xrun"], int(data.get("xrun_count") or 0))
 
     ordered = sorted(
         rows.values(),
@@ -146,7 +150,7 @@ def main() -> int:
     if args.limit > 0:
         ordered = ordered[: args.limit]
 
-    print("correlation_id | start->rx_start_ms | rx_start->first_input_ms | first_input->first_output_ms | overruns | demux_err | imm_exit | duration_s | rc")
+    print("correlation_id | start->rx_start_ms | rx_start->first_input_ms | first_input->first_output_ms | overruns | alsa_xrun | demux_err | imm_exit | duration_s | rc")
     print("-" * 150)
 
     for r in ordered:
@@ -157,7 +161,8 @@ def main() -> int:
         duration_text = "-" if duration_s is None else f"{duration_s:.3f}"
         print(
             f"{r['correlation_id']} | {_fmt_ms(a)} | {_fmt_ms(b)} | {_fmt_ms(c)} | "
-            f"{int(r.get('udp_overrun') or 0)} | {int(r.get('demux_errors') or 0)} | "
+            f"{int(r.get('udp_overrun') or 0)} | {int(r.get('alsa_xrun') or 0)} | "
+            f"{int(r.get('demux_errors') or 0)} | "
             f"{int(r.get('immediate_exit') or 0)} | {duration_text} | {r.get('return_code')}"
         )
 

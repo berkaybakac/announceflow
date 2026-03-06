@@ -86,6 +86,7 @@ def test_stream_telemetry_report_prints_latency_columns(tmp_path):
                 "first_input_at": "2026-03-05T20:30:00.300Z",
                 "first_output_at": "2026-03-05T20:30:00.450Z",
                 "udp_overrun": 2,
+                "alsa_xrun": 3,
                 "demux_errors": 1,
                 "immediate_exit": 1,
                 "duration_seconds": 12.5,
@@ -103,7 +104,7 @@ def test_stream_telemetry_report_prints_latency_columns(tmp_path):
         "2026-03-05T20:30:00",
     )
     assert proc.returncode == 0
-    assert "cid-1 | 100.0 | 200.0 | 150.0 | 2 | 1 | 1 | 12.500 | 0" in proc.stdout
+    assert "cid-1 | 100.0 | 200.0 | 150.0 | 2 | 3 | 1 | 1 | 12.500 | 0" in proc.stdout
     assert "rows= 1" in proc.stdout
 
 
@@ -125,5 +126,5 @@ def test_stream_telemetry_report_uses_first_input_output_events_without_summary(
         "2026-03-05T20:30:00",
     )
     assert proc.returncode == 0
-    assert "cid-2 | 100.0 | 200.0 | 150.0 | 0 | 0 | 0 | - | None" in proc.stdout
+    assert "cid-2 | 100.0 | 200.0 | 150.0 | 0 | 0 | 0 | 0 | - | None" in proc.stdout
     assert "rows= 1" in proc.stdout

@@ -23,9 +23,9 @@ logger = logging.getLogger(__name__)
 stream_logger = logging.getLogger("agent.stream")
 
 STREAM_SENDER_PORT = 5800
-
 # Audio format must match _stream_receiver.py expectations
-_SAMPLE_RATE = 44100
+_TARGET_SAMPLE_RATE = 44100
+
 def _env_int(name: str, default: int, minimum: int, maximum: int) -> int:
     raw = os.environ.get(name, "").strip()
     if not raw:
@@ -41,12 +41,33 @@ def _env_int(name: str, default: int, minimum: int, maximum: int) -> int:
     return value
 
 
+def _parse_capture_rates() -> tuple[int, ...]:
+    raw = os.environ.get("ANNOUNCEFLOW_STREAM_CAPTURE_RATES", "").strip()
+    if not raw:
+        return (_TARGET_SAMPLE_RATE, 48000)
+    values = []
+    for token in raw.split(","):
+        token = token.strip()
+        if not token:
+            continue
+        try:
+            rate = int(token)
+        except ValueError:
+            continue
+        if 8000 <= rate <= 192000 and rate not in values:
+            values.append(rate)
+    if _TARGET_SAMPLE_RATE not in values:
+        values.insert(0, _TARGET_SAMPLE_RATE)
+    return tuple(values) or (_TARGET_SAMPLE_RATE, 48000)
+
+
 _BLOCK_SIZE = _env_int(
     "ANNOUNCEFLOW_STREAM_BLOCK_SIZE",
     735,   # ~16ms at 44100 Hz (1470 bytes < 1500 MTU, avoids IP fragmentation)
     220,   # ~5ms
     8820,  # ~200ms
 )
+_CAPTURE_RATE_CANDIDATES = _parse_capture_rates()
 # Prefer stereo first: some Windows/WASAPI setups produce noise on mono-only open.
 _CHANNEL_CANDIDATES = (2, 1)
 _TELEMETRY_INTERVAL_SEC = 10.0
@@ -113,7 +134,8 @@ class StreamClient:
             "resolved_host": None,
             "speaker_name": None,
             "capture_device_name": None,
-            "sample_rate": _SAMPLE_RATE,
+            "sample_rate": _TARGET_SAMPLE_RATE,
+            "capture_sample_rate": None,
             "channels": None,
             "packet_count": 0,
             "first_packet_at": None,
@@ -341,6 +363,7 @@ class StreamClient:
             f"speaker={snap.get('speaker_name')}",
             f"capture_device={snap.get('capture_device_name')}",
             f"sample_rate={snap.get('sample_rate')}",
+            f"capture_sample_rate={snap.get('capture_sample_rate')}",
             f"channels={snap.get('channels')}",
             f"packet_count={snap.get('packet_count')}",
             f"first_packet_at={snap.get('first_packet_at')}",
@@ -543,7 +566,9 @@ class StreamClient:
     def _capture_loop(self, host: str, port: int) -> None:
         """Capture system audio via WASAPI loopback and send as UDP packets.
 
-        Audio format: s16le, 44100 Hz, mono — matches _stream_receiver.py.
+        Stream format stays s16le/44100/mono to match receiver expectations.
+        Capture can fallback to alternate device rates (e.g. 48000) and
+        resamples on sender side before UDP packetization.
         """
         sock = None
         sent_any_packet = False
@@ -575,124 +600,183 @@ class StreamClient:
                 return
 
             last_open_exc: Optional[BaseException] = None
-            for channels in _CHANNEL_CANDIDATES:
+            target_packet_bytes = _BLOCK_SIZE * 2  # mono * 16-bit
+            for capture_rate in _CAPTURE_RATE_CANDIDATES:
                 if not self._running:
                     break
-                try:
-                    self._mark_stage("recorder_open_start", channels=channels)
-                    with capture_device.recorder(
-                        samplerate=_SAMPLE_RATE,
-                        channels=channels,
-                        blocksize=_BLOCK_SIZE,
-                    ) as recorder:
-                        if self._attempt:
-                            self._attempt["channels"] = channels
-                            self._attempt["speaker_name"] = speaker.name
-                            self._attempt["capture_device_name"] = getattr(
-                                capture_device, "name", None
-                            )
-                        self._mark_stage("recorder_open_ok", channels=channels)
-                        _pkt_bytes = _BLOCK_SIZE * 1 * 2  # mono * 16-bit
-                        logger.info(
-                            "StreamClient: capture started "
-                            "speaker=%s capture_device=%s "
-                            "rate=%d channels=%d(capture)->1(mono) "
-                            "block=%d frames (%dms, %d bytes/pkt, %s MTU) "
-                            "target=%s:%d",
-                            getattr(speaker, "name", "?"),
-                            getattr(capture_device, "name", "?"),
-                            _SAMPLE_RATE,
-                            channels,
-                            _BLOCK_SIZE,
-                            int(_BLOCK_SIZE * 1000 / _SAMPLE_RATE),
-                            _pkt_bytes,
-                            "under" if _pkt_bytes <= 1472 else "OVER",
-                            host,
-                            port,
+                capture_block_size = max(
+                    1, int(round(_BLOCK_SIZE * capture_rate / _TARGET_SAMPLE_RATE))
+                )
+                for channels in _CHANNEL_CANDIDATES:
+                    if not self._running:
+                        break
+                    try:
+                        self._mark_stage(
+                            "recorder_open_start",
+                            channels=channels,
+                            capture_rate=capture_rate,
                         )
-                        last_telemetry_mono = time.monotonic()
-                        last_telemetry_packets = 0
-                        while self._running:
-                            # soundcard returns float32 in [-1.0, 1.0]
-                            data = recorder.record(numframes=_BLOCK_SIZE)
-                            clean = np.nan_to_num(
-                                data, nan=0.0, posinf=1.0, neginf=-1.0
-                            )
-                            if getattr(clean, "ndim", 1) > 1:
-                                # Downmix stereo/multi-channel to mono.
-                                clean = clean.mean(axis=1)
-                            pcm = np.clip(clean * 32767, -32768, 32767).astype(
-                                np.dtype("<i2")
-                            )
-                            try:
-                                sock.sendto(pcm.tobytes(), (host, port))
-                            except OSError as send_exc:
-                                self._record_failure(
-                                    "udp_send_failed",
-                                    "Failed to send UDP audio packet",
-                                    exc=send_exc,
-                                    stage="udp_send_failed",
-                                )
-                                return
-
-                            now = _utc_now()
-                            sent_any_packet = True
+                        with capture_device.recorder(
+                            samplerate=capture_rate,
+                            channels=channels,
+                            blocksize=capture_block_size,
+                        ) as recorder:
                             if self._attempt:
-                                self._attempt["packet_count"] += 1
-                                if self._attempt["first_packet_at"] is None:
-                                    self._attempt["first_packet_at"] = now
-                                    self._mark_stage("first_packet_send")
-                                self._attempt["last_packet_at"] = now
-                                if self._attempt["packet_count"] == 25:
-                                    self._mark_stage("steady_capture")
-                                now_mono = time.monotonic()
-                                elapsed = now_mono - last_telemetry_mono
-                                if elapsed >= _TELEMETRY_INTERVAL_SEC:
-                                    total_packets = int(self._attempt["packet_count"])
-                                    delta_packets = max(
-                                        0, total_packets - last_telemetry_packets
+                                self._attempt["channels"] = channels
+                                self._attempt["sample_rate"] = _TARGET_SAMPLE_RATE
+                                self._attempt["capture_sample_rate"] = capture_rate
+                                self._attempt["speaker_name"] = speaker.name
+                                self._attempt["capture_device_name"] = getattr(
+                                    capture_device, "name", None
+                                )
+                            self._mark_stage(
+                                "recorder_open_ok",
+                                channels=channels,
+                                capture_rate=capture_rate,
+                            )
+                            logger.info(
+                                "StreamClient: capture started "
+                                "speaker=%s capture_device=%s "
+                                "capture_rate=%d stream_rate=%d channels=%d(capture)->1(mono) "
+                                "block=%d frames (%dms) packet=%d bytes (%s MTU) target=%s:%d",
+                                getattr(speaker, "name", "?"),
+                                getattr(capture_device, "name", "?"),
+                                capture_rate,
+                                _TARGET_SAMPLE_RATE,
+                                channels,
+                                capture_block_size,
+                                int(capture_block_size * 1000 / capture_rate),
+                                target_packet_bytes,
+                                "under" if target_packet_bytes <= 1472 else "OVER",
+                                host,
+                                port,
+                            )
+                            last_telemetry_mono = time.monotonic()
+                            last_telemetry_packets = 0
+                            pending_bytes = b""
+                            while self._running:
+                                # soundcard returns float32 in [-1.0, 1.0]
+                                data = recorder.record(numframes=capture_block_size)
+                                clean = np.nan_to_num(
+                                    data, nan=0.0, posinf=1.0, neginf=-1.0
+                                )
+                                if getattr(clean, "ndim", 1) > 1:
+                                    # Downmix stereo/multi-channel to mono.
+                                    clean = clean.mean(axis=1)
+                                if capture_rate != _TARGET_SAMPLE_RATE:
+                                    output_frames = max(
+                                        1,
+                                        int(
+                                            round(
+                                                len(clean)
+                                                * _TARGET_SAMPLE_RATE
+                                                / capture_rate
+                                            )
+                                        ),
                                     )
-                                    packets_per_sec = (
-                                        round(delta_packets / elapsed, 2)
-                                        if elapsed > 0
-                                        else 0.0
-                                    )
-                                    self._log_event(
-                                        "capture_telemetry",
-                                        packet_count=total_packets,
-                                        delta_packets=delta_packets,
-                                        interval_seconds=round(elapsed, 3),
-                                        packets_per_sec=packets_per_sec,
-                                        channels=channels,
-                                        sample_rate=_SAMPLE_RATE,
-                                        block_size=_BLOCK_SIZE,
-                                    )
-                                    last_telemetry_mono = now_mono
-                                    last_telemetry_packets = total_packets
-                    # Recorder block exited gracefully.
-                    break
-                except Exception as open_exc:
-                    last_open_exc = open_exc
-                    if self._attempt is not None:
-                        self._attempt["open_errors"].append(
-                            {
-                                "ts": _utc_now(),
-                                "channels": channels,
-                                "error_type": open_exc.__class__.__name__,
-                                "error": str(open_exc),
-                            }
+                                    if len(clean) > 1:
+                                        src_x = np.linspace(
+                                            0.0, 1.0, num=len(clean), endpoint=False
+                                        )
+                                        dst_x = np.linspace(
+                                            0.0, 1.0, num=output_frames, endpoint=False
+                                        )
+                                        clean = np.interp(dst_x, src_x, clean).astype(
+                                            np.float32,
+                                            copy=False,
+                                        )
+                                    else:
+                                        clean = np.repeat(clean, output_frames)
+                                pcm = np.clip(clean * 32767, -32768, 32767).astype(
+                                    np.dtype("<i2")
+                                )
+                                pcm_bytes = pcm.tobytes()
+                                pending_bytes += pcm_bytes
+
+                                while (
+                                    self._running
+                                    and len(pending_bytes) >= target_packet_bytes
+                                ):
+                                    packet = pending_bytes[:target_packet_bytes]
+                                    pending_bytes = pending_bytes[target_packet_bytes:]
+                                    try:
+                                        sock.sendto(packet, (host, port))
+                                    except OSError as send_exc:
+                                        self._record_failure(
+                                            "udp_send_failed",
+                                            "Failed to send UDP audio packet",
+                                            exc=send_exc,
+                                            stage="udp_send_failed",
+                                        )
+                                        return
+
+                                    now = _utc_now()
+                                    sent_any_packet = True
+                                    if self._attempt:
+                                        self._attempt["packet_count"] += 1
+                                        if self._attempt["first_packet_at"] is None:
+                                            self._attempt["first_packet_at"] = now
+                                            self._mark_stage("first_packet_send")
+                                        self._attempt["last_packet_at"] = now
+                                        if self._attempt["packet_count"] == 25:
+                                            self._mark_stage("steady_capture")
+                                        now_mono = time.monotonic()
+                                        elapsed = now_mono - last_telemetry_mono
+                                        if elapsed >= _TELEMETRY_INTERVAL_SEC:
+                                            total_packets = int(
+                                                self._attempt["packet_count"]
+                                            )
+                                            delta_packets = max(
+                                                0, total_packets - last_telemetry_packets
+                                            )
+                                            packets_per_sec = (
+                                                round(delta_packets / elapsed, 2)
+                                                if elapsed > 0
+                                                else 0.0
+                                            )
+                                            self._log_event(
+                                                "capture_telemetry",
+                                                packet_count=total_packets,
+                                                delta_packets=delta_packets,
+                                                interval_seconds=round(elapsed, 3),
+                                                packets_per_sec=packets_per_sec,
+                                                channels=channels,
+                                                sample_rate=_TARGET_SAMPLE_RATE,
+                                                capture_sample_rate=capture_rate,
+                                                block_size=_BLOCK_SIZE,
+                                                capture_block_size=capture_block_size,
+                                            )
+                                            last_telemetry_mono = now_mono
+                                            last_telemetry_packets = total_packets
+                        # Recorder block exited gracefully.
+                        break
+                    except Exception as open_exc:
+                        last_open_exc = open_exc
+                        if self._attempt is not None:
+                            self._attempt["open_errors"].append(
+                                {
+                                    "ts": _utc_now(),
+                                    "channels": channels,
+                                    "capture_rate": capture_rate,
+                                    "error_type": open_exc.__class__.__name__,
+                                    "error": str(open_exc),
+                                }
+                            )
+                        logger.warning(
+                            "StreamClient: recorder open failed (capture_rate=%s, channels=%s): %s",
+                            capture_rate,
+                            channels,
+                            open_exc,
                         )
-                    logger.warning(
-                        "StreamClient: recorder open failed (channels=%s): %s",
-                        channels,
-                        open_exc,
-                    )
-                    self._log_event(
-                        "recorder_open_retry",
-                        channels=channels,
-                        error=str(open_exc),
-                    )
-                    continue
+                        self._log_event(
+                            "recorder_open_retry",
+                            capture_rate=capture_rate,
+                            channels=channels,
+                            error=str(open_exc),
+                        )
+                        continue
+                if sent_any_packet:
+                    break
 
             if not sent_any_packet and last_open_exc is not None:
                 self._record_failure(
