@@ -9,11 +9,45 @@ Transport: UDP on configurable port (default 5800)
 
 Usage: python _stream_receiver.py [port] [alsa_device]
 """
+import atexit
 import os
 import re
+import shlex
 import signal
 import subprocess
 import sys
+import threading
+import time
+from datetime import datetime, timezone
+from typing import Any, Dict, Optional
+
+
+def _utc_iso_ms() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace(
+        "+00:00", "Z"
+    )
+
+
+def _local_log_ts() -> str:
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+
+
+def _safe_log_system(event: str, data: dict) -> None:
+    try:
+        from logger import log_system
+
+        log_system(event, data)
+    except Exception:
+        pass
+
+
+def _safe_log_error(event: str, data: dict) -> None:
+    try:
+        from logger import log_error
+
+        log_error(event, data)
+    except Exception:
+        pass
 
 
 def _find_ffmpeg():
@@ -30,6 +64,7 @@ def _resolve_alsa_device():
 
     Priority: CLI arg > ANNOUNCEFLOW_ALSA_DEVICE env > probe candidates.
     """
+
     def _probe_candidate(candidate: str) -> bool:
         """Return True when ALSA device accepts a short raw-silence playback."""
         try:
@@ -75,7 +110,9 @@ def _resolve_alsa_device():
 
         cards = []
         for line in (probe.stdout or "").splitlines():
-            m = re.search(r"card\s+(\d+)\s*:\s*([^\[]+)\[([^\]]+)\]", line, re.IGNORECASE)
+            m = re.search(
+                r"card\s+(\d+)\s*:\s*([^\[]+)\[([^\]]+)\]", line, re.IGNORECASE
+            )
             if not m:
                 continue
             card_idx = m.group(1)
@@ -129,8 +166,7 @@ def _resolve_alsa_device():
 
     # Probe candidates (prefer detected concrete cards; keep default last).
     candidates = _uniq(
-        _detect_preferred_card_candidates()
-        + ["plughw:2,0", "plughw:0,0", "default"]
+        _detect_preferred_card_candidates() + ["plughw:2,0", "plughw:0,0", "default"]
     )
     first_non_default = next((c for c in candidates if c != "default"), None)
 
@@ -145,43 +181,169 @@ def _resolve_alsa_device():
     return "default"
 
 
+def _build_udp_input_url(port: int) -> str:
+    params = ["overrun_nonfatal=1"]
+
+    udp_fifo = os.environ.get("ANNOUNCEFLOW_STREAM_UDP_FIFO", "").strip()
+    if udp_fifo.isdigit() and int(udp_fifo) > 0:
+        params.append(f"fifo_size={udp_fifo}")
+
+    return f"udp://0.0.0.0:{port}?{'&'.join(params)}"
+
+
+def _parse_extra_ffmpeg_args() -> list[str]:
+    raw = os.environ.get("ANNOUNCEFLOW_STREAM_FFMPEG_ARGS", "").strip()
+    if not raw:
+        return []
+    try:
+        return shlex.split(raw)
+    except ValueError:
+        return []
+
+
+def _process_ffmpeg_line(line: str, log_file, counters: Dict[str, Any]) -> None:
+    text = (line or "").strip()
+    if not text:
+        return
+
+    event_ts = _utc_iso_ms()
+    log_file.write(f"{_local_log_ts()} {text}\n")
+    log_file.flush()
+
+    lower = text.lower()
+    if counters.get("first_input_at") is None and "input #0" in lower:
+        counters["first_input_at"] = event_ts
+    if counters.get("first_output_at") is None and "output #0" in lower:
+        counters["first_output_at"] = event_ts
+
+    if "circular buffer overrun" in lower:
+        counters["udp_overrun"] += 1
+        counters["last_overrun_at"] = event_ts
+        if counters.get("first_overrun_at") is None:
+            counters["first_overrun_at"] = event_ts
+    if "error during demuxing" in lower:
+        counters["demux_errors"] += 1
+    if "immediate exit requested" in lower:
+        counters["immediate_exit"] += 1
+    if "cannot open audio device" in lower or "device or resource busy" in lower:
+        counters["audio_device_errors"] += 1
+    if "connection refused" in lower or "timed out" in lower or "network is unreachable" in lower:
+        counters["connection_errors"] += 1
+
+
+def _drain_ffmpeg_stderr(pipe, log_file, counters: Dict[str, Any]) -> None:
+    if pipe is None:
+        return
+
+    carry = ""
+    try:
+        while True:
+            chunk = pipe.read(1024)
+            if not chunk:
+                break
+            carry += chunk.replace("\r", "\n")
+            while "\n" in carry:
+                line, carry = carry.split("\n", 1)
+                _process_ffmpeg_line(line, log_file, counters)
+
+        if carry:
+            _process_ffmpeg_line(carry, log_file, counters)
+    except Exception as exc:
+        log_file.write(f"{_local_log_ts()} [receiver] stderr_drain_error={exc}\n")
+        log_file.flush()
+
+
+def _resolve_correlation_id() -> str:
+    from_env = os.environ.get("ANNOUNCEFLOW_STREAM_CORRELATION_ID", "").strip()
+    if from_env:
+        return from_env
+    return f"local-{os.getpid()}-{int(time.time() * 1000)}"
+
+
 def main():
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 5800
     ffmpeg_bin = _find_ffmpeg()
     alsa_device = _resolve_alsa_device()
+    correlation_id = _resolve_correlation_id()
 
+    udp_input_url = _build_udp_input_url(port)
     cmd = [
         ffmpeg_bin,
+        "-hide_banner",
+        "-nostats",
         "-y",
-        "-f", "s16le",
-        "-ar", "44100",
-        "-ac", "1",
-        "-i", f"udp://0.0.0.0:{port}?overrun_nonfatal=1",
-        "-f", "alsa",
-        alsa_device,
+        "-probesize",
+        "32",
+        "-analyzeduration",
+        "0",
+        "-f",
+        "s16le",
+        "-ar",
+        "44100",
+        "-ac",
+        "1",
+        "-i",
+        udp_input_url,
     ]
+    cmd.extend(_parse_extra_ffmpeg_args())
+    cmd.extend(["-f", "alsa", alsa_device])
 
-    # Log ffmpeg stderr for debugging.
-    # Tests can isolate this via ANNOUNCEFLOW_LOG_DIR.
+    # Log ffmpeg stderr with per-line timestamps for deterministic debugging.
     log_dir = os.environ.get("ANNOUNCEFLOW_LOG_DIR", "").strip()
     if not log_dir:
         log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
     os.makedirs(log_dir, exist_ok=True)
-    stderr_log = open(os.path.join(log_dir, "stream_receiver_ffmpeg.log"), "a")
-    try:
-        stderr_log.write(
-            f"[receiver] resolved_alsa_device={alsa_device} port={port}\n"
-        )
-        stderr_log.flush()
-    except Exception:
-        pass
+
+    log_path = os.path.join(log_dir, "stream_receiver_ffmpeg.log")
+    stderr_log = open(log_path, "a", encoding="utf-8", errors="replace", buffering=1)
+    started_mono = time.monotonic()
+
+    counters: Dict[str, Any] = {
+        "udp_overrun": 0,
+        "demux_errors": 0,
+        "immediate_exit": 0,
+        "audio_device_errors": 0,
+        "connection_errors": 0,
+        "first_input_at": None,
+        "first_output_at": None,
+        "first_overrun_at": None,
+        "last_overrun_at": None,
+    }
+
+    stderr_log.write(
+        f"{_local_log_ts()} [receiver] correlation_id={correlation_id} "
+        f"resolved_alsa_device={alsa_device} port={port} udp_input={udp_input_url}\n"
+    )
+    stderr_log.flush()
+
+    _safe_log_system(
+        "stream_receiver_started",
+        {
+            "correlation_id": correlation_id,
+            "port": port,
+            "alsa_device": alsa_device,
+            "udp_input": udp_input_url,
+            "started_at": _utc_iso_ms(),
+        },
+    )
 
     proc = subprocess.Popen(
         cmd,
         stdout=subprocess.DEVNULL,
-        stderr=stderr_log,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        bufsize=0,
         preexec_fn=os.setsid,
     )
+
+    drain_thread = threading.Thread(
+        target=_drain_ffmpeg_stderr,
+        args=(proc.stderr, stderr_log, counters),
+        daemon=True,
+    )
+    drain_thread.start()
 
     def _cleanup():
         """Kill the entire process group to prevent orphan ffmpeg."""
@@ -190,17 +352,76 @@ def main():
         except (OSError, ProcessLookupError):
             pass
 
-    import atexit
     atexit.register(_cleanup)
 
     def _handle_signal(signum, frame):
         _cleanup()
-        sys.exit(0)
 
     signal.signal(signal.SIGTERM, _handle_signal)
     signal.signal(signal.SIGINT, _handle_signal)
 
-    proc.wait()
+    return_code: Optional[int] = None
+    try:
+        proc.wait()
+        return_code = proc.returncode
+    finally:
+        try:
+            if proc.stderr:
+                proc.stderr.close()
+        except Exception:
+            pass
+        drain_thread.join(timeout=2)
+
+        duration_seconds = round(time.monotonic() - started_mono, 3)
+        summary = {
+            "correlation_id": correlation_id,
+            "port": port,
+            "alsa_device": alsa_device,
+            "udp_overrun": counters["udp_overrun"],
+            "demux_errors": counters["demux_errors"],
+            "immediate_exit": counters["immediate_exit"],
+            "audio_device_errors": counters["audio_device_errors"],
+            "connection_errors": counters["connection_errors"],
+            "first_input_at": counters["first_input_at"],
+            "first_output_at": counters["first_output_at"],
+            "first_overrun_at": counters["first_overrun_at"],
+            "last_overrun_at": counters["last_overrun_at"],
+            "duration_seconds": duration_seconds,
+            "return_code": return_code,
+            "ended_at": _utc_iso_ms(),
+        }
+
+        stderr_log.write(
+            f"{_local_log_ts()} [receiver] summary correlation_id={correlation_id} "
+            f"return_code={return_code} duration_seconds={duration_seconds} "
+            f"udp_overrun={counters['udp_overrun']} demux_errors={counters['demux_errors']} "
+            f"immediate_exit={counters['immediate_exit']} "
+            f"audio_device_errors={counters['audio_device_errors']} "
+            f"connection_errors={counters['connection_errors']}\n"
+        )
+        stderr_log.flush()
+        stderr_log.close()
+
+        _safe_log_system("stream_receiver_summary", summary)
+
+        if counters["udp_overrun"] > 0:
+            _safe_log_error(
+                "stream_receiver_udp_overrun",
+                {
+                    "correlation_id": correlation_id,
+                    "overrun_count": counters["udp_overrun"],
+                    "duration_seconds": duration_seconds,
+                },
+            )
+
+        if return_code not in (None, 0, -15):
+            _safe_log_error(
+                "stream_receiver_exit_nonzero",
+                {
+                    "correlation_id": correlation_id,
+                    "return_code": return_code,
+                },
+            )
 
 
 if __name__ == "__main__":
