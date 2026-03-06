@@ -105,3 +105,25 @@ def test_stream_telemetry_report_prints_latency_columns(tmp_path):
     assert proc.returncode == 0
     assert "cid-1 | 100.0 | 200.0 | 150.0 | 2 | 1 | 1 | 12.500 | 0" in proc.stdout
     assert "rows= 1" in proc.stdout
+
+
+def test_stream_telemetry_report_uses_first_input_output_events_without_summary(tmp_path):
+    events_file = tmp_path / "events.jsonl"
+    rows = [
+        {"ts": "2026-03-05T20:30:00.000Z", "cat": "SYSTEM", "event": "stream_started", "data": {"correlation_id": "cid-2"}},
+        {"ts": "2026-03-05T20:30:00.100Z", "cat": "SYSTEM", "event": "stream_receiver_started", "data": {"correlation_id": "cid-2"}},
+        {"ts": "2026-03-05T20:30:00.300Z", "cat": "SYSTEM", "event": "stream_receiver_first_input", "data": {"correlation_id": "cid-2", "at": "2026-03-05T20:30:00.300Z"}},
+        {"ts": "2026-03-05T20:30:00.450Z", "cat": "SYSTEM", "event": "stream_receiver_first_output", "data": {"correlation_id": "cid-2", "at": "2026-03-05T20:30:00.450Z"}},
+    ]
+    events_file.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+
+    proc = _run_script(
+        "scripts/stream_telemetry_report.py",
+        "--file",
+        str(events_file),
+        "--since",
+        "2026-03-05T20:30:00",
+    )
+    assert proc.returncode == 0
+    assert "cid-2 | 100.0 | 200.0 | 150.0 | 0 | 0 | 0 | - | None" in proc.stdout
+    assert "rows= 1" in proc.stdout

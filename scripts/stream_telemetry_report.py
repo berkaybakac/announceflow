@@ -125,6 +125,10 @@ def main() -> int:
             duration = data.get("duration_seconds")
             row["duration_seconds"] = float(duration) if duration is not None else None
             row["return_code"] = data.get("return_code")
+        elif event == "stream_receiver_first_input":
+            row["first_input_at"] = _parse_ts(data.get("at")) or ts
+        elif event == "stream_receiver_first_output":
+            row["first_output_at"] = _parse_ts(data.get("at")) or ts
         elif event == "stream_receiver_udp_overrun":
             row["udp_overrun"] = max(row["udp_overrun"], int(data.get("overrun_count") or 0))
 
