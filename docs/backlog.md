@@ -7,7 +7,7 @@ Bu dosya V1 disi ama sonraki fazlarda degerli teknik isleri toplar.
 - V1 scope disi her yeni teknik istek bu dosyaya eklenir.
 - V1 sprint icinde backlog item'lari implement edilmez.
 - V1.1 scope disi talepler bu dosyaya eklenir.
-- V1.1 disi her talep once `V1_1_PROGRESS.md` dosyasina notlanir, sonra backlog'a tasinir.
+- Aktif stabilizasyon sorunlari once `STREAM_PHASE_ROADMAP.md` kapsaminda ele alinir; backlog'a ancak scope disina cikarsa tasinir.
 
 ## Kod Denetim Bulgulari (2026-02-27)
 
@@ -174,12 +174,12 @@ Bu dosya V1 disi ama sonraki fazlarda degerli teknik isleri toplar.
 - Durum: `Acik`
 - Release'i Bloklar mi?: `Evet`
 
-### BL-FAZ6-FROZEN-EXE - Frozen Windows EXE gercek ortam dogrulamasi
+### BL-FAZ6-FROZEN-EXE - Frozen Windows EXE cihaz uyumluluk dogrulamasi
 
 - ID: `BL-FAZ6-FROZEN-EXE`
 - Oncelik: `P0`
-- Neden/Risk: CI runner'da Python kurulu; Python'suz temiz Windows ortaminda bundled ffmpeg ile stream sender'in calismasi dogrulanmadi.
-- Kabul Kriteri: Python yuklu olmayan Windows makinede `AnnounceFlowAgent.exe` baslatilir, "Yayini Baslat" ile ffmpeg sender process spawn edilir, en az 10 saniye calisir, "Yayini Durdur" ile durur.
+- Neden/Risk: Farkli Windows 10/11 cihazlarda kurulum, stream baslatma ve ses kalitesi farkli davranabiliyor. Bir cihazda temiz calisan EXE diger cihazda kurulum veya bozuk ses problemi uretebilir.
+- Kabul Kriteri: En az iki farkli Windows 10/11 cihazda `AnnounceFlowAgent.exe` kurulup acilir, stream baslat/durdur akisi calisir, ses kabul edilebilir kalitededir ve belirleyici loglar toplanir.
 - Durum: `Acik`
 - Release'i Bloklar mi?: `Evet`
 
@@ -230,6 +230,24 @@ Bu dosya V1 disi ama sonraki fazlarda degerli teknik isleri toplar.
   - UI katmanindan platform detaylarini tamamen ayirma
 - Etiket: `V1'i bloklamaz`
 
+### BL-STREAM-CTRL-01 - Multi-sender ownership (LWW) arbitration
+
+- ID: `BL-STREAM-CTRL-01`
+- Oncelik: `P1`
+- Konu: Birden fazla sender komut verdiginde deterministic sahiplik ve "son gelen kazanir" davranisi
+- Neden/Risk: Eszamanli start/stop akislarinda sahiplik belirsizligi "ghost stream" ve beklenmeyen geri donus riski olusturur.
+- Icerik:
+  - sender<->Pi kontrol kanali (start/stop/ack) tanimi
+  - aktif owner state + monotonik command sequence takibi
+  - stale owner komutlarini ve stale audio akisinin etkisini engelleme
+  - status/diagnostic yuzeyine owner + last_command alanlari ekleme
+- Kabul Kriteri:
+  - Iki sender art arda start/stop yaptiginda son komut deterministic uygulanir.
+  - Stop/ack eksikliginde bile eski owner stream'i tekrar canlandiramaz.
+  - Race/integration testleri PASS (cift sender senaryolari dahil).
+- Not: Raw PCM + tek yonlu UDP akisinda header/owner bilgisi yok; owner enforcement icin kontrol kanali zorunludur.
+- Etiket: `V1'i bloklamaz`
+
 ### BL-STREAM-POLICY-01 - Recurring schedule skip DB izi
 
 - ID: `BL-STREAM-POLICY-01`
@@ -267,4 +285,36 @@ Bu dosya V1 disi ama sonraki fazlarda degerli teknik isleri toplar.
 - Kabul Kriteri: Tekrar eden `_job` + `_on_done` bloklari tek helper uzerinden calisir; mevcut testler PASS, davranis degismez.
 - Durum: `Acik`
 - Tetik: Faz 6+ yeni callback eklerse pattern netlesir ve refactor hakli olur
+- Etiket: `V1'i bloklamaz`
+
+### BL-SHUFFLE-01 - Playlist shuffle modu
+
+- ID: `BL-SHUFFLE-01`
+- Oncelik: `P2`
+- Konu: Zamanli calma/playlist akisinda karistirma (shuffle) modunu opsiyonel sunmak
+- Neden/Risk: Tekrarlayan sabit sira uzun sureli kullanimda dinleme kalitesini dusurur; manuel operasyon ihtiyaci artar.
+- Icerik:
+  - Playlist olusturma/oynatma akisina `shuffle on/off` parametresi ekleme
+  - Shuffle acikken deterministic test edilebilir sira uretimi
+  - UI'de shuffle durumunun gorunmesi ve degistirilebilmesi
+- Kabul Kriteri:
+  - Kullanici panelden shuffle modunu acip kapatabilir.
+  - Shuffle acikken sira sabit degil, kapaliyken mevcut davranis korunur.
+  - Mevcut playlist/scheduler testlerinde regresyon yok.
+- Etiket: `V1'i bloklamaz`
+
+### BL-CHUNKED-UPLOAD-01 - Parcali yukleme ve resume
+
+- ID: `BL-CHUNKED-UPLOAD-01`
+- Oncelik: `P1`
+- Konu: Buyuk medya dosyalarinda parcali upload ve kesinti sonrasi kaldigi yerden devam
+- Neden/Risk: Tek seferde upload yaklasimi buyuk dosyalarda timeout/yarim kalma riski tasir.
+- Icerik:
+  - Upload session kimligi ve chunk sirasi dogrulamasi
+  - Server tarafinda gecici parca birlestirme akisi
+  - Kesinti sonrasi yeniden baglanip eksik chunk'lari tamamlama
+- Kabul Kriteri:
+  - Buyuk dosyalar parcali yuklenebilir ve tamamlandiginda tek dosya olarak dogru birlesir.
+  - Ag kesintisi sonrasi ayni upload session devam ettirilebilir.
+  - Basarisiz/yarim session'lar temizlenir, kalinti birakmaz.
 - Etiket: `V1'i bloklamaz`
