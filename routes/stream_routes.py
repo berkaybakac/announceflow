@@ -14,7 +14,7 @@ V1 API contract (PI4_STREAM_V1_SCOPE.md section 4):
 """
 import logging
 
-from flask import Blueprint, jsonify
+from flask import Blueprint, jsonify, request
 
 from services.stream_service import get_stream_service
 from utils.helpers import _json_error, _json_success, login_required
@@ -29,7 +29,11 @@ _stream_service = get_stream_service()
 @login_required
 def stream_start():
     """Start a stream session."""
-    result = _stream_service.start()
+    correlation_id = request.headers.get("X-Stream-Correlation-Id", "").strip() or None
+    if correlation_id:
+        result = _stream_service.start(correlation_id=correlation_id)
+    else:
+        result = _stream_service.start()
     if result["success"]:
         return _json_success(status=result["status"])
     return _json_error(

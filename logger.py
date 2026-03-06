@@ -27,6 +27,11 @@ grep '"cat": "ERROR"' /home/admin/announceflow/logs/events.jsonl
 # Bugünün logları (tarih formatı: 2026-02-03):
 grep '2026-02-03' /home/admin/announceflow/logs/events.jsonl
 
+# jq olmadan zaman filtresi + özet (Pi'de önerilen):
+python3 /home/admin/announceflow/scripts/events_query.py \
+  --file /home/admin/announceflow/logs/events.jsonl \
+  --since "2026-03-05T20:30:00" --summary
+
 # Klasik metin logları:
 tail -100 /home/admin/announceflow/announceflow.log
 
@@ -50,7 +55,7 @@ ERROR   : Hatalar ve uyarılar (örn: prayer_cache_corrupt, policy_fail_safe_eng
 import json
 import os
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from logging.handlers import RotatingFileHandler
 from typing import Any, Dict, Optional
 
@@ -108,7 +113,9 @@ def log_event(category: str, event: str, data: Optional[Dict[str, Any]] = None) 
         log_event("PLAY", "track_start", {"file": "song.mp3", "index": 1})
     """
     entry = {
-        "ts": datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
+        "ts": datetime.now(timezone.utc)
+        .isoformat(timespec="milliseconds")
+        .replace("+00:00", "Z"),
         "cat": category,
         "event": event,
     }
