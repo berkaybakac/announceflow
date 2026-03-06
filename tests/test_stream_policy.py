@@ -147,6 +147,20 @@ def test_resume_after_policy_receiver_fail(mock_manager, mock_player):
     assert result["status"]["active"] is False
 
 
+def test_resume_after_policy_reuses_existing_correlation_id(mock_manager, mock_player):
+    svc = _make_service(mock_manager, mock_player)
+    svc.start(correlation_id="cid-policy-1")
+    svc.force_stop_by_policy()
+
+    result = svc.resume_after_policy()
+    assert result["success"] is True
+    assert result["status"]["state"] == "live"
+    assert mock_manager.start_receiver.call_count >= 2
+    assert mock_manager.start_receiver.call_args_list[-1].kwargs == {
+        "correlation_id": "cid-policy-1"
+    }
+
+
 def test_resume_after_announcement_when_sender_dead(mock_manager, mock_player):
     """P1: If sender becomes dead during announcement, resume drops to idle instead of sticking to paused."""
     svc = _make_service(mock_manager, mock_player)

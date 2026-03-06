@@ -13,11 +13,16 @@ V1 scope: single session, same LAN, no DB persistence for stream state.
 """
 import logging
 import threading
+import time
 from typing import Optional
 
 from logger import log_error, log_system
 
 logger = logging.getLogger(__name__)
+
+
+def _new_correlation_id() -> str:
+    return f"stream-{int(time.time() * 1000)}-{threading.get_ident()}"
 
 
 class StreamStatus:
@@ -65,17 +70,24 @@ class StreamService:
         self._lock = threading.Lock()
         self._policy_resume_armed = False
         self._user_stopped = False
+        self._active_correlation_id: Optional[str] = None
 
     def _is_policy_sender_alive_unlocked(self) -> bool:
         return bool(self._policy_resume_armed and not self._user_stopped)
 
-    def start(self) -> dict:
+    def start(self, correlation_id: Optional[str] = None) -> dict:
         """Start a stream session (idempotent).
 
         Returns:
             dict with 'success' and 'status' keys.
         """
         with self._lock:
+            request_correlation_id = (
+                correlation_id.strip() if isinstance(correlation_id, str) else ""
+            )
+            if not request_correlation_id:
+                request_correlation_id = _new_correlation_id()
+
             if self._status.active and self._status.state == "live":
                 logger.info("StreamService: start called but already live (idempotent)")
                 self._policy_resume_armed = True
@@ -102,7 +114,9 @@ class StreamService:
                     player.stop()
                     logger.info("StreamService: stopped playback for stream")
 
-                if self._manager and not self._manager.start_receiver():
+                if self._manager and not self._manager.start_receiver(
+                    correlation_id=request_correlation_id
+                ):
                     # Rollback: restore previous playback state
                     if was_playlist_active:
                         self._restore_playlist()
@@ -118,9 +132,14 @@ class StreamService:
                         source_before_stream=source_before,
                         last_error="receiver_start_failed",
                     )
+                    self._active_correlation_id = None
                     self._policy_resume_armed = False
                     log_error(
-                        "stream_start_failed", {"reason": "receiver_start_failed"}
+                        "stream_start_failed",
+                        {
+                            "reason": "receiver_start_failed",
+                            "correlation_id": request_correlation_id,
+                        },
                     )
                     return {"success": False, "status": self._status.to_dict()}
 
@@ -130,8 +149,15 @@ class StreamService:
                     source_before_stream=source_before,
                     last_error=None,
                 )
+                self._active_correlation_id = request_correlation_id
                 self._policy_resume_armed = True
-                log_system("stream_started", {"source_before": source_before})
+                log_system(
+                    "stream_started",
+                    {
+                        "source_before": source_before,
+                        "correlation_id": request_correlation_id,
+                    },
+                )
                 return {"success": True, "status": self._status.to_dict()}
 
             except Exception as exc:
@@ -141,8 +167,15 @@ class StreamService:
                     state="error",
                     last_error=str(exc),
                 )
+                self._active_correlation_id = None
                 self._policy_resume_armed = False
-                log_error("stream_start_exception", {"error": str(exc)})
+                log_error(
+                    "stream_start_exception",
+                    {
+                        "error": str(exc),
+                        "correlation_id": request_correlation_id,
+                    },
+                )
                 return {"success": False, "status": self._status.to_dict()}
 
     def stop(self) -> dict:
@@ -158,12 +191,14 @@ class StreamService:
                 )
                 self._policy_resume_armed = False
                 self._user_stopped = True
+                self._active_correlation_id = None
                 return {"success": True, "status": self._status.to_dict()}
 
             try:
                 self._policy_resume_armed = False
                 self._user_stopped = True
                 source_before = self._status.source_before_stream
+                correlation_id = self._active_correlation_id
                 stop_error = None
 
                 if self._manager:
@@ -183,7 +218,14 @@ class StreamService:
                     source_before_stream="none",
                     last_error=stop_error,
                 )
-                log_system("stream_stopped", {"restored_source": source_before})
+                log_system(
+                    "stream_stopped",
+                    {
+                        "restored_source": source_before,
+                        "correlation_id": correlation_id,
+                    },
+                )
+                self._active_correlation_id = None
                 return {"success": True, "status": self._status.to_dict()}
 
             except Exception as exc:
@@ -193,7 +235,14 @@ class StreamService:
                     state="error",
                     last_error=str(exc),
                 )
-                log_error("stream_stop_exception", {"error": str(exc)})
+                log_error(
+                    "stream_stop_exception",
+                    {
+                        "error": str(exc),
+                        "correlation_id": self._active_correlation_id,
+                    },
+                )
+                self._active_correlation_id = None
                 return {"success": False, "status": self._status.to_dict()}
 
     def status(self) -> dict:
@@ -216,6 +265,7 @@ class StreamService:
                     last_error="receiver_died",
                 )
                 self._policy_resume_armed = False
+                self._active_correlation_id = None
             return self._status.to_dict()
 
     def policy_sender_alive(self) -> bool:
@@ -242,7 +292,10 @@ class StreamService:
                 source_before_stream=self._status.source_before_stream,
                 last_error=None,
             )
-            log_system("stream_paused_for_announcement", {})
+            log_system(
+                "stream_paused_for_announcement",
+                {"correlation_id": self._active_correlation_id},
+            )
             return {"success": True, "status": self._status.to_dict()}
 
     def resume_after_announcement(self) -> dict:
@@ -258,9 +311,12 @@ class StreamService:
                     last_error=None,
                 )
                 self._policy_resume_armed = False
+                self._active_correlation_id = None
                 return {"success": True, "status": self._status.to_dict()}
 
-            if self._manager and not self._manager.start_receiver():
+            if self._manager and not self._manager.start_receiver(
+                correlation_id=self._active_correlation_id
+            ):
                 self._status = StreamStatus(
                     active=False,
                     state="error",
@@ -275,7 +331,13 @@ class StreamService:
                 source_before_stream=self._status.source_before_stream,
                 last_error=None,
             )
-            log_system("stream_resumed", {"source": "announcement_end"})
+            log_system(
+                "stream_resumed",
+                {
+                    "source": "announcement_end",
+                    "correlation_id": self._active_correlation_id,
+                },
+            )
             return {"success": True, "status": self._status.to_dict()}
 
     def force_stop_by_policy(self) -> dict:
@@ -297,7 +359,10 @@ class StreamService:
                 source_before_stream=self._status.source_before_stream,
                 last_error=None,
             )
-            log_system("stream_force_stopped_by_policy", {})
+            log_system(
+                "stream_force_stopped_by_policy",
+                {"correlation_id": self._active_correlation_id},
+            )
             return {"success": True, "status": self._status.to_dict()}
 
     def resume_after_policy(self) -> dict:
@@ -308,7 +373,9 @@ class StreamService:
             if not self._is_policy_sender_alive_unlocked():
                 return {"success": True, "status": self._status.to_dict()}
 
-            if self._manager and not self._manager.start_receiver():
+            if self._manager and not self._manager.start_receiver(
+                correlation_id=self._active_correlation_id
+            ):
                 self._status = StreamStatus(
                     active=False,
                     state="error",
@@ -323,7 +390,10 @@ class StreamService:
                 source_before_stream=self._status.source_before_stream,
                 last_error=None,
             )
-            log_system("stream_resumed", {"source": "policy_end"})
+            log_system(
+                "stream_resumed",
+                {"source": "policy_end", "correlation_id": self._active_correlation_id},
+            )
             return {"success": True, "status": self._status.to_dict()}
 
     def _restore_playlist(self):

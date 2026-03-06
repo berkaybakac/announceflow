@@ -15,6 +15,7 @@ import subprocess
 import sys
 import threading
 import time
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -29,7 +30,7 @@ class StreamManager:
         self._lock = threading.Lock()
         self._port = port
 
-    def start_receiver(self) -> bool:
+    def start_receiver(self, correlation_id: Optional[str] = None) -> bool:
         """Start the stream receiver process.
 
         Returns:
@@ -43,24 +44,33 @@ class StreamManager:
                     os.path.dirname(os.path.abspath(__file__)),
                     "_stream_receiver.py",
                 )
+                child_env = os.environ.copy()
+                if correlation_id:
+                    child_env["ANNOUNCEFLOW_STREAM_CORRELATION_ID"] = str(
+                        correlation_id
+                    )
+
                 self._process = subprocess.Popen(
                     [sys.executable, receiver_script, str(self._port)],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
+                    env=child_env,
                 )
                 # Brief health check: catch immediate death (port conflict, script error)
                 time.sleep(0.05)
                 if self._process.poll() is not None:
                     logger.error(
-                        "StreamManager: receiver died immediately (exit=%d)",
+                        "StreamManager: receiver died immediately (exit=%d, correlation_id=%s)",
                         self._process.returncode,
+                        correlation_id or "-",
                     )
                     self._process = None
                     return False
                 logger.info(
-                    "StreamManager: receiver started (pid=%d, port=%d)",
+                    "StreamManager: receiver started (pid=%d, port=%d, correlation_id=%s)",
                     self._process.pid,
                     self._port,
+                    correlation_id or "-",
                 )
                 return True
             except (OSError, subprocess.SubprocessError) as exc:

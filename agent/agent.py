@@ -96,7 +96,7 @@ def setup_agent_logging() -> None:
         runtime_dir = AGENT_RUNTIME_DIR
 
     formatter = logging.Formatter(
-        "%(asctime)s - %(levelname)s - [%(name)s] %(message)s",
+        "%(asctime)s.%(msecs)03d - %(levelname)s - [%(name)s] %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 
@@ -575,9 +575,19 @@ class AnnounceFlowAgent:
         )
         return bool(response and response.ok)
 
-    def start_stream_with_details(self) -> Dict[str, Any]:
+    def start_stream_with_details(
+        self, correlation_id: Optional[str] = None
+    ) -> Dict[str, Any]:
         """Start stream receiver on server and return structured result."""
-        response = self._request("POST", "/api/stream/start", auth_required=True)
+        headers = {}
+        if correlation_id:
+            headers["X-Stream-Correlation-Id"] = correlation_id
+        response = self._request(
+            "POST",
+            "/api/stream/start",
+            auth_required=True,
+            headers=headers if headers else None,
+        )
         if response is None:
             return {"success": False, "error": "api_start_failed"}
         try:
@@ -594,6 +604,7 @@ class AnnounceFlowAgent:
             "success": ok,
             "http_status": getattr(response, "status_code", None),
             "status": payload.get("status"),
+            "correlation_id": correlation_id,
         }
         if not ok:
             result["error"] = payload.get("error", "api_start_failed")
@@ -625,7 +636,7 @@ class AnnounceFlowAgent:
 
     def start_stream(self) -> bool:
         """Backward-compatible bool API for stream start."""
-        return bool(self.start_stream_with_details().get("success"))
+        return bool(self.start_stream_with_details(correlation_id=None).get("success"))
 
     def stop_stream(self) -> bool:
         """Backward-compatible bool API for stream stop."""
@@ -1271,16 +1282,21 @@ class AgentGUI:
     def start_stream(self):
         """Start live stream to Pi4."""
         host = self._resolve_stream_host()
+        correlation_id = f"agent-{int(time.time() * 1000)}"
         restore = self._with_loading(
             self._btn_stream_start, "Yayını Başlat", "Bağlanıyor..."
         )
 
         def _job():
-            api_result = self.agent.start_stream_with_details()
+            api_result = self.agent.start_stream_with_details(
+                correlation_id=correlation_id
+            )
             if not api_result.get("success"):
                 return {"result": "api_fail", "api": api_result}
 
-            sender_ok = self._stream_client.start_sender(host, 5800)
+            sender_ok = self._stream_client.start_sender(
+                host, 5800, correlation_id=correlation_id
+            )
             if not sender_ok:
                 rollback_result = self.agent.stop_stream_with_details()
                 return {
@@ -1319,8 +1335,9 @@ class AgentGUI:
                 attempt = payload.get("attempt") or {}
                 attempt_id = attempt.get("attempt_id")
                 stream_logger.info(
-                    "stream_start_ok attempt_id=%s packet_count=%s",
+                    "stream_start_ok attempt_id=%s correlation_id=%s packet_count=%s",
                     attempt_id,
+                    correlation_id,
                     attempt.get("packet_count"),
                 )
                 self._show_status("Canlı yayın başlatıldı")
@@ -1340,8 +1357,9 @@ class AgentGUI:
                     error_code, "Yayın başlatılamadı"
                 )
                 stream_logger.error(
-                    "stream_start_sender_fail attempt_id=%s error_code=%s rollback=%s",
+                    "stream_start_sender_fail attempt_id=%s correlation_id=%s error_code=%s rollback=%s",
                     attempt_id,
+                    correlation_id,
                     error_code,
                     (payload.get("rollback") or {}).get("success"),
                 )
@@ -1356,7 +1374,8 @@ class AgentGUI:
                     "receiver_start_failed": "Sunucu yayın alıcısını başlatamadı",
                 }
                 stream_logger.error(
-                    "stream_start_api_fail error_code=%s http_status=%s",
+                    "stream_start_api_fail correlation_id=%s error_code=%s http_status=%s",
+                    correlation_id,
                     api_error,
                     api.get("http_status"),
                 )

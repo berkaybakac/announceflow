@@ -58,6 +58,28 @@ class TestStreamServiceStart:
         assert result["status"]["active"] is True
         assert result["status"]["state"] == "live"
 
+    def test_start_passes_explicit_correlation_id_to_manager(
+        self, mock_manager, mock_player
+    ):
+        svc = _make_service(mock_manager, mock_player)
+        result = svc.start(correlation_id="cid-explicit")
+        assert result["success"] is True
+        mock_manager.start_receiver.assert_called_once_with(
+            correlation_id="cid-explicit"
+        )
+
+    @patch("services.stream_service._new_correlation_id")
+    def test_start_generates_correlation_id_when_missing(
+        self, mock_new_cid, mock_manager, mock_player
+    ):
+        mock_new_cid.return_value = "cid-generated"
+        svc = _make_service(mock_manager, mock_player)
+        result = svc.start()
+        assert result["success"] is True
+        mock_manager.start_receiver.assert_called_once_with(
+            correlation_id="cid-generated"
+        )
+
     def test_start_idempotent(self, mock_manager, mock_player):
         svc = _make_service(mock_manager, mock_player)
         r1 = svc.start()
@@ -220,6 +242,20 @@ class TestStreamRoutes:
         data = resp.get_json()
         assert data["success"] is True
         assert data["status"]["active"] is True
+        mock_svc.start.assert_called_once_with()
+
+    @patch("routes.stream_routes._stream_service")
+    def test_start_endpoint_forwards_correlation_header(self, mock_svc, client):
+        mock_svc.start.return_value = {
+            "success": True,
+            "status": StreamStatus(active=True, state="live").to_dict(),
+        }
+        resp = client.post(
+            "/api/stream/start",
+            headers={"X-Stream-Correlation-Id": "cid-route-1"},
+        )
+        assert resp.status_code == 200
+        mock_svc.start.assert_called_once_with(correlation_id="cid-route-1")
 
     @patch("routes.stream_routes._stream_service")
     def test_stop_endpoint_200(self, mock_svc, client):
