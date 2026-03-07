@@ -71,6 +71,7 @@ class StreamService:
         self._policy_resume_armed = False
         self._user_stopped = False
         self._active_correlation_id: Optional[str] = None
+        self._active_device_id: Optional[str] = None
 
     def _is_policy_sender_alive_unlocked(self) -> bool:
         if self._user_stopped:
@@ -83,7 +84,11 @@ class StreamService:
             self._status.state == "stopped_by_policy" and self._active_correlation_id
         )
 
-    def start(self, correlation_id: Optional[str] = None) -> dict:
+    def start(
+        self,
+        correlation_id: Optional[str] = None,
+        device_id: Optional[str] = None,
+    ) -> dict:
         """Start a stream session (idempotent).
 
         Returns:
@@ -95,12 +100,38 @@ class StreamService:
             )
             if not request_correlation_id:
                 request_correlation_id = _new_correlation_id()
+            request_device_id = device_id.strip() if isinstance(device_id, str) else ""
+            if not request_device_id:
+                request_device_id = None
 
             if self._status.active and self._status.state == "live":
-                logger.info("StreamService: start called but already live (idempotent)")
+                if request_device_id and request_device_id == self._active_device_id:
+                    logger.info(
+                        "StreamService: start called but already live for same device (idempotent)"
+                    )
+                    self._policy_resume_armed = True
+                    self._user_stopped = False
+                    return {
+                        "success": True,
+                        "status": self._status.to_dict(),
+                        "owner_correlation_id": self._active_correlation_id,
+                        "owner_device_id": self._active_device_id,
+                    }
+
+                logger.info(
+                    "StreamService: start called but already live (reject, owner_device=%s, request_device=%s)",
+                    self._active_device_id or "-",
+                    request_device_id or "-",
+                )
                 self._policy_resume_armed = True
                 self._user_stopped = False
-                return {"success": True, "status": self._status.to_dict()}
+                return {
+                    "success": False,
+                    "error": "stream_already_live",
+                    "status": self._status.to_dict(),
+                    "owner_correlation_id": self._active_correlation_id,
+                    "owner_device_id": self._active_device_id,
+                }
 
             try:
                 self._user_stopped = False
@@ -141,6 +172,7 @@ class StreamService:
                         last_error="receiver_start_failed",
                     )
                     self._active_correlation_id = None
+                    self._active_device_id = None
                     self._policy_resume_armed = False
                     log_error(
                         "stream_start_failed",
@@ -158,6 +190,7 @@ class StreamService:
                     last_error=None,
                 )
                 self._active_correlation_id = request_correlation_id
+                self._active_device_id = request_device_id
                 self._policy_resume_armed = True
                 log_system(
                     "stream_started",
@@ -176,6 +209,7 @@ class StreamService:
                     last_error=str(exc),
                 )
                 self._active_correlation_id = None
+                self._active_device_id = None
                 self._policy_resume_armed = False
                 log_error(
                     "stream_start_exception",
@@ -200,6 +234,7 @@ class StreamService:
                 self._policy_resume_armed = False
                 self._user_stopped = True
                 self._active_correlation_id = None
+                self._active_device_id = None
                 return {"success": True, "status": self._status.to_dict()}
 
             try:
@@ -234,6 +269,7 @@ class StreamService:
                     },
                 )
                 self._active_correlation_id = None
+                self._active_device_id = None
                 return {"success": True, "status": self._status.to_dict()}
 
             except Exception as exc:
@@ -251,6 +287,7 @@ class StreamService:
                     },
                 )
                 self._active_correlation_id = None
+                self._active_device_id = None
                 return {"success": False, "status": self._status.to_dict()}
 
     def status(self) -> dict:
@@ -274,6 +311,7 @@ class StreamService:
                 )
                 self._policy_resume_armed = False
                 self._active_correlation_id = None
+                self._active_device_id = None
             return self._status.to_dict()
 
     def policy_sender_alive(self) -> bool:
@@ -320,6 +358,7 @@ class StreamService:
                 )
                 self._policy_resume_armed = False
                 self._active_correlation_id = None
+                self._active_device_id = None
                 return {"success": True, "status": self._status.to_dict()}
 
             if self._manager and not self._manager.start_receiver(
