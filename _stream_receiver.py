@@ -391,6 +391,7 @@ def main():
 
     proc = subprocess.Popen(
         cmd,
+        stdin=subprocess.PIPE,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
         text=True,
@@ -413,10 +414,20 @@ def main():
     drain_thread.start()
 
     def _cleanup():
-        """Kill the entire process group to prevent orphan ffmpeg."""
+        """Gracefully stop ffmpeg via stdin 'q' command.
+
+        Only sends 'q' + closes stdin.  Does NOT send SIGTERM here —
+        the manager's escalation chain (SIGTERM -> wait -> SIGKILL)
+        handles fallback if 'q' alone doesn't work.  Sending SIGTERM
+        immediately after 'q' would race and could pre-empt the clean
+        exit path.
+        """
         try:
-            os.killpg(proc.pid, signal.SIGTERM)
-        except (OSError, ProcessLookupError):
+            if proc.stdin and not proc.stdin.closed:
+                proc.stdin.write("q")
+                proc.stdin.flush()
+                proc.stdin.close()
+        except (OSError, BrokenPipeError, ValueError):
             pass
 
     atexit.register(_cleanup)
