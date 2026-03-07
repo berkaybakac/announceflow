@@ -6,6 +6,7 @@ import logging
 from flask import Blueprint, request
 import database as db
 from player import get_player
+from services.stream_service import get_stream_service
 from utils.helpers import (
     login_required,
     _json_success,
@@ -16,6 +17,14 @@ from utils.helpers import (
 
 playlist_bp = Blueprint("playlist", __name__)
 logger = logging.getLogger(__name__)
+
+
+def _reject_if_stream_active():
+    """Return error response if a stream is currently active, else None."""
+    status = get_stream_service().status()
+    if status.get("active") and status.get("state") == "live":
+        return _json_error("Stream aktif — önce yayını durdurun", 409)
+    return None
 
 
 @playlist_bp.route("/api/playlist/set", methods=["POST"])
@@ -52,6 +61,9 @@ def api_playlist_play():
     blocked = _reject_if_outside_working_hours()
     if blocked:
         return blocked
+    blocked = _reject_if_stream_active()
+    if blocked:
+        return blocked
 
     player = get_player()
     logger.info("[source] manual play -> playlist current track")
@@ -68,6 +80,9 @@ def api_playlist_play():
 def api_playlist_next():
     """Skip to next track in playlist."""
     blocked = _reject_if_outside_working_hours()
+    if blocked:
+        return blocked
+    blocked = _reject_if_stream_active()
     if blocked:
         return blocked
 
@@ -98,6 +113,9 @@ def api_playlist_stop():
 def api_playlist_start_all():
     """Start playlist with ALL music files in library (loop mode)."""
     blocked = _reject_if_outside_working_hours()
+    if blocked:
+        return blocked
+    blocked = _reject_if_stream_active()
     if blocked:
         return blocked
 
