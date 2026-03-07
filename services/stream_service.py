@@ -20,6 +20,9 @@ from logger import log_error, log_system
 
 logger = logging.getLogger(__name__)
 
+# Seconds of silence before a stream with an active device_id is auto-stopped.
+HEARTBEAT_TIMEOUT = 15.0
+
 
 def _new_correlation_id() -> str:
     return f"stream-{int(time.time() * 1000)}-{threading.get_ident()}"
@@ -72,6 +75,66 @@ class StreamService:
         self._user_stopped = False
         self._active_correlation_id: Optional[str] = None
         self._active_device_id: Optional[str] = None
+        # Monotonic timestamp of the last accepted heartbeat.
+        # 0.0 means no heartbeat received yet (sentinel).
+        self._last_heartbeat_at: float = 0.0
+        self._start_heartbeat_monitor()
+
+    # ------------------------------------------------------------------
+    # Heartbeat monitor
+    # ------------------------------------------------------------------
+
+    def _start_heartbeat_monitor(self) -> None:
+        t = threading.Thread(target=self._heartbeat_monitor_loop, daemon=True)
+        t.name = "stream-heartbeat-monitor"
+        t.start()
+
+    def _heartbeat_monitor_loop(self) -> None:
+        while True:
+            time.sleep(5)
+            try:
+                self._check_heartbeat()
+            except Exception as exc:
+                logger.error("StreamService: heartbeat monitor error: %s", exc)
+
+    def _check_heartbeat(self) -> bool:
+        """Check heartbeat expiry; auto-stop if expired.
+
+        Returns True when stream was auto-stopped, False otherwise.
+        Designed to be called from the monitor loop or directly in tests.
+        """
+        should_stop = False
+        evicted_device = None
+        evicted_cid = None
+        with self._lock:
+            if (
+                self._status.active
+                and self._status.state == "live"
+                and self._active_device_id is not None
+                and self._last_heartbeat_at > 0
+            ):
+                elapsed = time.monotonic() - self._last_heartbeat_at
+                if elapsed >= HEARTBEAT_TIMEOUT:
+                    should_stop = True
+                    evicted_device = self._active_device_id
+                    evicted_cid = self._active_correlation_id
+        if should_stop:
+            logger.warning(
+                "StreamService: heartbeat expired (device=%s, cid=%s), auto-stopping",
+                evicted_device,
+                evicted_cid,
+            )
+            log_system(
+                "stream_heartbeat_expired",
+                {"device_id": evicted_device, "correlation_id": evicted_cid},
+            )
+            self.stop()
+            return True
+        return False
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
 
     def _is_policy_sender_alive_unlocked(self) -> bool:
         if self._user_stopped:
@@ -84,15 +147,25 @@ class StreamService:
             self._status.state == "stopped_by_policy" and self._active_correlation_id
         )
 
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+
     def start(
         self,
         correlation_id: Optional[str] = None,
         device_id: Optional[str] = None,
     ) -> dict:
-        """Start a stream session (idempotent).
+        """Start a stream session.
+
+        If a stream is already live from the *same* device, the call is
+        idempotent.  If it is live from a *different* device (or no device
+        is tracked), the new device takes over: the current receiver is
+        stopped and a new one is started ("last wins" semantics).
 
         Returns:
             dict with 'success' and 'status' keys.
+            Takeover responses also include 'takeover': True.
         """
         with self._lock:
             request_correlation_id = (
@@ -106,11 +179,13 @@ class StreamService:
 
             if self._status.active and self._status.state == "live":
                 if request_device_id and request_device_id == self._active_device_id:
+                    # Same device calling start again — idempotent, refresh heartbeat.
                     logger.info(
                         "StreamService: start called but already live for same device (idempotent)"
                     )
                     self._policy_resume_armed = True
                     self._user_stopped = False
+                    self._last_heartbeat_at = time.monotonic()
                     return {
                         "success": True,
                         "status": self._status.to_dict(),
@@ -118,19 +193,71 @@ class StreamService:
                         "owner_device_id": self._active_device_id,
                     }
 
+                # Different device (or no device_id) — takeover: stop old, start new.
+                inherited_source = self._status.source_before_stream
                 logger.info(
-                    "StreamService: start called but already live (reject, owner_device=%s, request_device=%s)",
-                    self._active_device_id or "-",
+                    "StreamService: takeover (new_device=%s evicts device=%s cid=%s)",
                     request_device_id or "-",
+                    self._active_device_id or "-",
+                    request_correlation_id,
                 )
+                log_system(
+                    "stream_takeover_start",
+                    {
+                        "new_device_id": request_device_id,
+                        "evicted_device_id": self._active_device_id,
+                        "new_correlation_id": request_correlation_id,
+                    },
+                )
+                if self._manager:
+                    self._manager.stop_receiver()
+
+                if self._manager and not self._manager.start_receiver(
+                    correlation_id=request_correlation_id, wait_for_stop=True
+                ):
+                    self._status = StreamStatus(
+                        active=False,
+                        state="error",
+                        source_before_stream=inherited_source,
+                        last_error="receiver_start_failed",
+                    )
+                    self._active_correlation_id = None
+                    self._active_device_id = None
+                    self._policy_resume_armed = False
+                    self._last_heartbeat_at = 0.0
+                    log_error(
+                        "stream_takeover_failed",
+                        {
+                            "reason": "receiver_start_failed",
+                            "new_device_id": request_device_id,
+                            "correlation_id": request_correlation_id,
+                        },
+                    )
+                    return {"success": False, "status": self._status.to_dict()}
+
+                self._status = StreamStatus(
+                    active=True,
+                    state="live",
+                    source_before_stream=inherited_source,
+                    last_error=None,
+                )
+                self._active_correlation_id = request_correlation_id
+                self._active_device_id = request_device_id
                 self._policy_resume_armed = True
                 self._user_stopped = False
+                self._last_heartbeat_at = time.monotonic()
+                log_system(
+                    "stream_takeover_complete",
+                    {
+                        "new_device_id": request_device_id,
+                        "new_correlation_id": request_correlation_id,
+                        "inherited_source": inherited_source,
+                    },
+                )
                 return {
-                    "success": False,
-                    "error": "stream_already_live",
+                    "success": True,
                     "status": self._status.to_dict(),
-                    "owner_correlation_id": self._active_correlation_id,
-                    "owner_device_id": self._active_device_id,
+                    "takeover": True,
                 }
 
             try:
@@ -192,6 +319,7 @@ class StreamService:
                 self._active_correlation_id = request_correlation_id
                 self._active_device_id = request_device_id
                 self._policy_resume_armed = True
+                self._last_heartbeat_at = time.monotonic()
                 log_system(
                     "stream_started",
                     {
@@ -270,6 +398,7 @@ class StreamService:
                 )
                 self._active_correlation_id = None
                 self._active_device_id = None
+                self._last_heartbeat_at = 0.0
                 return {"success": True, "status": self._status.to_dict()}
 
             except Exception as exc:
@@ -294,7 +423,7 @@ class StreamService:
         """Get current stream status.
 
         Returns:
-            StreamStatus as dict.
+            StreamStatus as dict, extended with 'owner_device_id'.
         """
         with self._lock:
             if (
@@ -312,7 +441,45 @@ class StreamService:
                 self._policy_resume_armed = False
                 self._active_correlation_id = None
                 self._active_device_id = None
-            return self._status.to_dict()
+            result = self._status.to_dict()
+            result["owner_device_id"] = self._active_device_id
+            return result
+
+    def heartbeat(self, device_id: Optional[str] = None) -> dict:
+        """Record a sender heartbeat to prevent auto-stop.
+
+        Senders should call this every ~5 s while streaming.  A stream
+        with an active device_id is automatically stopped after
+        HEARTBEAT_TIMEOUT (15 s) of no heartbeats — handling crashes and
+        network failures transparently.
+
+        Returns:
+            dict with 'accepted' bool, optional 'reason', and 'status'.
+        """
+        with self._lock:
+            request_device_id = (
+                device_id.strip() if isinstance(device_id, str) else ""
+            ) or None
+
+            active_states = {"live", "paused_for_announcement", "stopped_by_policy"}
+            if self._status.state not in active_states:
+                return {
+                    "accepted": False,
+                    "reason": "no_active_stream",
+                    "status": self._status.to_dict(),
+                }
+
+            if self._active_device_id is not None:
+                if request_device_id != self._active_device_id:
+                    return {
+                        "accepted": False,
+                        "reason": "not_owner",
+                        "owner_device_id": self._active_device_id,
+                        "status": self._status.to_dict(),
+                    }
+
+            self._last_heartbeat_at = time.monotonic()
+            return {"accepted": True, "status": self._status.to_dict()}
 
     def policy_sender_alive(self) -> bool:
         """Policy-level sender liveness for Faz 4 runtime rules."""

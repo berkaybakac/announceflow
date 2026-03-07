@@ -76,8 +76,19 @@ class StreamManager:
                 "-" if exit_code is None else exit_code,
             )
 
-    def start_receiver(self, correlation_id: Optional[str] = None) -> bool:
+    def start_receiver(
+        self,
+        correlation_id: Optional[str] = None,
+        wait_for_stop: bool = False,
+    ) -> bool:
         """Start the stream receiver process.
+
+        Args:
+            correlation_id: Opaque ID passed to the receiver for telemetry.
+            wait_for_stop: If True and a previous receiver stop is still in
+                progress, wait up to 1 s for it to finish (then force-kill)
+                instead of rejecting the start.  Use this for takeover paths
+                where stop+start are intentionally sequential.
 
         Returns:
             True if receiver started (or was already running), False on error.
@@ -85,11 +96,25 @@ class StreamManager:
         with self._lock:
             if self._stopping_proc is not None:
                 if self._stopping_proc.poll() is None:
-                    logger.warning(
-                        "StreamManager: receiver stop still in progress, rejecting start (correlation_id=%s)",
-                        correlation_id or "-",
-                    )
-                    return False
+                    if wait_for_stop:
+                        try:
+                            self._stopping_proc.wait(timeout=1.0)
+                        except subprocess.TimeoutExpired:
+                            logger.warning(
+                                "StreamManager: stopping proc did not exit in 1s, killing (correlation_id=%s)",
+                                correlation_id or "-",
+                            )
+                            self._stopping_proc.kill()
+                            try:
+                                self._stopping_proc.wait(timeout=0.3)
+                            except subprocess.TimeoutExpired:
+                                pass
+                    else:
+                        logger.warning(
+                            "StreamManager: receiver stop still in progress, rejecting start (correlation_id=%s)",
+                            correlation_id or "-",
+                        )
+                        return False
                 self._stopping_proc = None
             if self._is_alive_unlocked():
                 return True
