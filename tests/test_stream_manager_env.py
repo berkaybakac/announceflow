@@ -119,14 +119,32 @@ def test_start_receiver_without_correlation_id_does_not_set_env(monkeypatch, fak
 
 def test_stop_receiver_forces_kill_on_timeout(monkeypatch, fake_popen_timeout):
     monkeypatch.delenv("ANNOUNCEFLOW_STREAM_CORRELATION_ID", raising=False)
-    mgr = StreamManager(port=5800)
-    assert mgr.start_receiver() is True
-    assert mgr.stop_receiver() is True
-    # Background thread handles the kill; wait briefly for it to complete
-    deadline = time.monotonic() + 2
-    while not fake_popen_timeout["proc"].killed and time.monotonic() < deadline:
-        time.sleep(0.05)
-    assert fake_popen_timeout["proc"].killed is True
+    with patch("stream_manager.log_system") as mock_log_system:
+        mgr = StreamManager(port=5800)
+        assert mgr.start_receiver() is True
+        assert mgr.stop_receiver() is True
+        # Background thread handles the kill; wait briefly for it to complete
+        deadline = time.monotonic() + 2
+        while not fake_popen_timeout["proc"].killed and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert fake_popen_timeout["proc"].killed is True
+
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            if any(
+                c.args
+                and c.args[0] == "stream_receiver_stop_reason"
+                and c.args[1].get("reason") == "force_kill"
+                for c in mock_log_system.call_args_list
+            ):
+                break
+            time.sleep(0.05)
+        assert any(
+            c.args
+            and c.args[0] == "stream_receiver_stop_reason"
+            and c.args[1].get("reason") == "force_kill"
+            for c in mock_log_system.call_args_list
+        )
 
 
 def test_start_receiver_concurrent_calls_spawn_once(monkeypatch):
@@ -229,10 +247,19 @@ def test_start_rejected_while_previous_stop_in_progress(monkeypatch):
         lambda self, _proc: time.sleep(0.2),
     )
 
-    mgr = StreamManager(port=5800)
-    assert mgr.start_receiver() is True
-    assert mgr.stop_receiver() is True
-    assert mgr.start_receiver() is False
+    with patch("stream_manager.log_system") as mock_log_system:
+        mgr = StreamManager(port=5800)
+        assert mgr.start_receiver() is True
+        assert mgr.stop_receiver() is True
+        assert mgr.stop_receiver() is True  # already stopping
+        assert mgr.start_receiver() is False
+
+        assert any(
+            c.args
+            and c.args[0] == "stream_receiver_stop_reason"
+            and c.args[1].get("reason") == "already_stopping"
+            for c in mock_log_system.call_args_list
+        )
 
 
 def test_stop_receiver_closes_stdin_before_terminate(monkeypatch):
@@ -266,3 +293,18 @@ def test_stop_receiver_closes_stdin_before_terminate(monkeypatch):
     assert mgr.start_receiver() is True
     assert mgr.stop_receiver() is True
     assert call_order == ["stdin_close", "terminate"]
+
+
+def test_stop_receiver_logs_graceful_quick_reason(monkeypatch, fake_popen):
+    monkeypatch.delenv("ANNOUNCEFLOW_STREAM_CORRELATION_ID", raising=False)
+    with patch("stream_manager.log_system") as mock_log_system:
+        mgr = StreamManager(port=5800)
+        assert mgr.start_receiver() is True
+        assert mgr.stop_receiver() is True
+        assert any(
+            c.args
+            and c.args[0] == "stream_receiver_stop_reason"
+            and c.args[1].get("reason") == "graceful"
+            and c.args[1].get("phase") == "quick"
+            for c in mock_log_system.call_args_list
+        )

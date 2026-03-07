@@ -17,6 +17,8 @@ import threading
 import time
 from typing import Optional
 
+from logger import log_system
+
 logger = logging.getLogger(__name__)
 
 STREAM_RECEIVER_PORT = 5800
@@ -35,6 +37,27 @@ class StreamManager:
         self._lock = threading.Lock()
         self._port = port
         self._consecutive_start_failures = 0
+
+    def _log_stop_reason(
+        self,
+        reason: str,
+        *,
+        proc: Optional[subprocess.Popen] = None,
+        phase: Optional[str] = None,
+        error: Optional[str] = None,
+    ) -> None:
+        """Emit structured stop telemetry for diagnostics."""
+        data = {"reason": reason, "port": self._port}
+        if proc is not None:
+            data["pid"] = getattr(proc, "pid", None)
+        if phase:
+            data["phase"] = phase
+        if error:
+            data["error"] = error
+        try:
+            log_system("stream_receiver_stop_reason", data)
+        except Exception as exc:
+            logger.debug("StreamManager: failed to emit stop reason telemetry: %s", exc)
 
     def _record_start_failure_unlocked(
         self,
@@ -145,8 +168,15 @@ class StreamManager:
         """
         with self._lock:
             if not self._is_alive_unlocked():
+                if self._stopping_proc is not None and self._stopping_proc.poll() is None:
+                    self._log_stop_reason(
+                        "already_stopping",
+                        proc=self._stopping_proc,
+                    )
+                    return True
                 if self._stopping_proc is not None and self._stopping_proc.poll() is not None:
                     self._stopping_proc = None
+                self._log_stop_reason("already_stopped")
                 return True
             proc = self._process
             self._process = None
@@ -164,6 +194,7 @@ class StreamManager:
             try:
                 proc.wait(timeout=STOP_QUICK_WAIT)
                 logger.info("StreamManager: receiver stopped (quick)")
+                self._log_stop_reason("graceful", proc=proc, phase="quick")
                 with self._lock:
                     if self._stopping_proc is proc:
                         self._stopping_proc = None
@@ -179,6 +210,7 @@ class StreamManager:
             return True
         except Exception as exc:
             logger.error("StreamManager: error stopping receiver: %s", exc)
+            self._log_stop_reason("error", proc=proc, error=str(exc))
             with self._lock:
                 if self._stopping_proc is proc:
                     self._stopping_proc = None
@@ -189,6 +221,7 @@ class StreamManager:
         try:
             proc.wait(timeout=STOP_BG_GRACE_SECONDS)
             logger.info("StreamManager: receiver stopped (background grace)")
+            self._log_stop_reason("graceful", proc=proc, phase="background")
         except subprocess.TimeoutExpired:
             logger.warning(
                 "StreamManager: receiver did not exit in %.1fs, forcing kill",
@@ -197,8 +230,10 @@ class StreamManager:
             proc.kill()
             try:
                 proc.wait(timeout=STOP_KILL_WAIT_SECONDS)
+                self._log_stop_reason("force_kill", proc=proc)
             except subprocess.TimeoutExpired:
                 logger.error("StreamManager: receiver did not exit after SIGKILL")
+                self._log_stop_reason("force_kill_timeout", proc=proc)
         finally:
             with self._lock:
                 if self._stopping_proc is proc:
