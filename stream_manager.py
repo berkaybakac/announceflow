@@ -87,8 +87,10 @@ class StreamManager:
             correlation_id: Opaque ID passed to the receiver for telemetry.
             wait_for_stop: If True and a previous receiver stop is still in
                 progress, wait up to 1 s for it to finish (then force-kill)
-                instead of rejecting the start.  Use this for takeover paths
-                where stop+start are intentionally sequential.
+                instead of rejecting the start.  Prefer calling
+                wait_for_stop_complete() first (outside any service lock) and
+                then calling this with wait_for_stop=False for better
+                concurrency.
 
         Returns:
             True if receiver started (or was already running), False on error.
@@ -240,6 +242,45 @@ class StreamManager:
                 if self._stopping_proc is proc:
                     self._stopping_proc = None
             return False
+
+    def wait_for_stop_complete(self, timeout: float = 1.3) -> None:
+        """Wait for a pending stop operation to finish.
+
+        Uses short-poll intervals (50 ms) so the caller's service lock need
+        not be held during the wait — other threads can call is_alive() and
+        status() freely between polls.
+
+        Call this from the takeover path AFTER releasing StreamService._lock
+        and BEFORE re-acquiring it to start the new receiver.
+
+        Args:
+            timeout: Maximum seconds to wait before force-killing.
+        """
+        deadline = time.monotonic() + timeout
+        while True:
+            with self._lock:
+                if self._stopping_proc is None:
+                    return
+                if self._stopping_proc.poll() is not None:
+                    self._stopping_proc = None
+                    return
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            time.sleep(min(0.05, remaining))
+        # Timed out — force-kill so start_receiver() can proceed.
+        with self._lock:
+            if self._stopping_proc is not None and self._stopping_proc.poll() is None:
+                logger.warning(
+                    "StreamManager: forcing kill after wait_for_stop_complete timeout (%.1fs)",
+                    timeout,
+                )
+                self._stopping_proc.kill()
+                try:
+                    self._stopping_proc.wait(timeout=0.3)
+                except subprocess.TimeoutExpired:
+                    pass
+            self._stopping_proc = None
 
     def _background_kill(self, proc: subprocess.Popen):
         """Wait for process to exit gracefully, then SIGKILL if needed."""

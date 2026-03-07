@@ -31,6 +31,10 @@ def _reject_if_stream_active():
 @login_required
 def api_playlist_set():
     """Set a playlist of media files."""
+    blocked = _reject_if_stream_active()
+    if blocked:
+        return blocked
+
     data = request.get_json() or {}
     media_ids = data.get("media_ids", [])
     loop = data.get("loop", True)

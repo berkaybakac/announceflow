@@ -20,7 +20,10 @@ from logger import log_error, log_system
 
 logger = logging.getLogger(__name__)
 
-# Seconds of silence before a stream with an active device_id is auto-stopped.
+# Seconds after the *last heartbeat* before a stream is auto-stopped.
+# Monitoring only activates once the first heartbeat() call is received
+# (i.e. _last_heartbeat_at > 0), so senders that never call heartbeat
+# are never timed out — backward-compatible with old clients.
 HEARTBEAT_TIMEOUT = 15.0
 
 
@@ -76,8 +79,13 @@ class StreamService:
         self._active_correlation_id: Optional[str] = None
         self._active_device_id: Optional[str] = None
         # Monotonic timestamp of the last accepted heartbeat.
-        # 0.0 means no heartbeat received yet (sentinel).
+        # Stays 0.0 until the first heartbeat() call is received so that
+        # old clients that never call heartbeat are never auto-stopped.
         self._last_heartbeat_at: float = 0.0
+        # Set to True while a takeover is between its two lock sections
+        # (old receiver stopped, new one not yet started).  Prevents a
+        # concurrent start() from racing into an inconsistent state.
+        self._mid_takeover: bool = False
         self._start_heartbeat_monitor()
 
     # ------------------------------------------------------------------
@@ -100,6 +108,10 @@ class StreamService:
     def _check_heartbeat(self) -> bool:
         """Check heartbeat expiry; auto-stop if expired.
 
+        Monitoring activates only after the first heartbeat() call sets
+        _last_heartbeat_at > 0, regardless of whether a device_id is set.
+        This means old senders that never call heartbeat are never timed out.
+
         Returns True when stream was auto-stopped, False otherwise.
         Designed to be called from the monitor loop or directly in tests.
         """
@@ -110,8 +122,7 @@ class StreamService:
             if (
                 self._status.active
                 and self._status.state == "live"
-                and self._active_device_id is not None
-                and self._last_heartbeat_at > 0
+                and self._last_heartbeat_at > 0 
             ):
                 elapsed = time.monotonic() - self._last_heartbeat_at
                 if elapsed >= HEARTBEAT_TIMEOUT:
@@ -158,34 +169,49 @@ class StreamService:
     ) -> dict:
         """Start a stream session.
 
-        If a stream is already live from the *same* device, the call is
-        idempotent.  If it is live from a *different* device (or no device
-        is tracked), the new device takes over: the current receiver is
-        stopped and a new one is started ("last wins" semantics).
+        Same device → idempotent.
+        Different device (or no device tracked) → takeover: stop old receiver,
+        wait for it to finish (outside the service lock), start new receiver.
+        The wait-outside-lock design (Fix 3) ensures that status() and
+        heartbeat() callers are never blocked during the takeover wait.
 
         Returns:
             dict with 'success' and 'status' keys.
             Takeover responses also include 'takeover': True.
         """
+        request_correlation_id = (
+            correlation_id.strip() if isinstance(correlation_id, str) else ""
+        )
+        if not request_correlation_id:
+            request_correlation_id = _new_correlation_id()
+        request_device_id = device_id.strip() if isinstance(device_id, str) else ""
+        if not request_device_id:
+            request_device_id = None
+
+        # ── Phase 1 (inside lock): decide action ──────────────────────
         with self._lock:
-            request_correlation_id = (
-                correlation_id.strip() if isinstance(correlation_id, str) else ""
-            )
-            if not request_correlation_id:
-                request_correlation_id = _new_correlation_id()
-            request_device_id = device_id.strip() if isinstance(device_id, str) else ""
-            if not request_device_id:
-                request_device_id = None
+            if self._mid_takeover:
+                # Another takeover in flight — reject to avoid race.
+                logger.info(
+                    "StreamService: start rejected, takeover already in progress"
+                )
+                return {
+                    "success": False,
+                    "error": "takeover_in_progress",
+                    "status": self._status.to_dict(),
+                }
 
             if self._status.active and self._status.state == "live":
                 if request_device_id and request_device_id == self._active_device_id:
-                    # Same device calling start again — idempotent, refresh heartbeat.
+                    # Same device — idempotent, refresh heartbeat.
                     logger.info(
                         "StreamService: start called but already live for same device (idempotent)"
                     )
                     self._policy_resume_armed = True
                     self._user_stopped = False
-                    self._last_heartbeat_at = time.monotonic()
+                    # Treat an explicit re-start as a heartbeat so the timer resets.
+                    if self._last_heartbeat_at > 0:
+                        self._last_heartbeat_at = time.monotonic()
                     return {
                         "success": True,
                         "status": self._status.to_dict(),
@@ -193,10 +219,10 @@ class StreamService:
                         "owner_device_id": self._active_device_id,
                     }
 
-                # Different device (or no device_id) — takeover: stop old, start new.
+                # Different device (or no device_id) — begin takeover.
                 inherited_source = self._status.source_before_stream
                 logger.info(
-                    "StreamService: takeover (new_device=%s evicts device=%s cid=%s)",
+                    "StreamService: takeover phase-1 (new_device=%s evicts device=%s cid=%s)",
                     request_device_id or "-",
                     self._active_device_id or "-",
                     request_correlation_id,
@@ -211,55 +237,78 @@ class StreamService:
                 )
                 if self._manager:
                     self._manager.stop_receiver()
+                self._mid_takeover = True
+                # Save what we need for phase 3; _status still reflects the old
+                # session so concurrent status() callers see a live response.
 
-                if self._manager and not self._manager.start_receiver(
-                    correlation_id=request_correlation_id, wait_for_stop=True
-                ):
+        # ── Phase 2 (OUTSIDE lock): wait for old receiver to die ───────
+        # This keeps _lock free so status(), heartbeat(), is_alive() etc.
+        # are never blocked during the (potentially multi-hundred-ms) wait.
+        if self._mid_takeover and self._manager:
+            self._manager.wait_for_stop_complete(timeout=1.3)
+
+        # ── Phase 3 (inside lock again): start new receiver ───────────
+        if self._mid_takeover:
+            with self._lock:
+                self._mid_takeover = False
+                if not self._user_stopped:
+                    # _user_stopped=True means stop() was called while we waited.
+                    if self._manager and not self._manager.start_receiver(
+                        correlation_id=request_correlation_id
+                    ):
+                        self._status = StreamStatus(
+                            active=False,
+                            state="error",
+                            source_before_stream=inherited_source,
+                            last_error="receiver_start_failed",
+                        )
+                        self._active_correlation_id = None
+                        self._active_device_id = None
+                        self._policy_resume_armed = False
+                        self._last_heartbeat_at = 0.0
+                        log_error(
+                            "stream_takeover_failed",
+                            {
+                                "reason": "receiver_start_failed",
+                                "new_device_id": request_device_id,
+                                "correlation_id": request_correlation_id,
+                            },
+                        )
+                        # Fix 1: restore playlist so Pi doesn't stay silent.
+                        if inherited_source == "playlist":
+                            self._restore_playlist()
+                        return {"success": False, "status": self._status.to_dict()}
+
                     self._status = StreamStatus(
-                        active=False,
-                        state="error",
+                        active=True,
+                        state="live",
                         source_before_stream=inherited_source,
-                        last_error="receiver_start_failed",
+                        last_error=None,
                     )
-                    self._active_correlation_id = None
-                    self._active_device_id = None
-                    self._policy_resume_armed = False
-                    self._last_heartbeat_at = 0.0
-                    log_error(
-                        "stream_takeover_failed",
+                    self._active_correlation_id = request_correlation_id
+                    self._active_device_id = request_device_id
+                    self._policy_resume_armed = True
+                    self._user_stopped = False
+                    self._last_heartbeat_at = time.monotonic()  # Fix 2: Always monitor from start
+                    log_system(
+                        "stream_takeover_complete",
                         {
-                            "reason": "receiver_start_failed",
                             "new_device_id": request_device_id,
-                            "correlation_id": request_correlation_id,
+                            "new_correlation_id": request_correlation_id,
+                            "inherited_source": inherited_source,
                         },
                     )
+                    return {
+                        "success": True,
+                        "status": self._status.to_dict(),
+                        "takeover": True,
+                    }
+                else:
+                    # stop() was called during phase 2; return current (idle) state.
                     return {"success": False, "status": self._status.to_dict()}
 
-                self._status = StreamStatus(
-                    active=True,
-                    state="live",
-                    source_before_stream=inherited_source,
-                    last_error=None,
-                )
-                self._active_correlation_id = request_correlation_id
-                self._active_device_id = request_device_id
-                self._policy_resume_armed = True
-                self._user_stopped = False
-                self._last_heartbeat_at = time.monotonic()
-                log_system(
-                    "stream_takeover_complete",
-                    {
-                        "new_device_id": request_device_id,
-                        "new_correlation_id": request_correlation_id,
-                        "inherited_source": inherited_source,
-                    },
-                )
-                return {
-                    "success": True,
-                    "status": self._status.to_dict(),
-                    "takeover": True,
-                }
-
+        # ── Normal start (no takeover) ─────────────────────────────────
+        with self._lock:
             try:
                 self._user_stopped = False
                 player = self._player_fn()
@@ -319,7 +368,7 @@ class StreamService:
                 self._active_correlation_id = request_correlation_id
                 self._active_device_id = request_device_id
                 self._policy_resume_armed = True
-                self._last_heartbeat_at = time.monotonic()
+                self._last_heartbeat_at = time.monotonic()  # Fix 2: Always monitor from start
                 log_system(
                     "stream_started",
                     {
@@ -355,6 +404,9 @@ class StreamService:
             dict with 'success' and 'status' keys.
         """
         with self._lock:
+            # If a takeover is in flight between phase 1 and 3, signal it to abort.
+            self._mid_takeover = False
+
             if not self._status.active and self._status.state == "idle":
                 logger.info(
                     "StreamService: stop called but already idle (idempotent)"
@@ -448,10 +500,10 @@ class StreamService:
     def heartbeat(self, device_id: Optional[str] = None) -> dict:
         """Record a sender heartbeat to prevent auto-stop.
 
-        Senders should call this every ~5 s while streaming.  A stream
-        with an active device_id is automatically stopped after
-        HEARTBEAT_TIMEOUT (15 s) of no heartbeats — handling crashes and
-        network failures transparently.
+        Once called at least once, the heartbeat timer is active.  If no
+        heartbeat arrives within HEARTBEAT_TIMEOUT (15 s) the stream is
+        auto-stopped.  Senders that never call heartbeat are not monitored
+        (backward-compatible with old clients).
 
         Returns:
             dict with 'accepted' bool, optional 'reason', and 'status'.
@@ -489,6 +541,8 @@ class StreamService:
     def pause_for_announcement(self) -> dict:
         """Temporarily pause live stream for announcement playback."""
         with self._lock:
+            self._mid_takeover = False
+            
             if self._status.state == "paused_for_announcement":
                 return {"success": True, "status": self._status.to_dict()}
             if not self._status.active or self._status.state != "live":
@@ -557,6 +611,8 @@ class StreamService:
     def force_stop_by_policy(self) -> dict:
         """Force-stop stream output due to silence policy (intentional, non-error)."""
         with self._lock:
+            self._mid_takeover = False
+            
             if self._status.state == "stopped_by_policy" and not self._status.active:
                 return {"success": True, "status": self._status.to_dict()}
             if not self._status.active and self._status.state != "paused_for_announcement":
