@@ -663,7 +663,10 @@ class StreamClient:
                                 if getattr(clean, "ndim", 1) > 1:
                                     # Downmix stereo/multi-channel to mono.
                                     clean = clean.mean(axis=1)
+                                
+                                resample_active = False
                                 if capture_rate != _TARGET_SAMPLE_RATE:
+                                    resample_active = True
                                     output_frames = max(
                                         1,
                                         int(
@@ -675,16 +678,21 @@ class StreamClient:
                                         ),
                                     )
                                     if len(clean) > 1:
-                                        src_x = np.linspace(
-                                            0.0, 1.0, num=len(clean), endpoint=False
-                                        )
-                                        dst_x = np.linspace(
-                                            0.0, 1.0, num=output_frames, endpoint=False
-                                        )
-                                        clean = np.interp(dst_x, src_x, clean).astype(
-                                            np.float32,
-                                            copy=False,
-                                        )
+                                        try:
+                                            from scipy import signal
+                                            clean = signal.resample(clean, output_frames).astype(np.float32, copy=False)
+                                        except ImportError:
+                                            # Fallback if scipy is missing
+                                            src_x = np.linspace(
+                                                0.0, 1.0, num=len(clean), endpoint=False
+                                            )
+                                            dst_x = np.linspace(
+                                                0.0, 1.0, num=output_frames, endpoint=False
+                                            )
+                                            clean = np.interp(dst_x, src_x, clean).astype(
+                                                np.float32,
+                                                copy=False,
+                                            )
                                     else:
                                         clean = np.repeat(clean, output_frames)
                                 pcm = np.clip(clean * 32767, -32768, 32767).astype(
@@ -742,9 +750,11 @@ class StreamClient:
                                                 packets_per_sec=packets_per_sec,
                                                 channels=channels,
                                                 sample_rate=_TARGET_SAMPLE_RATE,
+                                                target_sample_rate=_TARGET_SAMPLE_RATE,
                                                 capture_sample_rate=capture_rate,
                                                 block_size=_BLOCK_SIZE,
                                                 capture_block_size=capture_block_size,
+                                                resample_active=resample_active,
                                             )
                                             last_telemetry_mono = now_mono
                                             last_telemetry_packets = total_packets

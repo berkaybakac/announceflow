@@ -26,6 +26,7 @@ Pillow==10.1.0       # Image processing (required by pystray)
 # ---------------------------------------------------------
 soundcard==0.4.4     # WASAPI loopback audio capture (no extra drivers needed)
 numpy==1.24.4        # PCM format conversion (float32 → s16le)
+scipy==1.11.3        # High-quality audio resampling (interp -> resample)
 
 # ---------------------------------------------------------
 # Build Tools (PyInstaller)

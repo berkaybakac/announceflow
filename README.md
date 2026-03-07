@@ -89,6 +89,7 @@ REST API with Flask Blueprints. JSON request/response format.
 SQLite with foreign key relationships and indexed queries.
 
 **Tables:**
+
 - `media_files` - Uploaded audio files with duration metadata
 - `one_time_schedules` - Single-use scheduled announcements
 - `recurring_schedules` - Repeating schedules (daily, weekly patterns)
@@ -101,21 +102,25 @@ SQLite with foreign key relationships and indexed queries.
 ## Key Features
 
 **Audio Management**
+
 - Playlist playback with loop support
 - Resume from exact position after interruption
 - Multi-format support (MP3, WAV, FLAC, M4A) via FFmpeg conversion
 
 **External API Integration**
+
 - Turkish Diyanet API for prayer times
 - 7-day cache for offline operation
 - Location-based queries (81 provinces, 900+ districts)
 
 **Scheduling**
+
 - One-time announcements for specific datetime
 - Recurring announcements with daily/weekly patterns
 - Business hours automation with auto-mute
 
 **Reliability**
+
 - State persistence in SQLite database
 - Automatic recovery after power failure
 - systemd service with restart policy
@@ -162,6 +167,7 @@ announceflow/
 ## Deployment
 
 **Development:**
+
 ```bash
 python3 -m venv venv
 source venv/bin/activate
@@ -170,6 +176,7 @@ python main.py
 ```
 
 **Production (Raspberry Pi):**
+
 ```bash
 ./deploy.sh pi4.local
 ```
@@ -186,7 +193,15 @@ python -m pytest tests/test_api.py -v
 
 Test coverage includes: health endpoint, authentication flow, volume control, player state, media library operations, playlist control, and page rendering.
 
-### Windows Agent Diagnostic Bundle
+### Agent Diagnostic Logs (Sender/Windows)
+
+For diagnosing audio quality (crackling/resampling) or connection issues on the Windows Agent, check the files in the following local AppData directory:
+`%LOCALAPPDATA%\AnnounceFlow\logs\`
+
+- **`agent_stream.log`**: Contains stream telemetry, including `capture_sample_rate`, `target_sample_rate`, `capture_block_size`, and whether `resample_active` triggered (e.g. 48000Hz to 44100Hz conversion via scipy).
+- **`agent.log`**: Contains general application errors, UI logins, and file upload logs.
+
+### Windows Agent Diagnostic Bundle (Advanced)
 
 If stream start fails on a Windows 10/11 target machine, collect logs from that same machine.
 

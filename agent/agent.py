@@ -664,6 +664,32 @@ class AnnounceFlowAgent:
             result["error"] = payload.get("error", "api_stop_failed")
         return result
 
+    def send_heartbeat(self) -> bool:
+        """Send stream heartbeat to keep the session alive."""
+        device_id = getattr(self, "device_id", None)
+        headers = {}
+        if isinstance(device_id, str) and device_id.strip():
+            headers["X-Stream-Device-Id"] = device_id.strip()
+            
+        response = self._request(
+            "POST",
+            "/api/stream/heartbeat",
+            auth_required=True,
+            headers=headers if headers else None,
+            timeout=DEFAULT_TIMEOUT,
+        )
+        return bool(response and response.ok)
+
+    def get_stream_status(self) -> Dict[str, Any]:
+        """Get stream status to detect if someone else took over."""
+        response = self._request("GET", "/api/stream/status", auth_required=True)
+        if response is None:
+            return {}
+        try:
+            return response.json() if response.ok else {}
+        except ValueError:
+            return {}
+
     def start_stream(self) -> bool:
         """Backward-compatible bool API for stream start."""
         return bool(self.start_stream_with_details(correlation_id=None).get("success"))
@@ -752,6 +778,11 @@ class AgentGUI:
         self._btn_stream_start: Optional[ModernButton] = None
         self._btn_stream_stop: Optional[ModernButton] = None
         self._btn_upload: Optional[ModernButton] = None
+        
+        # State tracking for polling loops
+        self._stream_active = False
+        self._heartbeat_job = None
+        self._poll_job = None
 
     def run(self):
         """Run the GUI application."""
@@ -1370,6 +1401,8 @@ class AgentGUI:
                     correlation_id,
                     attempt.get("packet_count"),
                 )
+                self._stream_active = True
+                self._start_stream_polling_loops()
                 self._show_status("Canlı yayın başlatıldı")
             elif result == "sender_fail":
                 attempt = payload.get("attempt") or {}
@@ -1434,6 +1467,10 @@ class AgentGUI:
             if not isinstance(payload, dict):
                 payload = {"success": bool(payload)}
             success = bool(payload.get("success"))
+            
+            self._stream_active = False
+            self._stop_stream_polling_loops()
+            
             if success:
                 self._show_status("Yayın durduruldu")
             else:
@@ -1465,10 +1502,88 @@ class AgentGUI:
 
     def logout(self):
         """Logout and return to login screen."""
+        self._stream_active = False
+        self._stop_stream_polling_loops()
         delete_credentials(self.agent.api_base)
         self.agent.close()
+        # Ensure any active stream is stopped
+        if hasattr(self, '_stream_client'):
+            self._stream_client.stop_sender()
         self.logged_in = False
         self.show_login_frame()
+
+    def _start_stream_polling_loops(self):
+        """Start the loops that maintain stream health and watch for takeovers."""
+        if not self._root_alive():
+            return
+        self._stop_stream_polling_loops()
+        self._heartbeat_job = self.root.after(4500, self._run_heartbeat)
+        self._poll_job = self.root.after(2000, self._run_status_poll)
+
+    def _stop_stream_polling_loops(self):
+        if self._heartbeat_job is not None and self.root:
+            try:
+                self.root.after_cancel(self._heartbeat_job)
+            except tk.TclError:
+                pass
+            self._heartbeat_job = None
+            
+        if self._poll_job is not None and self.root:
+            try:
+                self.root.after_cancel(self._poll_job)
+            except tk.TclError:
+                pass
+            self._poll_job = None
+
+    def _run_heartbeat(self):
+        """Send a heartbeat. Loop if still active."""
+        if not self._stream_active or not self._root_alive():
+            return
+            
+        def _job():
+            return self.agent.send_heartbeat()
+            
+        def _on_done(success):
+            if not self._root_alive():
+                return
+            if not success:
+                logger.warning("Agent stream heartbeat failed")
+            # Schedule next regardless of success, server drops us if too many fail
+            if self._stream_active:
+                self._heartbeat_job = self.root.after(4500, self._run_heartbeat)
+                
+        self._submit_network_job(_job, on_success=_on_done)
+
+    def _run_status_poll(self):
+        """Check if someone else took over the stream. Loop if still active."""
+        if not self._stream_active or not self._root_alive():
+            return
+            
+        def _job():
+            return self.agent.get_stream_status()
+            
+        def _on_done(status):
+            if not self._root_alive() or not self._stream_active:
+                return
+                
+            is_active = status.get("active")
+            owner_device_id = status.get("owner_device_id")
+            my_device_id = getattr(self.agent, "device_id", None)
+            
+            # If stream is active but owned by someone else -> takeover occurred
+            if is_active and owner_device_id and my_device_id and owner_device_id != my_device_id:
+                stream_logger.info("stream_takeover_detected new_owner=%s", owner_device_id)
+                self._stream_active = False # Stop loops immediately
+                
+                # Stop local capture thread
+                self._submit_network_job(
+                    lambda: self._stream_client.stop_sender(),
+                    on_success=lambda _: self._show_status("Yayın başka bir cihaza devredildi!", error=True)
+                )
+            elif self._stream_active:
+                self._poll_job = self.root.after(2000, self._run_status_poll)
+                
+        self._submit_network_job(_job, on_success=_on_done)
 
     def clear_frame(self):
         """Clear all widgets from root."""
