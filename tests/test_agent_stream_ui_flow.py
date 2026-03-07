@@ -334,6 +334,7 @@ class TestStreamApiDetailedWrappers:
     def test_start_stream_with_details_success_payload(self):
         agent_mod = _import_agent()
         agent = agent_mod.AnnounceFlowAgent.__new__(agent_mod.AnnounceFlowAgent)
+        agent.device_id = "dev-test-1"
         response = MagicMock()
         response.ok = True
         response.status_code = 200
@@ -344,14 +345,43 @@ class TestStreamApiDetailedWrappers:
         assert result["success"] is True
         assert result["http_status"] == 200
         assert result["status"]["state"] == "live"
+        agent._request.assert_called_once_with(
+            "POST",
+            "/api/stream/start",
+            auth_required=True,
+            headers={"X-Stream-Device-Id": "dev-test-1"},
+        )
 
     def test_start_stream_with_details_connection_failure(self):
         agent_mod = _import_agent()
         agent = agent_mod.AnnounceFlowAgent.__new__(agent_mod.AnnounceFlowAgent)
+        agent.device_id = "dev-test-2"
         agent._request = MagicMock(return_value=None)
 
         result = agent.start_stream_with_details()
         assert result == {"success": False, "error": "api_start_failed"}
+
+    def test_start_stream_with_details_sends_correlation_and_device_headers(self):
+        agent_mod = _import_agent()
+        agent = agent_mod.AnnounceFlowAgent.__new__(agent_mod.AnnounceFlowAgent)
+        agent.device_id = "dev-test-3"
+        response = MagicMock()
+        response.ok = True
+        response.status_code = 200
+        response.json.return_value = {"success": True, "status": {"state": "live"}}
+        agent._request = MagicMock(return_value=response)
+
+        result = agent.start_stream_with_details(correlation_id="cid-test-1")
+        assert result["success"] is True
+        agent._request.assert_called_once_with(
+            "POST",
+            "/api/stream/start",
+            auth_required=True,
+            headers={
+                "X-Stream-Correlation-Id": "cid-test-1",
+                "X-Stream-Device-Id": "dev-test-3",
+            },
+        )
 
     def test_stop_stream_with_details_invalid_json(self):
         agent_mod = _import_agent()

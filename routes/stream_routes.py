@@ -30,14 +30,20 @@ _stream_service = get_stream_service()
 def stream_start():
     """Start a stream session."""
     correlation_id = request.headers.get("X-Stream-Correlation-Id", "").strip() or None
-    if correlation_id:
-        result = _stream_service.start(correlation_id=correlation_id)
+    device_id = request.headers.get("X-Stream-Device-Id", "").strip() or None
+    if correlation_id or device_id:
+        result = _stream_service.start(
+            correlation_id=correlation_id,
+            device_id=device_id,
+        )
     else:
         result = _stream_service.start()
     if result["success"]:
         return _json_success(status=result["status"])
+    if result.get("error") == "stream_already_live":
+        return _json_error("stream_already_live", status=409)
     return _json_error(
-        result["status"].get("last_error", "stream_start_failed"),
+        result.get("error") or result["status"].get("last_error", "stream_start_failed"),
         status=500,
     )
 

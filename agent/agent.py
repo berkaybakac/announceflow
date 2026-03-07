@@ -10,6 +10,7 @@ import tempfile
 import webbrowser
 import logging
 import time
+import uuid
 import tkinter as tk
 from tkinter import ttk, filedialog
 from typing import Optional, Dict, Any
@@ -59,6 +60,7 @@ AGENT_RUNTIME_DIR = _resolve_agent_runtime_dir()
 AGENT_LOG_DIR = os.path.join(AGENT_RUNTIME_DIR, "logs")
 AGENT_LOG_FILE = os.path.join(AGENT_LOG_DIR, "agent.log")
 AGENT_STREAM_LOG_FILE = os.path.join(AGENT_LOG_DIR, "agent_stream.log")
+AGENT_DEVICE_ID_FILE = os.path.join(AGENT_RUNTIME_DIR, "device_id.txt")
 
 
 def setup_agent_logging() -> None:
@@ -186,6 +188,30 @@ def save_agent_config(config):
     """Save agent configuration."""
     with open(CONFIG_FILE, "w") as f:
         json.dump(config, f, indent=2)
+
+
+def _load_or_create_device_id() -> str:
+    """Load stable device_id from disk or create one on first run."""
+    try:
+        os.makedirs(AGENT_RUNTIME_DIR, exist_ok=True)
+    except OSError:
+        pass
+
+    try:
+        with open(AGENT_DEVICE_ID_FILE, "r", encoding="utf-8") as f:
+            existing = f.read().strip()
+        if existing:
+            return existing
+    except OSError:
+        pass
+
+    device_id = f"agent-{uuid.uuid4()}"
+    try:
+        with open(AGENT_DEVICE_ID_FILE, "w", encoding="utf-8") as f:
+            f.write(device_id)
+    except OSError as exc:
+        logger.warning("Could not persist device_id, using volatile id: %s", exc)
+    return device_id
 
 
 def get_icon(name, size=(24, 24)):
@@ -421,6 +447,7 @@ class AnnounceFlowAgent:
     def __init__(self):
         self.config = load_agent_config()
         self.api_base = self.config.get("api_base", API_BASE)
+        self.device_id = _load_or_create_device_id()
         self.session = None
         self._session_lock = threading.RLock()
 
@@ -582,6 +609,9 @@ class AnnounceFlowAgent:
         headers = {}
         if correlation_id:
             headers["X-Stream-Correlation-Id"] = correlation_id
+        device_id = getattr(self, "device_id", None)
+        if isinstance(device_id, str) and device_id.strip():
+            headers["X-Stream-Device-Id"] = device_id.strip()
         response = self._request(
             "POST",
             "/api/stream/start",
@@ -1372,6 +1402,7 @@ class AgentGUI:
                     "api_start_failed": "Sunucuya bağlanılamadı",
                     "api_start_invalid_response": "Sunucudan geçersiz cevap alındı",
                     "receiver_start_failed": "Sunucu yayın alıcısını başlatamadı",
+                    "stream_already_live": "Yayın zaten aktif. Önce mevcut yayını durdurun.",
                 }
                 stream_logger.error(
                     "stream_start_api_fail correlation_id=%s error_code=%s http_status=%s",

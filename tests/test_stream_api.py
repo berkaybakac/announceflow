@@ -80,13 +80,35 @@ class TestStreamServiceStart:
             correlation_id="cid-generated"
         )
 
-    def test_start_idempotent(self, mock_manager, mock_player):
+    def test_start_while_live_returns_already_live(self, mock_manager, mock_player):
         svc = _make_service(mock_manager, mock_player)
         r1 = svc.start()
         r2 = svc.start()
         assert r1["success"] is True
+        assert r2["success"] is False
+        assert r2["error"] == "stream_already_live"
+        assert r2["status"]["active"] is True
+        mock_manager.start_receiver.assert_called_once()
+
+    def test_start_while_live_same_device_is_idempotent(self, mock_manager, mock_player):
+        svc = _make_service(mock_manager, mock_player)
+        r1 = svc.start(correlation_id="cid-1", device_id="dev-1")
+        r2 = svc.start(correlation_id="cid-2", device_id="dev-1")
+        assert r1["success"] is True
         assert r2["success"] is True
         assert r2["status"]["active"] is True
+        mock_manager.start_receiver.assert_called_once()
+
+    def test_start_while_live_different_device_is_rejected(
+        self, mock_manager, mock_player
+    ):
+        svc = _make_service(mock_manager, mock_player)
+        r1 = svc.start(correlation_id="cid-1", device_id="dev-1")
+        r2 = svc.start(correlation_id="cid-2", device_id="dev-2")
+        assert r1["success"] is True
+        assert r2["success"] is False
+        assert r2["error"] == "stream_already_live"
+        assert r2["owner_device_id"] == "dev-1"
         mock_manager.start_receiver.assert_called_once()
 
     def test_start_stops_playlist(self, mock_manager, mock_player):
@@ -255,7 +277,26 @@ class TestStreamRoutes:
             headers={"X-Stream-Correlation-Id": "cid-route-1"},
         )
         assert resp.status_code == 200
-        mock_svc.start.assert_called_once_with(correlation_id="cid-route-1")
+        mock_svc.start.assert_called_once_with(
+            correlation_id="cid-route-1",
+            device_id=None,
+        )
+
+    @patch("routes.stream_routes._stream_service")
+    def test_start_endpoint_forwards_device_header(self, mock_svc, client):
+        mock_svc.start.return_value = {
+            "success": True,
+            "status": StreamStatus(active=True, state="live").to_dict(),
+        }
+        resp = client.post(
+            "/api/stream/start",
+            headers={"X-Stream-Device-Id": "dev-route-1"},
+        )
+        assert resp.status_code == 200
+        mock_svc.start.assert_called_once_with(
+            correlation_id=None,
+            device_id="dev-route-1",
+        )
 
     @patch("routes.stream_routes._stream_service")
     def test_stop_endpoint_200(self, mock_svc, client):
@@ -321,6 +362,16 @@ class TestStreamRoutes:
         }
         resp = client.post("/api/stream/start")
         assert resp.status_code == 500
+
+    @patch("routes.stream_routes._stream_service")
+    def test_start_already_live_returns_409(self, mock_svc, client):
+        mock_svc.start.return_value = {
+            "success": False,
+            "error": "stream_already_live",
+            "status": StreamStatus(active=True, state="live").to_dict(),
+        }
+        resp = client.post("/api/stream/start")
+        assert resp.status_code == 409
 
 
 # --------------- Mini gate: full lifecycle ---------------

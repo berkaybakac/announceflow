@@ -77,6 +77,18 @@ class TestStreamStartRoute:
         data = resp.get_json()
         assert "error" in data
 
+    @patch("routes.stream_routes._stream_service")
+    def test_start_already_live_returns_409(self, mock_svc, client):
+        mock_svc.start.return_value = {
+            "success": False,
+            "error": "stream_already_live",
+            "status": StreamStatus(active=True, state="live").to_dict(),
+        }
+        resp = client.post("/api/stream/start")
+        assert resp.status_code == 409
+        data = resp.get_json()
+        assert data["error"] == "stream_already_live"
+
 
 class TestStreamStopRoute:
     """POST /api/stream/stop — UI expects {success, status}."""
