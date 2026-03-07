@@ -1,6 +1,6 @@
 """
 AnnounceFlow - Stream Routes
-HTTP endpoints for stream control: start, stop, status.
+HTTP endpoints for stream control: start, stop, status, heartbeat.
 
 Responsibilities:
 - HTTP request/response handling and input validation
@@ -11,6 +11,7 @@ V1 API contract (PI4_STREAM_V1_SCOPE.md section 4):
     POST /api/stream/start
     POST /api/stream/stop
     GET  /api/stream/status
+    POST /api/stream/heartbeat
 """
 import logging
 
@@ -66,3 +67,29 @@ def stream_stop():
 def stream_status():
     """Get current stream status."""
     return jsonify(_stream_service.status())
+
+
+@stream_bp.route("/api/stream/heartbeat", methods=["POST"])
+@login_required
+def stream_heartbeat():
+    """Record a sender heartbeat to keep the stream alive.
+
+    Senders call this every ~5 s while streaming.  If no heartbeat is
+    received for HEARTBEAT_TIMEOUT (15 s), the stream is auto-stopped.
+
+    Header:
+        X-Stream-Device-Id: <device_id>  (same value used in /start)
+
+    Responses:
+        200  heartbeat accepted
+        409  caller is not the current stream owner
+        400  no stream is currently active
+    """
+    device_id = request.headers.get("X-Stream-Device-Id", "").strip() or None
+    result = _stream_service.heartbeat(device_id=device_id)
+    if result["accepted"]:
+        return _json_success(status=result["status"])
+    reason = result.get("reason", "heartbeat_rejected")
+    if reason == "not_owner":
+        return _json_error("not_stream_owner", status=409)
+    return _json_error(reason, status=400)
