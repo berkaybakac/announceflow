@@ -27,6 +27,7 @@ def mock_manager():
     mgr.start_receiver.return_value = True
     mgr.stop_receiver.return_value = True
     mgr.is_alive.return_value = False
+    mgr.wait_for_stop_complete.return_value = None
     return mgr
 
 
@@ -182,6 +183,13 @@ class TestStreamServiceStart:
             "/media/song.mp3", start_position=12.5
         )
 
+    def test_start_sets_heartbeat_timestamp(self, mock_manager, mock_player):
+        """Fix 2: _last_heartbeat_at must be initialized on start to monitor everyone."""
+        svc = _make_service(mock_manager, mock_player)
+        svc.start(device_id="dev-1")
+        assert svc._last_heartbeat_at > 0.0
+
+
 
 class TestStreamServiceStop:
     def test_stop_returns_active_false(self, mock_manager, mock_player):
@@ -215,6 +223,13 @@ class TestStreamServiceStop:
         assert result["status"]["active"] is False
         assert result["status"]["state"] == "error"
         assert result["status"]["last_error"] == "receiver_stop_failed"
+
+    def test_stop_clears_mid_takeover_flag(self, mock_manager, mock_player):
+        """stop() during a takeover cancels it."""
+        svc = _make_service(mock_manager, mock_player)
+        svc._mid_takeover = True
+        svc.stop()
+        assert svc._mid_takeover is False
 
 
 class TestStreamServiceStatus:
@@ -284,6 +299,13 @@ class TestStreamServiceTakeover:
         assert mock_manager.stop_receiver.call_count == 1
         assert mock_manager.start_receiver.call_count == 2
 
+    def test_takeover_calls_wait_for_stop_complete(self, mock_manager, mock_player):
+        """Takeover must call wait_for_stop_complete (outside service lock)."""
+        svc = _make_service(mock_manager, mock_player)
+        svc.start(device_id="dev-1")
+        svc.start(device_id="dev-2")
+        mock_manager.wait_for_stop_complete.assert_called_once()
+
     def test_takeover_preserves_source_before_stream(self, mock_manager, mock_player):
         mock_player.get_state.return_value = {
             "is_playing": True,
@@ -324,26 +346,66 @@ class TestStreamServiceTakeover:
         st = svc.status()
         assert st["owner_device_id"] == "dev-2"
 
+    @patch("services.stream_service.StreamService._restore_playlist")
+    def test_takeover_failure_restores_playlist(
+        self, mock_restore, mock_manager, mock_player
+    ):
+        """Fix 1: takeover receiver failure must restore playlist to prevent silence."""
+        mock_player.get_state.return_value = {
+            "is_playing": True,
+            "playlist": {"active": True},
+        }
+        svc = _make_service(mock_manager, mock_player)
+        svc.start(device_id="dev-1")
+        # Make the takeover's start_receiver call fail (phase 3).
+        mock_manager.start_receiver.side_effect = None
+        mock_manager.start_receiver.return_value = False
+        r2 = svc.start(device_id="dev-2")
+        assert r2["success"] is False
+        assert r2["status"]["state"] == "error"
+        mock_restore.assert_called_once()
+
     def test_takeover_receiver_start_failure_sets_error(
         self, mock_manager, mock_player
     ):
         svc = _make_service(mock_manager, mock_player)
         svc.start(device_id="dev-1")
+        mock_manager.start_receiver.side_effect = None
         mock_manager.start_receiver.return_value = False
         r2 = svc.start(device_id="dev-2")
         assert r2["success"] is False
         assert r2["status"]["state"] == "error"
         assert r2["status"]["last_error"] == "receiver_start_failed"
 
-    def test_takeover_uses_wait_for_stop(self, mock_manager, mock_player):
-        """Takeover path must pass wait_for_stop=True to start_receiver."""
+    def test_concurrent_start_during_takeover_is_rejected(
+        self, mock_manager, mock_player
+    ):
+        """While _mid_takeover is True, a concurrent start returns an error."""
         svc = _make_service(mock_manager, mock_player)
         svc.start(device_id="dev-1")
-        svc.start(device_id="dev-2")
-        # Second start_receiver call should have wait_for_stop=True
-        calls = mock_manager.start_receiver.call_args_list
-        assert len(calls) == 2
-        assert calls[1].kwargs.get("wait_for_stop") is True
+        # Simulate phase 2: mid-takeover flag set
+        svc._mid_takeover = True
+        r = svc.start(device_id="dev-3")
+        assert r["success"] is False
+        assert r["error"] == "takeover_in_progress"
+
+    def test_pause_or_policy_during_takeover_aborts_takeover(
+        self, mock_manager, mock_player
+    ):
+        """Fix 3 flaw: pause/policy_stop during Phase 2 wait must clear _mid_takeover."""
+        svc = _make_service(mock_manager, mock_player)
+        svc.start(device_id="dev-1")
+        svc._mid_takeover = True
+        
+        # Someone calls pause_for_announcement while takeover is waiting
+        svc.pause_for_announcement()
+        
+        # Then Phase 3 resumes. If _mid_takeover wasn't cleared, it proceeds and overwrites state!
+        assert svc._mid_takeover is False, "pause_for_announcement must clear _mid_takeover"
+        
+        svc._mid_takeover = True
+        svc.force_stop_by_policy()
+        assert svc._mid_takeover is False, "force_stop_by_policy must clear _mid_takeover"
 
 
 # --------------- Heartbeat unit tests ---------------
@@ -380,7 +442,8 @@ class TestStreamServiceHeartbeat:
         result = svc.heartbeat(device_id="dev-1")
         assert result["accepted"] is True
 
-    def test_heartbeat_updates_last_heartbeat_at(self, mock_manager, mock_player):
+    def test_heartbeat_activates_monitoring(self, mock_manager, mock_player):
+        """_last_heartbeat_at is refreshed appropriately on heartbeat."""
         svc = _make_service(mock_manager, mock_player)
         svc.start(device_id="dev-1")
         before = svc._last_heartbeat_at
@@ -391,7 +454,7 @@ class TestStreamServiceHeartbeat:
     def test_heartbeat_expiry_auto_stops_stream(self, mock_manager, mock_player):
         svc = _make_service(mock_manager, mock_player)
         svc.start(device_id="dev-1")
-        # Simulate expired heartbeat by backdating the timestamp.
+        # Activate monitoring and immediately expire it.
         svc._last_heartbeat_at = time.monotonic() - (HEARTBEAT_TIMEOUT + 1)
         stopped = svc._check_heartbeat()
         assert stopped is True
@@ -400,27 +463,41 @@ class TestStreamServiceHeartbeat:
         assert st["state"] == "idle"
         mock_manager.stop_receiver.assert_called_once()
 
+    def test_heartbeat_expiry_stops_stream_without_device_id(
+        self, mock_manager, mock_player
+    ):
+        """Fix 2: streams without device_id are also monitored after first HB."""
+        svc = _make_service(mock_manager, mock_player)
+        svc.start()  # no device_id
+        svc._last_heartbeat_at = time.monotonic() - (HEARTBEAT_TIMEOUT + 1)
+        stopped = svc._check_heartbeat()
+        assert stopped is True
+        mock_manager.stop_receiver.assert_called_once()
+
     def test_heartbeat_not_expired_does_not_stop(self, mock_manager, mock_player):
         svc = _make_service(mock_manager, mock_player)
         svc.start(device_id="dev-1")
-        svc._last_heartbeat_at = time.monotonic() - 5  # 5 s ago, well within limit
+        svc._last_heartbeat_at = time.monotonic() - 5  # 5 s, well within limit
         result = svc._check_heartbeat()
         assert result is False
         mock_manager.stop_receiver.assert_not_called()
 
-    def test_heartbeat_no_device_id_not_monitored(self, mock_manager, mock_player):
-        """Streams without device_id are never auto-stopped by heartbeat expiry."""
+    def test_stream_without_heartbeat_gets_monitored(self, mock_manager, mock_player):
+        """Fix 2: Stream that never sends heartbeat is still monitored from start."""
         svc = _make_service(mock_manager, mock_player)
-        svc.start()  # no device_id → _active_device_id is None
-        svc._last_heartbeat_at = time.monotonic() - 999
+        svc.start(device_id="dev-1")
+        assert svc._last_heartbeat_at > 0.0  # monitoring starts immediately
+        # Simulate expiry
+        svc._last_heartbeat_at = time.monotonic() - (HEARTBEAT_TIMEOUT + 1)
         result = svc._check_heartbeat()
-        assert result is False
-        mock_manager.stop_receiver.assert_not_called()
+        assert result is True
+        mock_manager.stop_receiver.assert_called_once()
 
     def test_heartbeat_resets_on_stop(self, mock_manager, mock_player):
         svc = _make_service(mock_manager, mock_player)
         svc.start(device_id="dev-1")
-        assert svc._last_heartbeat_at > 0
+        svc.heartbeat(device_id="dev-1")
+        assert svc._last_heartbeat_at > 0.0
         svc.stop()
         assert svc._last_heartbeat_at == 0.0
 
@@ -640,6 +717,18 @@ class TestPlaylistStreamGuard:
     """Playlist endpoints must reject playback when stream is active."""
 
     @patch("routes.playlist_routes.get_stream_service")
+    def test_set_blocked_when_stream_live(self, mock_get_svc, client):
+        """Fix 4: /set must also be guarded."""
+        mock_svc = MagicMock()
+        mock_svc.status.return_value = {"active": True, "state": "live"}
+        mock_get_svc.return_value = mock_svc
+        resp = client.post(
+            "/api/playlist/set",
+            json={"media_ids": [1, 2]},
+        )
+        assert resp.status_code == 409
+
+    @patch("routes.playlist_routes.get_stream_service")
     def test_start_all_blocked_when_stream_live(self, mock_get_svc, client):
         mock_svc = MagicMock()
         mock_svc.status.return_value = {"active": True, "state": "live"}
@@ -662,6 +751,15 @@ class TestPlaylistStreamGuard:
         mock_get_svc.return_value = mock_svc
         # Will fail with 404 (no music files) but should NOT be 409
         resp = client.post("/api/playlist/start-all")
+        assert resp.status_code != 409
+
+    @patch("routes.playlist_routes.get_stream_service")
+    def test_set_allowed_when_stream_idle(self, mock_get_svc, client):
+        mock_svc = MagicMock()
+        mock_svc.status.return_value = {"active": False, "state": "idle"}
+        mock_get_svc.return_value = mock_svc
+        # Will fail with 400/404 (no body) but NOT 409
+        resp = client.post("/api/playlist/set", json={})
         assert resp.status_code != 409
 
 
