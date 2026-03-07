@@ -10,11 +10,22 @@ import pytest
 from stream_manager import StreamManager
 
 
+class _FakeStdin:
+    """Minimal stdin mock that supports close() without error."""
+
+    def __init__(self):
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+
+
 class _AliveProc:
     def __init__(self):
         self.pid = 4242
         self.returncode = None
         self._terminated = False
+        self.stdin = _FakeStdin()
 
     def poll(self):
         return None if not self._terminated else 0
@@ -53,6 +64,7 @@ class _DeadProc:
     def __init__(self, returncode=1):
         self.pid = 9898
         self.returncode = returncode
+        self.stdin = _FakeStdin()
 
     def poll(self):
         return self.returncode
@@ -63,7 +75,7 @@ def fake_popen(monkeypatch):
     captured = {}
     proc = _AliveProc()
 
-    def _fake_popen(cmd, stdout=None, stderr=None, env=None):
+    def _fake_popen(cmd, stdin=None, stdout=None, stderr=None, env=None):
         captured["cmd"] = cmd
         captured["env"] = env
         return proc
@@ -78,7 +90,7 @@ def fake_popen_timeout(monkeypatch):
     captured = {}
     proc = _TimeoutProc()
 
-    def _fake_popen(cmd, stdout=None, stderr=None, env=None):
+    def _fake_popen(cmd, stdin=None, stdout=None, stderr=None, env=None):
         captured["cmd"] = cmd
         captured["env"] = env
         captured["proc"] = proc
@@ -123,7 +135,7 @@ def test_start_receiver_concurrent_calls_spawn_once(monkeypatch):
     first_call_entered = threading.Event()
     release_first_call = threading.Event()
 
-    def _fake_popen(cmd, stdout=None, stderr=None, env=None):
+    def _fake_popen(cmd, stdin=None, stdout=None, stderr=None, env=None):
         popen_calls["count"] += 1
         first_call_entered.set()
         release_first_call.wait(timeout=1)
@@ -157,7 +169,7 @@ def test_start_failure_counter_warns_on_third_and_resets_on_success(monkeypatch)
     ]
     popen_calls = {"count": 0}
 
-    def _fake_popen(cmd, stdout=None, stderr=None, env=None):
+    def _fake_popen(cmd, stdin=None, stdout=None, stderr=None, env=None):
         popen_calls["count"] += 1
         return outcomes.pop(0)
 
@@ -182,3 +194,75 @@ def test_start_failure_counter_warns_on_third_and_resets_on_success(monkeypatch)
         assert mgr._consecutive_start_failures == 0
 
     assert popen_calls["count"] == 7
+
+
+def test_start_rejected_while_previous_stop_in_progress(monkeypatch):
+    class _StuckOnTerminateProc(_AliveProc):
+        def __init__(self):
+            super().__init__()
+            self.killed = False
+
+        def terminate(self):
+            # Simulate process ignoring SIGTERM.
+            pass
+
+        def wait(self, timeout=None):
+            if not self.killed:
+                raise subprocess.TimeoutExpired(cmd="receiver", timeout=timeout)
+            self._terminated = True
+            return 0
+
+        def kill(self):
+            self.killed = True
+            self._terminated = True
+
+    proc = _StuckOnTerminateProc()
+
+    def _fake_popen(cmd, stdin=None, stdout=None, stderr=None, env=None):
+        return proc
+
+    monkeypatch.setattr("stream_manager.time.sleep", lambda _x: None)
+    monkeypatch.setattr("stream_manager.subprocess.Popen", _fake_popen)
+    monkeypatch.setattr(
+        StreamManager,
+        "_background_kill",
+        lambda self, _proc: time.sleep(0.2),
+    )
+
+    mgr = StreamManager(port=5800)
+    assert mgr.start_receiver() is True
+    assert mgr.stop_receiver() is True
+    assert mgr.start_receiver() is False
+
+
+def test_stop_receiver_closes_stdin_before_terminate(monkeypatch):
+    """Verify stop closes stdin pipe before sending SIGTERM for graceful ffmpeg exit."""
+    call_order = []
+
+    class _OrderTrackingProc(_AliveProc):
+        def __init__(self):
+            super().__init__()
+            self.stdin = _FakeStdin()
+            # Override close to track order
+            original_close = self.stdin.close
+            def tracked_close():
+                call_order.append("stdin_close")
+                original_close()
+            self.stdin.close = tracked_close
+
+        def terminate(self):
+            call_order.append("terminate")
+            super().terminate()
+
+    proc = _OrderTrackingProc()
+
+    def _fake_popen(cmd, stdin=None, stdout=None, stderr=None, env=None):
+        return proc
+
+    monkeypatch.setattr("stream_manager.time.sleep", lambda _x: None)
+    monkeypatch.setattr("stream_manager.subprocess.Popen", _fake_popen)
+
+    mgr = StreamManager(port=5800)
+    assert mgr.start_receiver() is True
+    assert mgr.stop_receiver() is True
+    assert call_order == ["stdin_close", "terminate"]
