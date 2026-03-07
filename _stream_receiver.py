@@ -414,13 +414,12 @@ def main():
     drain_thread.start()
 
     def _cleanup():
-        """Gracefully stop ffmpeg via stdin 'q' command.
+        """Gracefully stop ffmpeg via stdin 'q' + SIGTERM.
 
-        Only sends 'q' + closes stdin.  Does NOT send SIGTERM here —
-        the manager's escalation chain (SIGTERM -> wait -> SIGKILL)
-        handles fallback if 'q' alone doesn't work.  Sending SIGTERM
-        immediately after 'q' would race and could pre-empt the clean
-        exit path.
+        Sends 'q' first (best-effort), then SIGTERM.  FFmpeg with UDP
+        input blocks on recvfrom() and never reads stdin, so 'q' alone
+        is not reliable.  SIGTERM is a kernel-level signal that reaches
+        ffmpeg regardless of what syscall it's blocked on.
         """
         try:
             if proc.stdin and not proc.stdin.closed:
@@ -428,6 +427,10 @@ def main():
                 proc.stdin.flush()
                 proc.stdin.close()
         except (OSError, BrokenPipeError, ValueError):
+            pass
+        try:
+            proc.terminate()
+        except (OSError, ProcessLookupError):
             pass
 
     atexit.register(_cleanup)
