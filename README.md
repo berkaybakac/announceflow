@@ -247,6 +247,48 @@ powershell -ExecutionPolicy Bypass -File .\preflight_windows_audio.ps1
 
 The scripts print PASS/WARN/FAIL and generate a report file path.
 
+### Stream Logs (Quick)
+
+`cd /home/admin/announceflow` sonrası en sık kullanılan komutlar:
+
+```bash
+# Olay ozeti (start/stop/receiver/stop-reason)
+python3 scripts/events_query.py --file logs/events.jsonl \
+  --since "2026-03-07T09:00:00Z" \
+  --event stream_started --event stream_stopped \
+  --event stream_receiver_started --event stream_receiver_summary \
+  --event stream_receiver_udp_overrun --event stream_receiver_alsa_xrun \
+  --event stream_receiver_stop_reason --summary
+```
+
+```bash
+# Belirli correlation_id
+python3 scripts/events_query.py --file logs/events.jsonl \
+  --since "2026-03-07T09:00:00Z" \
+  --contains "agent-..." --limit 200
+```
+
+```bash
+# Stream telemetry tablosu
+python3 scripts/stream_telemetry_report.py --file logs/events.jsonl \
+  --since "2026-03-07T09:00:00Z" --limit 300
+```
+
+```bash
+# FFmpeg receiver hatalari (overrun/xrun/bind/immediate-exit)
+LC_ALL=C grep -aEni \
+"Circular buffer overrun|ALSA buffer xrun|Immediate exit requested|bind failed|Error opening input" \
+logs/stream_receiver_ffmpeg.log | tail -n 200
+```
+
+```bash
+# Servis logu
+journalctl -u announceflow --since "2026-03-07 09:00:00" --no-pager | tail -n 400
+```
+
+Stop-reason telemetry `reason` degerleri:
+`graceful`, `force_kill`, `already_stopping`, `already_stopped`, `force_kill_timeout`, `error`.
+
 ---
 
 ## Environment Configuration
