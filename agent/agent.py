@@ -174,6 +174,8 @@ _STATUS_ERROR = "#c62828"
 _DISABLED_BG = "#ccd6e3"
 _SLIDER_TRACK = "#d8e0ec"
 _STREAM_STOP = "#95661a"
+_BTN_MUTED = "#9eaabb"
+_BTN_MUTED_HOVER = "#adb8c6"
 
 
 def load_agent_config():
@@ -291,6 +293,17 @@ class ModernButton(tk.Frame):
         """Update button text."""
         self.text_label.config(text=text)
 
+    def set_color(self, bg_color: str, hover_color: str):
+        """Update button background and hover colors."""
+        self.bg_color = bg_color
+        self.hover_color = hover_color
+        if not self._disabled:
+            self.config(bg=bg_color)
+            for child in self.winfo_children():
+                child.config(bg=bg_color)  # type: ignore[union-attr]
+                for subchild in child.winfo_children():
+                    subchild.config(bg=bg_color)  # type: ignore[union-attr]
+
     def on_enter(self, event):
         if self._disabled:
             return
@@ -319,116 +332,104 @@ class ModernButton(tk.Frame):
 class ModernSlider(tk.Frame):
     """Modern volume slider with Canvas - thick bar with speaker icons."""
 
-    def __init__(self, parent, from_=0, to=100, value=80, command=None, **kwargs):
-        super().__init__(parent, bg=_BG)
+    def __init__(self, parent, from_=0, to=100, value=80, command=None, card_bg=None, **kwargs):
+        bg = card_bg or _BG
+        super().__init__(parent, bg=bg, **kwargs)
+        self._bg = bg
         self.from_ = from_
         self.to = to
         self.value = value
         self.command = command
 
-        # Load SVG/PNG Icons for slider
-        self.img_mute = get_icon('vol_mute', size=(20, 20))
-        self.img_loud = get_icon('vol_high', size=(20, 20))
+        # Load PNG icons (requires PIL — optional)
+        self.img_mute = get_icon('vol_mute', size=(18, 18))
+        self.img_loud = get_icon('vol_high', size=(18, 18))
 
-        # Main container with icons
-        container = tk.Frame(self, bg=_BG)
+        container = tk.Frame(self, bg=bg)
         container.pack(fill="x", expand=True)
 
-        # Left speaker icon (mute)
-        self.left_icon = tk.Label(container, bg=_BG)
+        # Left label: PNG icon when available, plain text fallback (no emoji)
+        self.left_icon = tk.Label(container, bg=bg)
         if self.img_mute:
             self.left_icon.config(image=self.img_mute)
         else:
-            self.left_icon.config(text="🔈", fg=_FG_DIM, font=("Segoe UI", 14))
+            self.left_icon.config(text="Ses", fg=_FG_DIM, font=("Segoe UI", 9))
+        self.left_icon.pack(side="left", padx=(0, 8))
 
-        self.left_icon.pack(side="left", padx=(0, 10))
-
-        # Canvas for slider
+        # Slider canvas — thin track design, fixed 32px height
         self.canvas = tk.Canvas(
-            container, width=220, height=50, bg=_BG,
+            container, height=32, bg=bg,
             highlightthickness=0, cursor="hand2",
         )
         self.canvas.pack(side="left", fill="x", expand=True)
 
-        # Right speaker icon (loud) + percentage
-        right_frame = tk.Frame(container, bg=_BG)
-        right_frame.pack(side="left", padx=(10, 0))
+        # Right side: optional loud icon + percentage
+        right_frame = tk.Frame(container, bg=bg)
+        right_frame.pack(side="left", padx=(8, 0))
 
-        self.right_icon = tk.Label(right_frame, bg=_BG)
         if self.img_loud:
-            self.right_icon.config(image=self.img_loud)
-        else:
-            self.right_icon.config(text="🔊", fg=_FG_DIM, font=("Segoe UI", 14))
-
-        self.right_icon.pack(side="left")
+            tk.Label(right_frame, bg=bg, image=self.img_loud).pack(side="left", padx=(0, 4))
 
         self.percent_label = tk.Label(
             right_frame, text=f"{int(value)}%",
-            font=("Segoe UI", 12, "bold"), bg=_BG, fg=_GREEN, width=4,
+            font=("Segoe UI", 10, "bold"), bg=bg, fg=_GREEN, width=4,
         )
-        self.percent_label.pack(side="left", padx=(5, 0))
+        self.percent_label.pack(side="left")
 
-        # Bind events
         self.canvas.bind("<Button-1>", self._on_click)
         self.canvas.bind("<B1-Motion>", self._on_click)
         self.bind("<Map>", lambda e: self.after(50, self._draw))
 
+    # Track geometry constants (shared between _draw and _on_click)
+    _PAD = 8
+    _HANDLE_R = 8
+
     def _draw(self):
         self.canvas.delete("all")
         w = max(self.canvas.winfo_width(), 200)
-        h = 50
+        h = 32
+        pad = self._PAD
+        handle_r = self._HANDLE_R
 
-        pad = 10
-        bar_height = 24
         track_y = h // 2
-        track_top = track_y - bar_height // 2
-        track_bottom = track_y + bar_height // 2
+        track_h = 4          # thin, clean track line
+        track_top = track_y - track_h // 2
+        track_bottom = track_y + track_h // 2
+        track_left = pad
         track_right = w - pad
+        track_span = max(1, track_right - track_left)
 
-        radius = bar_height // 2
+        # Gray base track
         self.canvas.create_rectangle(
-            pad + radius, track_top, track_right - radius, track_bottom,
-            fill=_SLIDER_TRACK, outline="",
-        )
-        self.canvas.create_oval(
-            pad, track_top, pad + bar_height, track_bottom, fill=_SLIDER_TRACK, outline=""
-        )
-        self.canvas.create_oval(
-            track_right - bar_height, track_top, track_right, track_bottom,
+            track_left, track_top, track_right, track_bottom,
             fill=_SLIDER_TRACK, outline="",
         )
 
+        # Green fill — simple rectangle, no end-cap tricks, no overflow
         ratio = (self.value - self.from_) / max(1, self.to - self.from_)
-        fill_width = ratio * (track_right - pad - bar_height)
-        fill_x = pad + bar_height // 2 + fill_width
-
-        if ratio > 0.02:
+        fill_right = track_left + ratio * track_span
+        if ratio > 0:
             self.canvas.create_rectangle(
-                pad + radius, track_top, min(fill_x, track_right - radius), track_bottom,
-                fill=_GREEN, outline="",
-            )
-            self.canvas.create_oval(
-                pad, track_top, pad + bar_height, track_bottom,
+                track_left, track_top, fill_right, track_bottom,
                 fill=_GREEN, outline="",
             )
 
-        handle_x = pad + bar_height // 2 + fill_width
-        handle_radius = 14
+        # Handle — clamped so it never extends beyond the track edges
+        handle_x = track_left + ratio * track_span
+        handle_x = max(track_left + handle_r, min(track_right - handle_r, handle_x))
         self.canvas.create_oval(
-            handle_x - handle_radius, track_y - handle_radius,
-            handle_x + handle_radius, track_y + handle_radius,
-            fill="white", outline=_GREEN, width=3,
+            handle_x - handle_r, track_y - handle_r,
+            handle_x + handle_r, track_y + handle_r,
+            fill="white", outline=_GREEN, width=2,
         )
 
         self.percent_label.config(text=f"{int(self.value)}%")
 
     def _on_click(self, event):
+        pad = self._PAD
         w = max(self.canvas.winfo_width(), 200)
-        pad = 10
-        bar_height = 24
-        track_width = w - pad * 2 - bar_height
-
-        ratio = (event.x - pad - bar_height // 2) / max(1, track_width)
+        track_span = max(1, w - pad - pad)
+        ratio = (event.x - pad) / track_span
         ratio = max(0, min(1, ratio))
         self.value = self.from_ + ratio * (self.to - self.from_)
         self._draw()
@@ -781,6 +782,7 @@ class AgentGUI:
         
         # State tracking for polling loops
         self._stream_active = False
+        self._music_active = False
         self._heartbeat_job = None
         self._poll_job = None
 
@@ -1017,6 +1019,8 @@ class AgentGUI:
             url_frame, font=("Segoe UI", 10), width=35, show="*"
         )
         self.password_entry.pack(fill="x", pady=5)
+        self.username_entry.bind("<Return>", lambda *_: self.do_login())
+        self.password_entry.bind("<Return>", lambda *_: self.do_login())
 
         # Remember Me checkbox
         self.remember_var = tk.BooleanVar(value=True)
@@ -1136,19 +1140,14 @@ class AgentGUI:
 
         # Logout as small text link in header
         logout_label = tk.Label(
-            header_content, text="Çıkış", font=("Segoe UI", 9, "underline"),
-            bg=_BG_HEADER, fg=_FG_DIM, cursor="hand2",
+            header_content, text="Çıkış", font=("Segoe UI", 10, "underline"),
+            bg=_BG_HEADER, fg=_FG, cursor="hand2",
         )
         logout_label.pack(side="right")
         logout_label.bind("<Button-1>", lambda e: self.logout())
         logout_label.bind("<Enter>", lambda e: logout_label.config(fg=_RED))
-        logout_label.bind("<Leave>", lambda e: logout_label.config(fg=_FG_DIM))
+        logout_label.bind("<Leave>", lambda e: logout_label.config(fg=_FG))
 
-        # Connection info
-        tk.Label(
-            header, text=self.agent.api_base,
-            font=("Segoe UI", 8), bg=_BG_HEADER, fg=_FG_DIM,
-        ).pack(anchor="w", padx=16)
 
         # Scrollable content
         content = tk.Frame(self.root, bg=_BG, padx=16, pady=12)
@@ -1206,6 +1205,9 @@ class AgentGUI:
         )
         self._btn_stream_stop.pack(side="left", fill="x", expand=True, padx=(4, 0))
 
+        self._refresh_music_buttons()
+        self._refresh_stream_buttons()
+
         # ── Tools Section ──
         tools_section = tk.Frame(content, bg=_BG_CARD, padx=12, pady=10)
         tools_section.pack(fill="x", pady=(0, 8))
@@ -1241,7 +1243,8 @@ class AgentGUI:
         ).pack(anchor="w", pady=(0, 4))
 
         self.volume_slider = ModernSlider(
-            vol_section, from_=0, to=100, value=80, command=self.on_volume_change
+            vol_section, from_=0, to=100, value=80, command=self.on_volume_change,
+            card_bg=_BG_CARD,
         )
         self.volume_slider.pack(fill="x")
 
@@ -1258,6 +1261,10 @@ class AgentGUI:
             current = player.get("volume")
             if isinstance(current, (int, float)):
                 self.volume_slider.set_value(int(current))
+            player_state = player.get("state", "")
+            if isinstance(player_state, str) and player_state.lower() in ("playing", "running"):
+                self._music_active = True
+                self._refresh_music_buttons()
 
         self._submit_network_job(_load_health, on_success=_apply_health)
 
@@ -1282,6 +1289,8 @@ class AgentGUI:
             if not self._root_alive():
                 return
             if success:
+                self._music_active = True
+                self._refresh_music_buttons()
                 self._show_status("Müzik başlatıldı")
             else:
                 self._show_status("Müzik başlatılamadı", error=True)
@@ -1299,6 +1308,8 @@ class AgentGUI:
             if not self._root_alive():
                 return
             if success:
+                self._music_active = False
+                self._refresh_music_buttons()
                 self._show_status("Müzik durduruldu")
             else:
                 self._show_status("Müzik durdurulamadı", error=True)
@@ -1403,6 +1414,7 @@ class AgentGUI:
                 )
                 self._stream_active = True
                 self._start_stream_polling_loops()
+                self._refresh_stream_buttons()
                 self._show_status("Canlı yayın başlatıldı")
             elif result == "sender_fail":
                 attempt = payload.get("attempt") or {}
@@ -1470,7 +1482,8 @@ class AgentGUI:
             
             self._stream_active = False
             self._stop_stream_polling_loops()
-            
+            self._refresh_stream_buttons()
+
             if success:
                 self._show_status("Yayın durduruldu")
             else:
@@ -1503,6 +1516,7 @@ class AgentGUI:
     def logout(self):
         """Logout and return to login screen."""
         self._stream_active = False
+        self._music_active = False
         self._stop_stream_polling_loops()
         delete_credentials(self.agent.api_base)
         self.agent.close()
@@ -1511,6 +1525,28 @@ class AgentGUI:
             self._stream_client.stop_sender()
         self.logged_in = False
         self.show_login_frame()
+
+    def _refresh_music_buttons(self):
+        """Update music button colors to reflect current play state."""
+        if not self._btn_music_start or not self._btn_music_stop:
+            return
+        if self._music_active:
+            self._btn_music_start.set_color(_BTN_MUTED, _BTN_MUTED_HOVER)
+            self._btn_music_stop.set_color(_RED, _RED_HOVER)
+        else:
+            self._btn_music_start.set_color(_GREEN, _GREEN_HOVER)
+            self._btn_music_stop.set_color(_BTN_MUTED, _BTN_MUTED_HOVER)
+
+    def _refresh_stream_buttons(self):
+        """Update stream button colors to reflect current stream state."""
+        if not self._btn_stream_start or not self._btn_stream_stop:
+            return
+        if self._stream_active:
+            self._btn_stream_start.set_color(_BTN_MUTED, _BTN_MUTED_HOVER)
+            self._btn_stream_stop.set_color(_STREAM_STOP, _AMBER)
+        else:
+            self._btn_stream_start.set_color(_AMBER, _AMBER_HOVER)
+            self._btn_stream_stop.set_color(_BTN_MUTED, _BTN_MUTED_HOVER)
 
     def _start_stream_polling_loops(self):
         """Start the loops that maintain stream health and watch for takeovers."""
@@ -1565,20 +1601,38 @@ class AgentGUI:
         def _on_done(status):
             if not self._root_alive() or not self._stream_active:
                 return
-                
+
             is_active = status.get("active")
+            state = status.get("state", "idle")
             owner_device_id = status.get("owner_device_id")
             my_device_id = getattr(self.agent, "device_id", None)
-            
+
             # If stream is active but owned by someone else -> takeover occurred
             if is_active and owner_device_id and my_device_id and owner_device_id != my_device_id:
                 stream_logger.info("stream_takeover_detected new_owner=%s", owner_device_id)
-                self._stream_active = False # Stop loops immediately
-                
+                self._stream_active = False
+                self._refresh_stream_buttons()
+
                 # Stop local capture thread
                 self._submit_network_job(
                     lambda: self._stream_client.stop_sender(),
                     on_success=lambda _: self._show_status("Yayın başka bir cihaza devredildi!", error=True)
+                )
+            elif state in ("idle", "error") and not is_active and self._stream_active:
+                # Stream stopped externally (panel stop, heartbeat timeout, receiver died).
+                # Note: stopped_by_policy is intentionally excluded — receiver will resume.
+                stream_logger.info(
+                    "stream_external_stop detected state=%s, stopping local sender", state
+                )
+                self._stream_active = False
+                self._stop_stream_polling_loops()
+                self._refresh_stream_buttons()
+                self._submit_network_job(
+                    lambda: self._stream_client.stop_sender(),
+                    on_success=lambda _: self._show_status(
+                        "Yayın durduruldu" if state == "idle" else "Yayın bağlantısı kesildi",
+                        error=(state == "error"),
+                    ),
                 )
             elif self._stream_active:
                 self._poll_job = self.root.after(2000, self._run_status_poll)

@@ -459,3 +459,191 @@ class TestGuiUsesDetailedStreamApi:
         gui._stream_client.stop_sender.assert_called_once()
         gui.agent.stop_stream_with_details.assert_called_once()
         gui.agent.stop_stream.assert_not_called()
+
+
+# --------------- helpers for status poll tests ---------------
+
+
+def _make_gui_for_polling():
+    """Create a GUI object ready for _run_status_poll / _on_done testing."""
+    agent_mod = _import_agent()
+    AgentGUI = agent_mod.AgentGUI
+
+    agent_mock = MagicMock()
+    agent_mock.api_base = "http://aflow.local:5001"
+    agent_mock.device_id = "agent-device-abc"
+    agent_mock.config = {"api_base": "http://aflow.local:5001"}
+
+    gui = AgentGUI.__new__(AgentGUI)
+    gui.agent = agent_mock
+    gui._closing = False
+    gui._volume_update_job = None
+    gui._pending_volume = None
+    gui._status_clear_job = None
+    gui._stream_active = True
+    gui._heartbeat_job = None
+    gui._poll_job = None
+    gui._btn_stream_start = None
+    gui._btn_stream_stop = None
+    gui._btn_music_start = None
+    gui._btn_music_stop = None
+    gui._btn_upload = None
+
+    # Root mock — winfo_exists returns True so _root_alive() passes
+    root_mock = MagicMock()
+    root_mock.winfo_exists.return_value = True
+    gui.root = root_mock
+
+    # Status label mock for _show_status
+    gui._status_label = MagicMock()
+    gui._status_label.winfo_exists.return_value = True
+
+    from stream_client import StreamClient
+    gui._stream_client = MagicMock(spec=StreamClient)
+    gui.network_worker = MagicMock()
+
+    return gui
+
+
+def _capture_poll_on_done(gui):
+    """Call _run_status_poll and capture the _on_done callback.
+
+    The first submit call queues the status-fetch job and captures _on_done.
+    Any subsequent submit calls (e.g., stop_sender lambda) are executed
+    immediately so side-effects are visible without a real worker thread.
+    """
+    captured_on_done = None
+    submit_calls = []
+
+    def fake_submit(fn, *, on_success=None, on_error=None):
+        submit_calls.append((fn, on_success))
+        nonlocal captured_on_done
+        if len(submit_calls) == 1:
+            # First call: status-fetch job → capture on_done, don't execute
+            captured_on_done = on_success
+        else:
+            # Subsequent calls (e.g., stop_sender) → run immediately
+            fn()
+
+    gui._submit_network_job = fake_submit
+    gui._run_status_poll()
+
+    return captured_on_done, submit_calls
+
+
+# --------------- 10. External stop detection (panel/panel stop) ---------------
+
+
+class TestStatusPollExternalStop:
+    """_run_status_poll detects when server stops stream externally."""
+
+    def test_idle_state_stops_local_sender(self):
+        """Panel called /api/stream/stop → server idle → EXE stops sender."""
+        gui = _make_gui_for_polling()
+        on_done, _ = _capture_poll_on_done(gui)
+        assert on_done is not None, "_run_status_poll did not register _on_done"
+
+        on_done({"active": False, "state": "idle", "owner_device_id": None})
+
+        assert gui._stream_active is False
+        gui._stream_client.stop_sender.assert_called_once()
+
+    def test_error_state_stops_local_sender(self):
+        """Receiver died on server → error state → EXE stops sender."""
+        gui = _make_gui_for_polling()
+        on_done, _ = _capture_poll_on_done(gui)
+        assert on_done is not None
+
+        on_done({"active": False, "state": "error", "owner_device_id": None})
+
+        assert gui._stream_active is False
+        gui._stream_client.stop_sender.assert_called_once()
+
+    def test_stopped_by_policy_does_not_stop_sender(self):
+        """Policy stop → sender keeps running (receiver will auto-resume)."""
+        gui = _make_gui_for_polling()
+        on_done, _ = _capture_poll_on_done(gui)
+        assert on_done is not None
+
+        on_done({"active": False, "state": "stopped_by_policy", "owner_device_id": None})
+
+        # _stream_active must stay True so heartbeats and polling continue
+        assert gui._stream_active is True
+        gui._stream_client.stop_sender.assert_not_called()
+
+    def test_live_active_no_stop(self):
+        """Stream still live and owned by same device → no action."""
+        gui = _make_gui_for_polling()
+        gui.agent.device_id = "agent-device-abc"
+        on_done, _ = _capture_poll_on_done(gui)
+        assert on_done is not None
+
+        on_done({
+            "active": True,
+            "state": "live",
+            "owner_device_id": "agent-device-abc",
+        })
+
+        assert gui._stream_active is True
+        gui._stream_client.stop_sender.assert_not_called()
+
+    def test_idle_cancels_polling_loops(self):
+        """On external idle stop, pending heartbeat job is cancelled."""
+        gui = _make_gui_for_polling()
+        fake_job_id = object()
+        gui._heartbeat_job = fake_job_id
+        on_done, _ = _capture_poll_on_done(gui)
+        assert on_done is not None
+
+        on_done({"active": False, "state": "idle", "owner_device_id": None})
+
+        gui.root.after_cancel.assert_called_with(fake_job_id)
+        assert gui._heartbeat_job is None
+
+
+# --------------- 11. Hostname display ---------------
+
+
+class TestHostnameDisplay:
+    """_resolve_stream_host extracts hostname for header label."""
+
+    def test_hostname_from_local_url(self):
+        gui = _make_gui_for_polling()
+        gui.agent.api_base = "http://rpi001.local:5001"
+        assert gui._resolve_stream_host() == "rpi001.local"
+
+    def test_hostname_from_ip_url(self):
+        gui = _make_gui_for_polling()
+        gui.agent.api_base = "http://192.168.1.42:5001"
+        assert gui._resolve_stream_host() == "192.168.1.42"
+
+    def test_hostname_fallback_on_empty(self):
+        gui = _make_gui_for_polling()
+        gui.agent.api_base = ""
+        assert gui._resolve_stream_host() == "aflow.local"
+
+
+# --------------- 12. ModernSlider card_bg ---------------
+
+
+class TestModernSliderCardBg:
+    """ModernSlider source has card_bg parameter and _BG_CARD is passed at call site."""
+
+    def _source(self):
+        path = os.path.join(_agent_dir, "agent.py")
+        with open(path) as f:
+            return f.read()
+
+    def test_modernslider_accepts_card_bg_param(self):
+        """ModernSlider.__init__ signature includes card_bg parameter."""
+        assert "card_bg=None" in self._source()
+
+    def test_vol_section_passes_card_bg(self):
+        """show_main_frame passes card_bg=_BG_CARD when creating the volume slider."""
+        assert "card_bg=_BG_CARD" in self._source()
+
+    def test_slider_bg_uses_card_bg_or_fallback(self):
+        """ModernSlider sets bg from card_bg argument (not hardcoded _BG)."""
+        source = self._source()
+        # The init should store bg = card_bg or _BG
+        assert "bg = card_bg or _BG" in source

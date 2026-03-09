@@ -80,6 +80,9 @@ def _make_gui():
     gui._btn_stream_start = None
     gui._btn_stream_stop = None
     gui._btn_upload = None
+    gui._stream_active = False
+    gui._heartbeat_job = None
+    gui._poll_job = None
 
     from stream_client import StreamClient
     gui._stream_client = MagicMock(spec=StreamClient)
