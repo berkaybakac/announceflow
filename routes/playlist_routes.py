@@ -38,6 +38,7 @@ def api_playlist_set():
     data = request.get_json() or {}
     media_ids = data.get("media_ids", [])
     loop = data.get("loop", True)
+    shuffle = data.get("shuffle", False)
 
     if not media_ids:
         return _json_error("media_ids required", 400)
@@ -53,7 +54,7 @@ def api_playlist_set():
         return _json_error("No valid media files", 404)
 
     player = get_player()
-    success = player.set_playlist(file_paths, loop=loop)
+    success = player.set_playlist(file_paths, loop=loop, shuffle=shuffle)
 
     return _json_success({"success": success, "tracks": len(file_paths)})
 
@@ -133,9 +134,11 @@ def api_playlist_start_all():
     file_paths = [f["filepath"] for f in music_files]
 
     # Set playlist and start playing (loop=True)
+    data = request.get_json() or {}
+    shuffle = data.get("shuffle", False)
     player = get_player()
-    player.set_playlist(file_paths, loop=True)
-    logger.info(f"[source] manual play -> playlist start-all (tracks={len(file_paths)})")
+    player.set_playlist(file_paths, loop=True, shuffle=shuffle)
+    logger.info(f"[source] manual play -> playlist start-all (tracks={len(file_paths)}, shuffle={shuffle})")
     success = player.play_playlist()
 
     if success:
