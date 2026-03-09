@@ -103,6 +103,21 @@ Basari kriteri:
 
 Stream stabilizasyonu ve panel kontrolu tamamlandiktan sonra siradaki urun iyilestirmeleri.
 
+#### Toplu Yukleme (Multi-File / Sequential AJAX Upload) ✅ TAMAMLANDI (c57b467)
+
+- [x] Tek seferde 1-10 medya dosyasi secip sirali yukleme
+  - `<input multiple>` + sequential fetch loop; backend endpoint degismedi
+  - Per-dosya progress gostergesi, hata izolasyonu (bir dosya basarisiz olsa digerleri devam eder)
+  - Iptal butonu (AbortController), yükleme sonrasi özet panel
+  - Client-side max 10 dosya validasyonu
+- [x] `.opus` (WhatsApp Android ses kaydi) format destegi
+  - `ALLOWED_EXTENSIONS` ve `NEEDS_CONVERSION` kümelerine `opus` eklendi
+  - Mevcut FFmpeg conversion pipeline üzerinden MP3'e donusturuluyor
+  - `<input accept>` listesi guncellendi
+- [x] `media_type` validasyon acigi duzeltildi (pre-existing bug)
+  - Gecersiz media_type DB CHECK constraint hatasina neden oluyordu; endpoint seviyesinde yakalandı
+- Commit: `c57b467` (feat: add .opus support), önceki commitler: multi-file upload impl + 34 test
+
 #### Shuffle (Karistirma) Modu
 
 - [ ] Zamanli calma listelerinde dosya sirasini rastgele karistirma
@@ -144,10 +159,10 @@ Stream stabilizasyonu ve panel kontrolu tamamlandiktan sonra siradaki urun iyile
 
 Basari kriteri:
 
+- [x] Birden fazla medya dosyasi tek seferde yuklenebiliyor, per-dosya progress gorunuyor (c57b467)
+- [x] WhatsApp Android ses kayitlari (.opus) yuklenebiliyor (c57b467)
 - [ ] Shuffle modu panelden acilip kapatilabiliyor, rastgele sira dogru calisiyor
 - [ ] Buyuk dosyalar (>50 MB) parcali yuklenebiliyor, kesintide resume calisiyor
-- [ ] Agent EXE'de hostname gosterimi dogru calisiyor, IP degisiminde guncelleniyor
-- [ ] Ses alani gorsel revizyonu tamamlanmis, UX standartlarina uygun
 - [ ] Cihaz envanter dosyasi olusturulmus, recovery proseduru dokumante edilmis
 - [ ] Birden fazla cihaza deploy.sh ile deploy yapilabildigi dogrulanmis
 
