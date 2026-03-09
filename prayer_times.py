@@ -6,7 +6,7 @@ import logging
 import json
 import os
 import tempfile
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Dict, List, Tuple
 import urllib.request
 import urllib.error
@@ -48,7 +48,7 @@ def _mark_corrupt_file(path: str, err: Exception) -> None:
     if not os.path.exists(path):
         return
 
-    stamp = datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     corrupt_path = f"{path}.corrupt.{stamp}"
     try:
         os.replace(path, corrupt_path)

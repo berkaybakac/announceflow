@@ -140,7 +140,7 @@ Stream stabilizasyonu ve panel kontrolu tamamlandiktan sonra siradaki urun iyile
 
 #### Dusuk Oncelikli Notlar
 
-- [ ] `datetime.utcnow()` deprecation uyarisi (Python 3.14+, V1.2'de duzeltilecek, release bloklamiyor)
+- [x] `datetime.utcnow()` deprecation uyarisi — `datetime.now(timezone.utc)` ile duzeltildi
 
 Basari kriteri:
 
