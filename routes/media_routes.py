@@ -169,15 +169,25 @@ def get_primary_audio_codec(file_path: str) -> str:
 @media_bp.route("/api/media/upload", methods=["POST"])
 @login_required
 def api_media_upload():
-    """Upload a media file."""
+    """Upload a media file. Supports both traditional form POST and AJAX (X-Requested-With header)."""
+    is_ajax = request.headers.get("X-Requested-With") == "XMLHttpRequest"
+
+    def _err(msg, category="error"):
+        if is_ajax:
+            return jsonify({"success": False, "message": msg}), 400
+        return _flash_redirect(msg, category, "library")
+
     if "file" not in request.files:
-        return _flash_redirect("Dosya seçilmedi", "error", "library")
+        return _err("Dosya seçilmedi")
 
     file = request.files["file"]
     media_type = request.form.get("media_type", "music")
 
+    if media_type not in ("music", "announcement"):
+        return _err("Geçersiz medya türü. 'music' veya 'announcement' olmalıdır.")
+
     if file.filename == "":
-        return _flash_redirect("Dosya seçilmedi", "error", "library")
+        return _err("Dosya seçilmedi")
 
     if file and file.filename and allowed_file(file.filename):
         original_filename = secure_filename(file.filename)
@@ -197,18 +207,13 @@ def api_media_upload():
         try:
             temp_size = os.path.getsize(temp_path)
             if _is_recent_duplicate_upload(original_filename, media_type, temp_size):
-                return _flash_redirect(
+                return _err(
                     "Aynı dosya kısa sürede tekrar gönderildi. Çift tıklama engellendi.",
                     "warning",
-                    "library",
                 )
 
             if not has_audio_stream(temp_path):
-                return _flash_redirect(
-                    "Yüklenen dosya bozuk veya ses akışı içermiyor.",
-                    "error",
-                    "library",
-                )
+                return _err("Yüklenen dosya bozuk veya ses akışı içermiyor.")
 
             codec = get_primary_audio_codec(temp_path)
             needs_convert = ext_lower in NEEDS_CONVERSION or codec != "mp3"
@@ -226,8 +231,7 @@ def api_media_upload():
                     counter += 1
 
                 if not convert_to_mp3(temp_path, mp3_filepath):
-                    flash(f"{original_filename} dönüştürülemedi. ffmpeg hatası.", "error")
-                    return redirect(url_for("library"))
+                    return _err(f"{original_filename} dönüştürülemedi. ffmpeg hatası.")
 
                 converted_codec = get_primary_audio_codec(mp3_filepath)
                 if converted_codec != "mp3":
@@ -235,19 +239,16 @@ def api_media_upload():
                         os.remove(mp3_filepath)
                     except OSError:
                         pass
-                    flash(
-                        f"{original_filename} dönüştürüldü ama MP3 doğrulaması başarısız.",
-                        "error",
+                    return _err(
+                        f"{original_filename} dönüştürüldü ama MP3 doğrulaması başarısız."
                     )
-                    return redirect(url_for("library"))
 
                 duration = get_audio_duration(mp3_filepath)
                 db.add_media_file(mp3_filename, mp3_filepath, media_type, duration)
                 log_web("upload", {"filename": mp3_filename, "media_type": media_type})
-                flash(
-                    f"{original_filename} → {mp3_filename} dönüştürüldü ve yüklendi!",
-                    "success",
-                )
+                success_msg = f"{original_filename} → {mp3_filename} dönüştürüldü ve yüklendi!"
+                if not is_ajax:
+                    flash(success_msg, "success")
             else:
                 # True MP3: keep original file as-is.
                 target_filename = original_filename
@@ -265,17 +266,19 @@ def api_media_upload():
                 duration = get_audio_duration(filepath)
                 db.add_media_file(target_filename, filepath, media_type, duration)
                 log_web("upload", {"filename": target_filename, "media_type": media_type})
-                flash(f"{target_filename} başarıyla yüklendi!", "success")
+                success_msg = f"{target_filename} başarıyla yüklendi!"
+                if not is_ajax:
+                    flash(success_msg, "success")
         finally:
             if temp_path and os.path.exists(temp_path):
                 os.remove(temp_path)
     else:
-        return _flash_redirect(
-            "Geçersiz dosya türü. Kabul edilen: MP3, WAV, OGG, AIFF, FLAC, M4A, WMA, MP2",
-            "error",
-            "library",
+        return _err(
+            "Geçersiz dosya türü. Kabul edilen: MP3, WAV, OGG, AIFF, FLAC, M4A, WMA, MP2"
         )
 
+    if is_ajax:
+        return jsonify({"success": True}), 200
     return redirect(url_for("library"))
 
 

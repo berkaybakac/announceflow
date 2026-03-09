@@ -86,6 +86,53 @@
             grid-template-columns: 1fr;
         }
     }
+
+    .upload-progress-panel {
+        margin-top: 16px;
+        border-top: 1px solid var(--border);
+        padding-top: 16px;
+    }
+
+    .upload-file-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 6px 8px;
+        border-radius: 8px;
+        font-size: 0.875rem;
+    }
+
+    .upload-file-item-name {
+        flex: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    .upload-file-item-status {
+        font-size: 0.8rem;
+        color: var(--text-muted);
+        flex-shrink: 0;
+        max-width: 200px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        text-align: right;
+    }
+
+    .upload-spinner {
+        width: 16px;
+        height: 16px;
+        border: 2px solid var(--border);
+        border-top-color: var(--primary);
+        border-radius: 50%;
+        animation: uploadSpin 0.8s linear infinite;
+        flex-shrink: 0;
+    }
+
+    @keyframes uploadSpin {
+        to { transform: rotate(360deg); }
+    }
 </style>
 {% endblock %}
 
@@ -111,17 +158,18 @@
         </h3>
     </div>
 
-    <form action="/api/media/upload" method="POST" enctype="multipart/form-data">
+    <form id="uploadForm" action="/api/media/upload" method="POST" enctype="multipart/form-data">
         <div class="library-upload-grid">
             <div class="form-group" style="margin: 0;">
                 <label class="form-label" style="display: inline-flex; align-items: center; gap: 6px;">
                     <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 16px; height: 16px; color: var(--text-secondary);">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
                     </svg>
-                    Dosya Seç (MP3)
+                    Dosya Seç
+                    <span style="color: var(--text-muted); font-weight: 400;">(en fazla 10)</span>
                 </label>
                 <input id="mediaFileInput" type="file" class="file-input-hidden" name="file"
-                    accept=".mp3,.wav,.ogg,.aiff,.aif,.flac,.m4a,.wma,.mp2" required>
+                    accept=".mp3,.wav,.ogg,.aiff,.aif,.flac,.m4a,.wma,.mp2" multiple>
                 <div class="file-picker-row">
                     <button type="button" class="btn btn-outline btn-sm" onclick="triggerMediaFileInput()">
                         Dosya Seç
@@ -132,7 +180,7 @@
 
             <div class="form-group" style="margin: 0;">
                 <label class="form-label">Tür</label>
-                <select class="form-select" name="media_type" required>
+                <select id="mediaTypeSelect" class="form-select" name="media_type" required>
                     <option value="music">Müzik</option>
                     <option value="announcement">Anons</option>
                 </select>
@@ -146,6 +194,21 @@
             </button>
         </div>
     </form>
+
+    <div id="uploadProgressPanel" class="upload-progress-panel" style="display: none;">
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+            <span id="uploadProgressTitle" style="color: var(--text-primary); font-weight: 600; font-size: 0.95rem;"></span>
+            <button type="button" id="uploadCancelBtn" class="btn btn-outline btn-sm" onclick="cancelBatchUpload()" style="display: none;">İptal</button>
+        </div>
+        <div id="uploadFileList" style="display: flex; flex-direction: column; gap: 2px; max-height: 320px; overflow-y: auto;"></div>
+        <div id="uploadSummaryPanel" style="display: none; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border);">
+            <div id="uploadSummaryText" style="color: var(--text-primary); margin-bottom: 12px; font-size: 0.95rem;"></div>
+            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                <button type="button" class="btn btn-outline btn-sm" onclick="resetUploadForm()">Yeni Yükleme</button>
+                <button type="button" class="btn btn-success btn-sm" onclick="location.reload()">Kütüphaneyi Yenile</button>
+            </div>
+        </div>
+    </div>
 </div>
 
 <div class="card animate-in">
@@ -422,22 +485,201 @@
 <script>
     function triggerMediaFileInput() {
         const input = document.getElementById('mediaFileInput');
-        if (input) {
-            input.click();
-        }
+        if (input) input.click();
     }
 
     function updateSelectedFileName() {
         const input = document.getElementById('mediaFileInput');
         const label = document.getElementById('mediaFileName');
-        if (!input || !label) {
-            return;
-        }
+        if (!input || !label) return;
         if (!input.files || input.files.length === 0) {
             label.textContent = 'Dosya seçilmedi';
             return;
         }
-        label.textContent = input.files[0].name;
+        const count = input.files.length;
+        if (count === 1) {
+            label.textContent = input.files[0].name;
+        } else if (count > 10) {
+            label.textContent = `${count} dosya seçildi — ilk 10 yüklenecek`;
+        } else {
+            label.textContent = `${count} dosya seçildi`;
+        }
+    }
+
+    let _batchAbortController = null;
+
+    function cancelBatchUpload() {
+        if (_batchAbortController) _batchAbortController.abort();
+    }
+
+    function resetUploadForm() {
+        document.getElementById('uploadForm').style.display = '';
+        document.getElementById('uploadProgressPanel').style.display = 'none';
+        const input = document.getElementById('mediaFileInput');
+        if (input) input.value = '';
+        updateSelectedFileName();
+    }
+
+    function _escHtml(str) {
+        const d = document.createElement('div');
+        d.appendChild(document.createTextNode(str));
+        return d.innerHTML;
+    }
+
+    function _setFileStatus(index, status, text) {
+        const item = document.getElementById(`upl-item-${index}`);
+        if (!item) return;
+        const nameEl = item.querySelector('.upload-file-item-name');
+        const statusEl = document.getElementById(`upl-status-${index}`);
+        const iconEl = item.querySelector('.upl-icon');
+
+        const icons = {
+            uploading: `<div class="upload-spinner"></div>`,
+            success: `<svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width:16px;height:16px;color:var(--success);"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>`,
+            error: `<svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width:16px;height:16px;color:var(--danger);"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z"/></svg>`,
+            cancelled: `<svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width:16px;height:16px;color:var(--text-muted);"><path stroke-linecap="round" stroke-linejoin="round" d="M9.75 9.75l4.5 4.5m0-4.5l-4.5 4.5M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>`,
+            pending: `<svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width:16px;height:16px;color:var(--text-muted);"><path stroke-linecap="round" stroke-linejoin="round" d="M9 9l10.5-3m0 6.553v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 11-.99-3.467l2.31-.66a2.25 2.25 0 001.632-2.163zm0 0V2.25L9 5.25v10.303m0 0v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 01-.99-3.467l2.31-.66A2.25 2.25 0 009 15.553z"/></svg>`,
+        };
+        const colors = {
+            uploading: 'var(--text-primary)',
+            success: 'var(--text-primary)',
+            error: 'var(--text-secondary)',
+            cancelled: 'var(--text-muted)',
+            pending: 'var(--text-muted)',
+        };
+        const statusColors = {
+            uploading: 'var(--text-muted)',
+            success: 'var(--success)',
+            error: 'var(--danger)',
+            cancelled: 'var(--text-muted)',
+            pending: 'var(--text-muted)',
+        };
+
+        if (iconEl) iconEl.innerHTML = icons[status] || icons.pending;
+        if (nameEl) nameEl.style.color = colors[status] || 'var(--text-muted)';
+        if (statusEl) {
+            statusEl.textContent = text;
+            statusEl.style.color = statusColors[status] || 'var(--text-muted)';
+        }
+    }
+
+    async function startBatchUpload(e) {
+        e.preventDefault();
+
+        const input = document.getElementById('mediaFileInput');
+        const mediaType = document.getElementById('mediaTypeSelect').value;
+
+        if (!input.files || input.files.length === 0) {
+            showToast('Lütfen en az bir dosya seçin', 'warning');
+            return;
+        }
+
+        const files = Array.from(input.files).slice(0, 10);
+        const total = files.length;
+
+        const nonMp3 = files.filter(f => !f.name.toLowerCase().endsWith('.mp3'));
+        if (nonMp3.length > 0) {
+            showToast(`${nonMp3.length} dosya MP3'e dönüştürülecek, bu işlem biraz uzun sürebilir.`, 'info');
+        }
+
+        // Switch to progress view
+        document.getElementById('uploadForm').style.display = 'none';
+        const panel = document.getElementById('uploadProgressPanel');
+        const fileList = document.getElementById('uploadFileList');
+        const summaryPanel = document.getElementById('uploadSummaryPanel');
+        const cancelBtn = document.getElementById('uploadCancelBtn');
+        const progressTitle = document.getElementById('uploadProgressTitle');
+
+        panel.style.display = 'block';
+        summaryPanel.style.display = 'none';
+        cancelBtn.style.display = '';
+
+        // Build file list
+        fileList.innerHTML = '';
+        files.forEach((file, i) => {
+            const item = document.createElement('div');
+            item.id = `upl-item-${i}`;
+            item.className = 'upload-file-item';
+            item.innerHTML = `
+                <span class="upl-icon" style="width:16px;height:16px;flex-shrink:0;"></span>
+                <span class="upload-file-item-name" style="color:var(--text-muted);">${_escHtml(file.name)}</span>
+                <span class="upload-file-item-status" id="upl-status-${i}">Bekliyor</span>
+            `;
+            fileList.appendChild(item);
+            _setFileStatus(i, 'pending', 'Bekliyor');
+        });
+
+        _batchAbortController = new AbortController();
+        let successCount = 0;
+        let failCount = 0;
+        let wasCancelled = false;
+
+        for (let i = 0; i < files.length; i++) {
+            if (_batchAbortController.signal.aborted) {
+                for (let j = i; j < files.length; j++) {
+                    _setFileStatus(j, 'cancelled', 'İptal edildi');
+                }
+                wasCancelled = true;
+                break;
+            }
+
+            _setFileStatus(i, 'uploading', 'Yükleniyor...');
+            progressTitle.textContent = `Yükleniyor ${i + 1} / ${total}`;
+
+            try {
+                const formData = new FormData();
+                formData.append('file', files[i]);
+                formData.append('media_type', mediaType);
+
+                const response = await fetch('/api/media/upload', {
+                    method: 'POST',
+                    headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                    body: formData,
+                    signal: _batchAbortController.signal,
+                });
+
+                const data = await response.json().catch(() => ({}));
+
+                if (response.ok && data.success) {
+                    _setFileStatus(i, 'success', 'Yüklendi');
+                    successCount++;
+                } else {
+                    _setFileStatus(i, 'error', data.message || 'Yükleme başarısız');
+                    failCount++;
+                }
+            } catch (err) {
+                if (err.name === 'AbortError') {
+                    _setFileStatus(i, 'cancelled', 'İptal edildi');
+                    for (let j = i + 1; j < files.length; j++) {
+                        _setFileStatus(j, 'cancelled', 'İptal edildi');
+                    }
+                    wasCancelled = true;
+                    break;
+                }
+                _setFileStatus(i, 'error', 'Bağlantı hatası');
+                failCount++;
+            }
+        }
+
+        _batchAbortController = null;
+        cancelBtn.style.display = 'none';
+
+        let summaryText;
+        if (wasCancelled) {
+            summaryText = successCount > 0
+                ? `Yükleme iptal edildi. ${successCount} dosya başarıyla yüklendi.`
+                : 'Yükleme iptal edildi.';
+        } else if (failCount === 0) {
+            summaryText = `${successCount} dosya başarıyla yüklendi!`;
+        } else if (successCount === 0) {
+            summaryText = `Yükleme tamamlanamadı. ${failCount} dosyada hata oluştu.`;
+        } else {
+            summaryText = `${successCount} başarılı, ${failCount} başarısız.`;
+        }
+
+        progressTitle.textContent = 'Yükleme Tamamlandı';
+        document.getElementById('uploadSummaryText').textContent = summaryText;
+        summaryPanel.style.display = 'block';
     }
 
     function setSectionOpen(type, isOpen, persist = true) {
@@ -466,9 +708,9 @@
             setSectionOpen(type, state === 'open', false);
         });
 
-        const uploadForm = document.querySelector('form[action="/api/media/upload"]');
-        if (typeof monitorUserSubmit === 'function') {
-            monitorUserSubmit(uploadForm, 120000);
+        const uploadForm = document.getElementById('uploadForm');
+        if (uploadForm) {
+            uploadForm.addEventListener('submit', startBatchUpload);
         }
 
         const fileInput = document.getElementById('mediaFileInput');
