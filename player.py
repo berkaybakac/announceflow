@@ -307,10 +307,15 @@ class AudioPlayer:
             return self.play_next()
         return True
 
-    def set_playlist(self, file_paths: list, loop: bool = True) -> bool:
+    def set_playlist(self, file_paths: list, loop: bool = True, shuffle: bool = False) -> bool:
         """Set a playlist of files to play sequentially."""
         if not file_paths:
             return False
+
+        if shuffle:
+            import random
+            file_paths = list(file_paths)
+            random.shuffle(file_paths)
 
         self._playlist = file_paths
         self._playlist_index = -1
@@ -320,8 +325,8 @@ class AudioPlayer:
         # Persist to database for auto-resume on restart
         db.save_playlist_state(playlist=file_paths, index=-1, loop=loop, active=True)
 
-        logger.info(f"Playlist set with {len(file_paths)} tracks, loop={loop}")
-        log_play("playlist_set", {"tracks": len(file_paths), "loop": loop})
+        logger.info(f"Playlist set with {len(file_paths)} tracks, loop={loop}, shuffle={shuffle}")
+        log_play("playlist_set", {"tracks": len(file_paths), "loop": loop, "shuffle": shuffle})
         return True
 
     def play_playlist(self) -> bool:
