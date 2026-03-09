@@ -21,8 +21,8 @@ media_bp = Blueprint("media", __name__)
 
 # Media constants
 MEDIA_FOLDER = str(load_config().get("media_folder", "media")).strip() or "media"
-ALLOWED_EXTENSIONS = {"mp3", "wav", "ogg", "aiff", "aif", "flac", "m4a", "wma", "mp2"}
-NEEDS_CONVERSION = {"wav", "ogg", "aiff", "aif", "flac", "m4a", "wma", "mp2"}
+ALLOWED_EXTENSIONS = {"mp3", "wav", "ogg", "aiff", "aif", "flac", "m4a", "wma", "mp2", "opus"}
+NEEDS_CONVERSION = {"wav", "ogg", "aiff", "aif", "flac", "m4a", "wma", "mp2", "opus"}
 RECENT_UPLOAD_TTL_SECONDS = 15
 
 os.makedirs(os.path.join(MEDIA_FOLDER, "music"), exist_ok=True)

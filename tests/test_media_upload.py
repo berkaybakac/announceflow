@@ -463,6 +463,7 @@ class TestUploadAllowedExtensions(_UploadTestBase):
             ("test.aiff", "pcm_s16be", "mp3"),
             ("test.aif",  "pcm_s16be", "mp3"),
             ("test.mp2",  "mp2",       "mp3"),
+            ("test.opus", "opus",      "mp3"),         # WhatsApp Android audio
         ]
 
         for filename, input_codec, output_codec in cases:
