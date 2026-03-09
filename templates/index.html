@@ -689,6 +689,8 @@
     let streamPollAbortController = null;
     let streamPollingEnabled = true;
     let streamActionInProgress = false;
+    let _prevStreamState = null;
+    let _prevStreamOwner = undefined;
 
     function clearStreamPollTimer() {
         if (streamPollTimer) { clearTimeout(streamPollTimer); streamPollTimer = null; }
@@ -770,6 +772,13 @@
             errorInfo.style.display = 'none';
         }
 
+        // Panel başlattı (owner=null) + EXE bağlanmadı → idle'a düştü
+        if (_prevStreamState === 'live' && _prevStreamOwner === null && state === 'idle') {
+            showToast('Yayın için Windows\'ta .exe uzantılı uygulamanın açık olması gerekiyor.', 'info');
+        }
+
+        _prevStreamState = state;
+        _prevStreamOwner = data.owner_device_id ?? null;
     }
 
     async function updateStreamState() {
