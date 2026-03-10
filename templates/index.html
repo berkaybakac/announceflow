@@ -792,7 +792,15 @@
 
         if (state === 'error' && data.last_error) {
             errorInfo.style.display = '';
-            errorText.textContent = data.last_error;
+
+            const errorTranslations = {
+                'receiver_start_failed': 'Alıcı başlatılamadı (Windows Ajanı ile bağlantı kurulamadı)',
+                'receiver_died': 'Ses alıcısı aniden çöktü (Ses aygıtı hatası veya yetki eksikliği)',
+                'port_conflict': 'Yayın portu şu anda kullanımda',
+                'stream_active': 'Yayın zaten açık',
+            };
+
+            errorText.textContent = errorTranslations[data.last_error] || data.last_error;
         } else {
             errorInfo.style.display = 'none';
         }

@@ -318,6 +318,30 @@ def _resolve_correlation_id() -> str:
     return f"local-{os.getpid()}-{int(time.time() * 1000)}"
 
 
+def stop_process(proc: subprocess.Popen) -> None:
+    """Gracefully stop ffmpeg via stdin 'q' + SIGTERM.
+
+    Sends 'q' first (best-effort), then SIGTERM.  FFmpeg with UDP
+    input blocks on recvfrom() and never reads stdin, so 'q' alone
+    is not reliable.  SIGTERM is a kernel-level signal that reaches
+    ffmpeg regardless of what syscall it's blocked on.
+    """
+    try:
+        if proc.stdin and not proc.stdin.closed:
+            proc.stdin.write("q")
+            proc.stdin.flush()
+            proc.stdin.close()
+    except (OSError, BrokenPipeError, ValueError):
+        pass
+    try:
+        proc.terminate()
+        proc.wait(timeout=1.0)
+    except (OSError, ProcessLookupError, subprocess.TimeoutExpired):
+        try:
+            proc.kill()
+        except Exception:
+            pass
+
 def main():
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 5800
     ffmpeg_bin = _find_ffmpeg()
@@ -398,7 +422,6 @@ def main():
         encoding="utf-8",
         errors="replace",
         bufsize=0,
-        preexec_fn=os.setsid,
     )
 
     drain_thread = threading.Thread(
@@ -414,24 +437,8 @@ def main():
     drain_thread.start()
 
     def _cleanup():
-        """Gracefully stop ffmpeg via stdin 'q' + SIGTERM.
-
-        Sends 'q' first (best-effort), then SIGTERM.  FFmpeg with UDP
-        input blocks on recvfrom() and never reads stdin, so 'q' alone
-        is not reliable.  SIGTERM is a kernel-level signal that reaches
-        ffmpeg regardless of what syscall it's blocked on.
-        """
-        try:
-            if proc.stdin and not proc.stdin.closed:
-                proc.stdin.write("q")
-                proc.stdin.flush()
-                proc.stdin.close()
-        except (OSError, BrokenPipeError, ValueError):
-            pass
-        try:
-            proc.terminate()
-        except (OSError, ProcessLookupError):
-            pass
+        """Gracefully stop ffmpeg via stdin 'q' + SIGTERM."""
+        stop_process(proc)
 
     atexit.register(_cleanup)
 
