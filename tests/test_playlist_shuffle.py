@@ -279,12 +279,13 @@ class TestStartAllShuffleApi(_PlaylistApiBase):
 
     # ── Backward compat: no body ─────────────────────────────────────────────
 
-    def test_no_json_content_type_returns_415(self):
-        """POST with no Content-Type → Flask rejects with 415 before our code runs."""
+    def test_no_body_no_content_type_shuffle_defaults_false(self):
+        """POST with no body and no Content-Type → force+silent JSON read → shuffle=False, 200."""
         self._seed_music()
         resp = self.client.post("/api/playlist/start-all")
-        self.assertEqual(resp.status_code, 415)
-        self._mock_player.set_playlist.assert_not_called()
+        self.assertEqual(resp.status_code, 200)
+        _, kwargs = self._mock_player.set_playlist.call_args
+        self.assertFalse(kwargs.get("shuffle", False))
 
     def test_empty_json_body_shuffle_defaults_false(self):
         """Empty JSON {} → shuffle=False."""
