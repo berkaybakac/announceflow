@@ -782,6 +782,7 @@ class AgentGUI:
         
         # State tracking for polling loops
         self._stream_active = False
+        self._stream_poll_active = False
         self._music_active = False
         self._heartbeat_job = None
         self._poll_job = None
@@ -956,6 +957,8 @@ class AgentGUI:
                 return
             if result.get("success"):
                 self.logged_in = True
+                self._stream_poll_active = True
+                self._run_status_poll()
                 self.show_main_frame()
                 return
             if result.get("error") == "invalid_credentials":
@@ -1101,6 +1104,8 @@ class AgentGUI:
                     delete_credentials(final_url)
 
                 self.logged_in = True
+                self._stream_poll_active = True
+                self._run_status_poll()
                 self.show_main_frame()
                 return
 
@@ -1487,7 +1492,7 @@ class AgentGUI:
             success = bool(payload.get("success"))
             
             self._stream_active = False
-            self._stop_stream_polling_loops()
+            self._stop_heartbeat_only()
             self._refresh_stream_buttons()
 
             if success:
@@ -1558,24 +1563,30 @@ class AgentGUI:
         """Start the loops that maintain stream health and watch for takeovers."""
         if not self._root_alive():
             return
-        self._stop_stream_polling_loops()
+        self._stop_heartbeat_only()
+        if not self._stream_poll_active:
+            self._stream_poll_active = True
+            self._run_status_poll()
         self._heartbeat_job = self.root.after(4500, self._run_heartbeat)
-        self._poll_job = self.root.after(2000, self._run_status_poll)
 
     def _stop_stream_polling_loops(self):
-        if self._heartbeat_job is not None and self.root:
-            try:
-                self.root.after_cancel(self._heartbeat_job)
-            except tk.TclError:
-                pass
-            self._heartbeat_job = None
-            
+        self._stream_poll_active = False
+        self._stop_heartbeat_only()
         if self._poll_job is not None and self.root:
             try:
                 self.root.after_cancel(self._poll_job)
             except tk.TclError:
                 pass
             self._poll_job = None
+
+    def _stop_heartbeat_only(self):
+        """Stop heartbeat loop but keep status poll running."""
+        if self._heartbeat_job is not None and self.root:
+            try:
+                self.root.after_cancel(self._heartbeat_job)
+            except tk.TclError:
+                pass
+            self._heartbeat_job = None
 
     def _run_heartbeat(self):
         """Send a heartbeat. Loop if still active."""
@@ -1597,15 +1608,21 @@ class AgentGUI:
         self._submit_network_job(_job, on_success=_on_done)
 
     def _run_status_poll(self):
-        """Check if someone else took over the stream. Loop if still active."""
-        if not self._stream_active or not self._root_alive():
+        """Check stream state and react: takeover, external stop, or auto-resume.
+
+        Keeps polling as long as _stream_poll_active is True, even when
+        _stream_active (sender running) is False.  This allows the agent
+        to detect when the panel re-starts the receiver and auto-resume
+        the local sender.
+        """
+        if not getattr(self, "_stream_poll_active", False) or not self._root_alive():
             return
-            
+
         def _job():
             return self.agent.get_stream_status()
-            
+
         def _on_done(status):
-            if not self._root_alive() or not self._stream_active:
+            if not self._root_alive():
                 return
 
             is_active = status.get("active")
@@ -1613,25 +1630,28 @@ class AgentGUI:
             owner_device_id = status.get("owner_device_id")
             my_device_id = getattr(self.agent, "device_id", None)
 
-            # If stream is active but owned by someone else -> takeover occurred
+            # ── 1. Takeover: someone else owns the stream ──────────────
             if is_active and owner_device_id and my_device_id and owner_device_id != my_device_id:
                 stream_logger.info("stream_takeover_detected new_owner=%s", owner_device_id)
                 self._stream_active = False
+                self._stop_heartbeat_only()
                 self._refresh_stream_buttons()
-
-                # Stop local capture thread
                 self._submit_network_job(
                     lambda: self._stream_client.stop_sender(),
                     on_success=lambda _: self._show_status("Yayın başka bir cihaza devredildi!", error=True)
                 )
-            elif state in ("idle", "error") and not is_active and self._stream_active:
-                # Stream stopped externally (panel stop, heartbeat timeout, receiver died).
-                # Note: stopped_by_policy is intentionally excluded — receiver will resume.
+                # Keep polling
+                if getattr(self, "_stream_poll_active", False):
+                    self._poll_job = self.root.after(3000, self._run_status_poll)
+                return
+
+            # ── 2. External stop: server idle/error, we were sending ───
+            if state in ("idle", "error") and not is_active and self._stream_active:
                 stream_logger.info(
                     "stream_external_stop detected state=%s, stopping local sender", state
                 )
                 self._stream_active = False
-                self._stop_stream_polling_loops()
+                self._stop_heartbeat_only()
                 self._refresh_stream_buttons()
                 self._submit_network_job(
                     lambda: self._stream_client.stop_sender(),
@@ -1640,9 +1660,55 @@ class AgentGUI:
                         error=(state == "error"),
                     ),
                 )
-            elif self._stream_active:
-                self._poll_job = self.root.after(2000, self._run_status_poll)
-                
+                # Keep polling — don't return, schedule next poll below
+
+            # ── 3. Auto-resume: receiver is live but sender stopped ────
+            elif is_active and state == "live" and not self._stream_active:
+                stream_logger.info(
+                    "stream_auto_resume: receiver is live (owner=%s) "
+                    "but local sender stopped — restarting sender",
+                    owner_device_id or "panel",
+                )
+                host = self._resolve_stream_host()
+                correlation_id = f"agent-resume-{int(time.time() * 1000)}"
+
+                def _resume():
+                    ok = self._stream_client.start_sender(
+                        host, 5800, correlation_id=correlation_id
+                    )
+                    stream_logger.info(
+                        "stream_auto_resume: start_sender result=%s "
+                        "host=%s correlation_id=%s",
+                        ok, host, correlation_id,
+                    )
+                    return ok
+
+                def _on_resume(ok):
+                    if not self._root_alive():
+                        return
+                    if ok:
+                        stream_logger.info(
+                            "stream_auto_resume: sender resumed successfully"
+                        )
+                        self._stream_active = True
+                        self._start_stream_polling_loops()
+                        self._refresh_stream_buttons()
+                        self._show_status("Yayın devam ediyor")
+                    else:
+                        stream_logger.warning(
+                            "stream_auto_resume: sender failed to resume, "
+                            "will retry on next poll"
+                        )
+                        # Don't set _stream_active — next poll will retry
+
+                self._submit_network_job(_resume, on_success=_on_resume)
+                return  # _start_stream_polling_loops will reschedule
+
+            # ── 4. Steady state: keep polling ──────────────────────────
+            if getattr(self, "_stream_poll_active", False):
+                interval = 2000 if self._stream_active else 3000
+                self._poll_job = self.root.after(interval, self._run_status_poll)
+
         self._submit_network_job(_job, on_success=_on_done)
 
     def clear_frame(self):
