@@ -938,7 +938,7 @@ class AgentGUI:
         loading_frame.pack(expand=True)
 
         tk.Label(
-            loading_frame, text="AnnounceFlow",
+            loading_frame, text="StatekSound",
             font=("Segoe UI", 20, "bold"), bg=_BG, fg=_FG,
         ).pack(pady=(40, 10))
         tk.Label(
@@ -985,7 +985,7 @@ class AgentGUI:
 
         # Title
         tk.Label(
-            frame, text="AnnounceFlow",
+            frame, text="StatekSound",
             font=("Segoe UI", 20, "bold"), bg=_BG, fg=_FG,
         ).pack(pady=(30, 5))
 
@@ -1277,6 +1277,12 @@ class AgentGUI:
             bg=_BG_HEADER, fg=_FG_DIM,
         )
         self._status_label.pack()
+
+        tk.Label(
+            status_frame,
+            text="Statek Stabil Teknoloji tarafından geliştirilmiştir.",
+            font=("Segoe UI", 8), bg=_BG_HEADER, fg=_FG_DIM,
+        ).pack(pady=(0, 2))
 
     # --------------- Actions ---------------
 
