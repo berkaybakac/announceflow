@@ -308,6 +308,10 @@ class StreamService:
                     return {"success": False, "status": self._status.to_dict()}
 
         # ── Normal start (no takeover) ─────────────────────────────────
+        # Ensure any background stop has completed before starting.
+        if self._manager:
+            self._manager.wait_for_stop_complete(timeout=1.3)
+
         with self._lock:
             try:
                 self._user_stopped = False

@@ -304,7 +304,8 @@ class TestStreamServiceTakeover:
         svc = _make_service(mock_manager, mock_player)
         svc.start(device_id="dev-1")
         svc.start(device_id="dev-2")
-        mock_manager.wait_for_stop_complete.assert_called_once()
+        # Called twice: once in normal start (dev-1) and once in takeover (dev-2).
+        assert mock_manager.wait_for_stop_complete.call_count == 2
 
     def test_takeover_preserves_source_before_stream(self, mock_manager, mock_player):
         mock_player.get_state.return_value = {

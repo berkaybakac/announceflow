@@ -367,3 +367,139 @@ class TestPolicyStatesHaveStopAction:
         svc.force_stop_by_policy()
         svc.stop()
         assert svc.status()["state"] == "idle"
+
+
+# --------------- 7. Race condition: start after background stop ---------------
+
+
+class TestStartAfterBackgroundStop:
+    """Tests for the race condition where start_receiver() is called before
+    a previous stop's background kill thread has completed.  This is the
+    exact bug scenario: heartbeat expires → auto-stop → panel clicks start →
+    'receiver stop still in progress, rejecting start'.
+    """
+
+    def test_start_after_auto_stop_calls_wait_for_stop(
+        self, mock_manager, mock_player
+    ):
+        """After heartbeat auto-stop, next start() must call
+        wait_for_stop_complete() BEFORE start_receiver()."""
+        svc = _make_service(mock_manager, mock_player)
+        svc.start()  # panel start → live
+        # Simulate heartbeat expiry → auto-stop
+        svc._last_heartbeat_at = time.monotonic() - (HEARTBEAT_TIMEOUT + 1)
+        svc._check_heartbeat()
+        assert svc.status()["state"] == "idle"
+
+        mock_manager.wait_for_stop_complete.reset_mock()
+        mock_manager.start_receiver.reset_mock()
+
+        # Panel clicks start again immediately after auto-stop
+        result = svc.start()
+        assert result["success"] is True
+        assert result["status"]["state"] == "live"
+        # The fix: wait_for_stop_complete must be called before start_receiver
+        mock_manager.wait_for_stop_complete.assert_called_with(timeout=1.3)
+        mock_manager.start_receiver.assert_called_once()
+
+    def test_start_after_explicit_stop_calls_wait(
+        self, mock_manager, mock_player
+    ):
+        """Explicit stop() → immediate start() must wait for background cleanup."""
+        svc = _make_service(mock_manager, mock_player)
+        svc.start()
+        svc.stop()
+
+        mock_manager.wait_for_stop_complete.reset_mock()
+        result = svc.start()
+        assert result["success"] is True
+        mock_manager.wait_for_stop_complete.assert_called_once_with(timeout=1.3)
+
+    def test_start_receiver_failure_after_wait_returns_error(
+        self, mock_manager, mock_player
+    ):
+        """Even after wait_for_stop_complete, if receiver fails to start
+        we must get a clean error (not hang or crash)."""
+        svc = _make_service(mock_manager, mock_player)
+        svc.start()
+        svc.stop()
+
+        # Next start: wait completes but receiver refuses to start
+        mock_manager.start_receiver.return_value = False
+        result = svc.start()
+        assert result["success"] is False
+        assert result["status"]["state"] == "error"
+        assert result["status"]["last_error"] == "receiver_start_failed"
+
+    def test_double_rapid_start_is_idempotent(
+        self, mock_manager, mock_player
+    ):
+        """User spam-clicks start — second call while live is idempotent,
+        must not crash or create duplicate receivers."""
+        mock_manager.is_alive.return_value = True
+        svc = _make_service(mock_manager, mock_player)
+        r1 = svc.start()
+        assert r1["success"] is True
+        # Second start with no device_id → takeover path (not same-device idempotent)
+        # but receiver is alive so will succeed
+        r2 = svc.start()
+        assert r2["success"] is True
+
+    def test_three_stop_start_cycles_no_zombie_state(
+        self, mock_manager, mock_player
+    ):
+        """Three rapid stop→start cycles must leave clean state each time,
+        with no zombie _stopping_proc or stuck mid_takeover."""
+        svc = _make_service(mock_manager, mock_player)
+        for i in range(3):
+            r = svc.start()
+            assert r["success"] is True, f"Cycle {i}: start failed"
+            assert r["status"]["state"] == "live", f"Cycle {i}: not live"
+            r = svc.stop()
+            assert r["success"] is True, f"Cycle {i}: stop failed"
+            assert r["status"]["state"] == "idle", f"Cycle {i}: not idle"
+        # After 3 cycles: wait_for_stop_complete called each start (3 times)
+        assert mock_manager.wait_for_stop_complete.call_count == 3
+
+    def test_heartbeat_expire_then_immediate_restart_succeeds(
+        self, mock_manager, mock_player
+    ):
+        """The EXACT bug scenario: panel start → heartbeat expires →
+        auto-stop (background kill) → panel start again → MUST succeed.
+
+        Before fix: 'receiver stop still in progress, rejecting start'
+        After fix:  wait_for_stop_complete() clears the way."""
+        svc = _make_service(mock_manager, mock_player)
+
+        # 1. Panel starts stream
+        r1 = svc.start()
+        assert r1["success"] is True
+
+        # 2. Heartbeat expires (auto-stop)
+        svc._last_heartbeat_at = time.monotonic() - (HEARTBEAT_TIMEOUT + 1)
+        svc._check_heartbeat()
+        assert svc.status()["state"] == "idle"
+
+        # 3. Simulate: stop_receiver's background thread hasn't cleared
+        #    _stopping_proc yet (this is the race window)
+        mock_manager.wait_for_stop_complete.reset_mock()
+
+        # 4. Panel clicks start IMMEDIATELY
+        r2 = svc.start()
+
+        # Must succeed — wait_for_stop_complete blocks until bg thread is done
+        assert r2["success"] is True, "Start after auto-stop must not be rejected"
+        assert r2["status"]["state"] == "live"
+        mock_manager.wait_for_stop_complete.assert_called_with(timeout=1.3)
+
+    def test_start_after_stop_does_not_leave_mid_takeover_flag(
+        self, mock_manager, mock_player
+    ):
+        """After normal start (not takeover), _mid_takeover must stay False.
+        Stale mid_takeover=True would block all subsequent starts."""
+        svc = _make_service(mock_manager, mock_player)
+        svc.start()
+        svc.stop()
+        svc.start()
+        assert svc._mid_takeover is False
+
