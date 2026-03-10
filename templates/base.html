@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}AnnounceFlow{% endblock %}</title>
+    <title>{% block title %}StatekSound{% endblock %}</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -809,14 +809,14 @@
     <div class="app-container">
         <!-- Sidebar -->
         <aside class="sidebar">
-            <a href="/" class="logo-link" aria-label="AnnounceFlow">
+            <a href="/" class="logo-link" aria-label="StatekSound">
                 <div class="logo">
                     <div class="logo-icon">
                         <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path stroke-linecap="round" stroke-linejoin="round" d="M9 9l10.5-3m0 6.553v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 11-.99-3.467l2.31-.66a2.25 2.25 0 001.632-2.163zm0 0V2.25L9 5.25v10.303m0 0v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 01-.99-3.467l2.31-.66A2.25 2.25 0 009 15.553z" />
                         </svg>
                     </div>
-                    <span class="logo-text">AnnounceFlow</span>
+                    <span class="logo-text">StatekSound</span>
                 </div>
             </a>
 
@@ -921,6 +921,11 @@
             <button class="control-btn" onclick="globalStop()" title="Durdur" aria-label="Durdur">
                 <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M5.25 7.5A2.25 2.25 0 017.5 5.25h9a2.25 2.25 0 012.25 2.25v9a2.25 2.25 0 01-2.25 2.25h-9a2.25 2.25 0 01-2.25-2.25v-9z" />
+                </svg>
+            </button>
+            <button class="control-btn" onclick="globalShuffle()" title="Karışık Oynat" aria-label="Karışık Oynat">
+                <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" />
                 </svg>
             </button>
             <button class="control-btn control-btn-loop" onclick="globalLoop()" title="Loop Oynat" aria-label="Loop Oynat">
@@ -1107,6 +1112,22 @@
 
         function globalNext() {
             globalPlayerAction('/api/playlist/next', 'Sonraki parça başlatılamadı');
+        }
+
+        async function globalShuffle() {
+            try {
+                const response = await fetchUserAction(
+                    '/api/playlist/start-all',
+                    { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ shuffle: true }) },
+                    { timeoutMs: USER_ACTION_WARNING_DEFAULT_MS }
+                );
+                if (!response.ok) {
+                    const data = await response.json().catch(() => ({}));
+                    showToast(data.error || 'Karışık oynatma başlatılamadı', 'error');
+                }
+            } catch (error) {
+                showToast('Karışık oynatma başlatılamadı', 'error');
+            }
         }
 
         // Helper function for delete operations
