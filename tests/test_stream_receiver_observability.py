@@ -109,3 +109,46 @@ def test_process_ffmpeg_line_emits_first_input_output_events(monkeypatch):
     ]
     assert emitted[0][1]["correlation_id"] == "cid-1"
     assert emitted[1][1]["correlation_id"] == "cid-1"
+
+
+import subprocess
+from unittest.mock import MagicMock
+
+def test_stop_process_graceful():
+    proc = MagicMock(spec=subprocess.Popen)
+    proc.stdin = MagicMock()
+    proc.stdin.closed = False
+    
+    receiver.stop_process(proc)
+    
+    proc.stdin.write.assert_called_once_with("q")
+    proc.stdin.flush.assert_called_once()
+    proc.stdin.close.assert_called_once()
+    proc.terminate.assert_called_once()
+    proc.wait.assert_called_once_with(timeout=1.0)
+    proc.kill.assert_not_called()
+
+def test_stop_process_force_kill():
+    proc = MagicMock(spec=subprocess.Popen)
+    proc.stdin = None  # test no stdin
+    
+    # Simulate a process that ignores terminate and times out
+    proc.wait.side_effect = subprocess.TimeoutExpired(cmd="ffmpeg", timeout=1.0)
+    
+    receiver.stop_process(proc)
+    
+    proc.terminate.assert_called_once()
+    proc.wait.assert_called_once_with(timeout=1.0)
+    proc.kill.assert_called_once()
+
+def test_stop_process_process_lookup_error():
+    proc = MagicMock(spec=subprocess.Popen)
+    proc.stdin = None
+    
+    # Simulate process already dead when terminate is called
+    proc.terminate.side_effect = ProcessLookupError()
+    
+    receiver.stop_process(proc)
+    
+    proc.terminate.assert_called_once()
+    proc.kill.assert_called_once()

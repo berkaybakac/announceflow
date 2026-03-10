@@ -38,6 +38,37 @@ class StreamManager:
         self._port = port
         self._consecutive_start_failures = 0
 
+    @staticmethod
+    def _read_stderr_snippet(proc: subprocess.Popen, max_bytes: int = 1024) -> str:
+        """Read up to max_bytes from a dead process's stderr pipe."""
+        try:
+            if proc.stderr:
+                raw = proc.stderr.read(max_bytes)
+                if raw:
+                    return raw.decode("utf-8", errors="replace").strip()[:500]
+        except Exception:
+            pass
+        return ""
+
+    @staticmethod
+    def _start_stderr_drain(proc: subprocess.Popen) -> None:
+        """Drain stderr in a background thread to prevent pipe buffer deadlock."""
+        def _drain():
+            try:
+                if proc.stderr:
+                    for line in iter(proc.stderr.readline, b""):
+                        try:
+                            msg = line.decode("utf-8", errors="replace").strip()
+                            if msg:
+                                logger.warning("StreamReceiver[%s]: %s", getattr(proc, "pid", "?"), msg)
+                        except Exception:
+                            pass
+            except Exception:
+                pass
+        t = threading.Thread(target=_drain, daemon=True)
+        t.name = "stream-stderr-drain"
+        t.start()
+
     def _log_stop_reason(
         self,
         reason: str,
@@ -135,33 +166,38 @@ class StreamManager:
                     [sys.executable, receiver_script, str(self._port)],
                     stdin=subprocess.PIPE,
                     stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
+                    stderr=subprocess.PIPE,
                     env=child_env,
                 )
                 # Brief health check: catch immediate death (port conflict, script error)
                 time.sleep(0.05)
                 if self._process.poll() is not None:
                     exit_code = self._process.returncode
+                    stderr_snippet = self._read_stderr_snippet(self._process)
                     logger.warning(
-                        "StreamManager: receiver died immediately (exit=%s, correlation_id=%s), retrying once after %.0fms",
+                        "StreamManager: receiver died immediately (exit=%s, correlation_id=%s, stderr=%s), retrying once after %.0fms",
                         exit_code,
                         correlation_id or "-",
+                        stderr_snippet,
                         START_RETRY_DELAY * 1000,
                     )
+                    self._process = None
                     time.sleep(START_RETRY_DELAY)
                     self._process = subprocess.Popen(
                         [sys.executable, receiver_script, str(self._port)],
                         stdin=subprocess.PIPE,
                         stdout=subprocess.DEVNULL,
-                        stderr=subprocess.DEVNULL,
+                        stderr=subprocess.PIPE,
                         env=child_env,
                     )
                     time.sleep(0.05)
                     if self._process.poll() is not None:
+                        stderr_snippet = self._read_stderr_snippet(self._process)
                         logger.error(
-                            "StreamManager: receiver died on retry (exit=%s, correlation_id=%s)",
+                            "StreamManager: receiver died on retry (exit=%s, correlation_id=%s, stderr=%s)",
                             self._process.returncode,
                             correlation_id or "-",
+                            stderr_snippet,
                         )
                         self._record_start_failure_unlocked(
                             correlation_id=correlation_id,
@@ -169,6 +205,8 @@ class StreamManager:
                         )
                         self._process = None
                         return False
+                # Receiver alive — drain stderr in background to prevent pipe buffer deadlock
+                self._start_stderr_drain(self._process)
                 logger.info(
                     "StreamManager: receiver started (pid=%d, port=%d, correlation_id=%s)",
                     self._process.pid,

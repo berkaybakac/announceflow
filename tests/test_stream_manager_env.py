@@ -20,12 +20,38 @@ class _FakeStdin:
         self.closed = True
 
 
+class _FakeStderr:
+    """Minimal stderr mock that supports read/readline for stderr drain."""
+
+    def __init__(self, data: bytes = b""):
+        self._data = data
+        self._pos = 0
+
+    def read(self, n: int = -1) -> bytes:
+        if n < 0:
+            result = self._data[self._pos:]
+            self._pos = len(self._data)
+        else:
+            result = self._data[self._pos:self._pos + n]
+            self._pos += len(result)
+        return result
+
+    def readline(self) -> bytes:
+        idx = self._data.find(b"\n", self._pos)
+        if idx == -1:
+            return b""
+        result = self._data[self._pos:idx + 1]
+        self._pos = idx + 1
+        return result
+
+
 class _AliveProc:
     def __init__(self):
         self.pid = 4242
         self.returncode = None
         self._terminated = False
         self.stdin = _FakeStdin()
+        self.stderr = _FakeStderr()
 
     def poll(self):
         return None if not self._terminated else 0
@@ -61,10 +87,11 @@ class _TimeoutProc(_AliveProc):
 class _DeadProc:
     """Simulates a receiver process that exits immediately."""
 
-    def __init__(self, returncode=1):
+    def __init__(self, returncode=1, stderr_data: bytes = b""):
         self.pid = 9898
         self.returncode = returncode
         self.stdin = _FakeStdin()
+        self.stderr = _FakeStderr(stderr_data)
 
     def poll(self):
         return self.returncode
@@ -212,6 +239,52 @@ def test_start_failure_counter_warns_on_third_and_resets_on_success(monkeypatch)
         assert mgr._consecutive_start_failures == 0
 
     assert popen_calls["count"] == 7
+
+
+def test_start_failure_logs_stderr_snippet(monkeypatch):
+    """When receiver dies immediately, stderr output is included in the log."""
+    error_msg = b"cannot open audio device plughw:2,0 (Unknown error 524)\n"
+    outcomes = [
+        _DeadProc(1, stderr_data=error_msg),
+        _DeadProc(1, stderr_data=error_msg),
+    ]
+
+    def _fake_popen(cmd, stdin=None, stdout=None, stderr=None, env=None):
+        return outcomes.pop(0)
+
+    monkeypatch.setattr("stream_manager.time.sleep", lambda _x: None)
+    monkeypatch.setattr("stream_manager.subprocess.Popen", _fake_popen)
+
+    mgr = StreamManager(port=5800)
+    with patch("stream_manager.logger.warning") as mock_warn, \
+         patch("stream_manager.logger.error") as mock_err:
+        assert mgr.start_receiver(correlation_id="test-stderr") is False
+
+        # First attempt warning should include stderr
+        warn_calls = [c for c in mock_warn.call_args_list if "died immediately" in str(c)]
+        assert len(warn_calls) == 1
+        assert "cannot open audio device" in str(warn_calls[0])
+
+        # Retry error should also include stderr
+        err_calls = [c for c in mock_err.call_args_list if "died on retry" in str(c)]
+        assert len(err_calls) == 1
+        assert "cannot open audio device" in str(err_calls[0])
+
+
+def test_start_success_drains_stderr(monkeypatch):
+    """When receiver starts successfully, stderr drain thread is started."""
+    proc = _AliveProc()
+
+    def _fake_popen(cmd, stdin=None, stdout=None, stderr=None, env=None):
+        return proc
+
+    monkeypatch.setattr("stream_manager.time.sleep", lambda _x: None)
+    monkeypatch.setattr("stream_manager.subprocess.Popen", _fake_popen)
+
+    mgr = StreamManager(port=5800)
+    with patch.object(StreamManager, "_start_stderr_drain") as mock_drain:
+        assert mgr.start_receiver() is True
+        mock_drain.assert_called_once_with(proc)
 
 
 def test_start_rejected_while_previous_stop_in_progress(monkeypatch):
