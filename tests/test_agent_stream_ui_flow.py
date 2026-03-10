@@ -481,6 +481,7 @@ def _make_gui_for_polling():
     gui._pending_volume = None
     gui._status_clear_job = None
     gui._stream_active = True
+    gui._stream_poll_active = True
     gui._heartbeat_job = None
     gui._poll_job = None
     gui._btn_stream_start = None
@@ -509,8 +510,8 @@ def _capture_poll_on_done(gui):
     """Call _run_status_poll and capture the _on_done callback.
 
     The first submit call queues the status-fetch job and captures _on_done.
-    Any subsequent submit calls (e.g., stop_sender lambda) are executed
-    immediately so side-effects are visible without a real worker thread.
+    All subsequent submit calls are captured (fn + on_success) so tests can
+    inspect and execute them manually.
     """
     captured_on_done = None
     submit_calls = []
@@ -521,9 +522,6 @@ def _capture_poll_on_done(gui):
         if len(submit_calls) == 1:
             # First call: status-fetch job → capture on_done, don't execute
             captured_on_done = on_success
-        else:
-            # Subsequent calls (e.g., stop_sender) → run immediately
-            fn()
 
     gui._submit_network_job = fake_submit
     gui._run_status_poll()
@@ -540,21 +538,33 @@ class TestStatusPollExternalStop:
     def test_idle_state_stops_local_sender(self):
         """Panel called /api/stream/stop → server idle → EXE stops sender."""
         gui = _make_gui_for_polling()
-        on_done, _ = _capture_poll_on_done(gui)
+        on_done, submits = _capture_poll_on_done(gui)
         assert on_done is not None, "_run_status_poll did not register _on_done"
 
         on_done({"active": False, "state": "idle", "owner_device_id": None})
 
+        # Execute the submitted stop_sender job
+        assert len(submits) >= 2, "Should have submitted a stop_sender job"
+        stop_job, _ = submits[1]
+        stop_job()
+
         assert gui._stream_active is False
         gui._stream_client.stop_sender.assert_called_once()
+        # Poll keeps running for auto-resume
+        assert gui._stream_poll_active is True
 
     def test_error_state_stops_local_sender(self):
         """Receiver died on server → error state → EXE stops sender."""
         gui = _make_gui_for_polling()
-        on_done, _ = _capture_poll_on_done(gui)
+        on_done, submits = _capture_poll_on_done(gui)
         assert on_done is not None
 
         on_done({"active": False, "state": "error", "owner_device_id": None})
+
+        # Execute the submitted stop_sender job
+        assert len(submits) >= 2, "Should have submitted a stop_sender job"
+        stop_job, _ = submits[1]
+        stop_job()
 
         assert gui._stream_active is False
         gui._stream_client.stop_sender.assert_called_once()
@@ -587,8 +597,8 @@ class TestStatusPollExternalStop:
         assert gui._stream_active is True
         gui._stream_client.stop_sender.assert_not_called()
 
-    def test_idle_cancels_polling_loops(self):
-        """On external idle stop, pending heartbeat job is cancelled."""
+    def test_idle_stops_heartbeat_but_keeps_poll(self):
+        """On external idle stop, heartbeat is cancelled but poll stays active."""
         gui = _make_gui_for_polling()
         fake_job_id = object()
         gui._heartbeat_job = fake_job_id
@@ -599,6 +609,132 @@ class TestStatusPollExternalStop:
 
         gui.root.after_cancel.assert_called_with(fake_job_id)
         assert gui._heartbeat_job is None
+        # Poll should still be active for auto-resume
+        assert gui._stream_poll_active is True
+
+    def test_takeover_stops_poll_completely(self):
+        """When another device takes over, local sender stops but polling keeps checking for updates."""
+        gui = _make_gui_for_polling()
+        gui.agent.device_id = "agent-device-abc"
+        on_done, submits = _capture_poll_on_done(gui)
+        assert on_done is not None
+
+        on_done({
+            "active": True,
+            "state": "live",
+            "owner_device_id": "other-device-xyz",
+        })
+
+        # Execute the submitted stop_sender job
+        assert len(submits) >= 2, "Should have submitted a stop_sender job"
+        stop_job, _ = submits[1]
+        stop_job()
+
+        assert gui._stream_active is False
+        assert gui._stream_poll_active is True
+        gui._stream_client.stop_sender.assert_called_once()
+
+
+# --------------- 13. Auto-resume: panel starts receiver, agent resumes sender -----
+
+
+class TestStatusPollAutoResume:
+    """The CORE fix: when panel starts receiver and agent's sender is stopped,
+    the status poll should auto-resume the sender."""
+
+    def test_auto_resume_when_receiver_live_sender_stopped(self):
+        """Panel starts receiver → poll sees live → agent starts sender."""
+        gui = _make_gui_for_polling()
+        gui._stream_active = False  # Sender stopped (e.g., after panel stop)
+        gui._stream_poll_active = True  # But poll still running
+
+        gui._stream_client.start_sender.return_value = True
+
+        on_done, submits = _capture_poll_on_done(gui)
+        assert on_done is not None
+
+        on_done({"active": True, "state": "live", "owner_device_id": None})
+
+        # Auto-resume should have submitted a job that calls start_sender
+        assert len(submits) >= 2, "Auto-resume should submit a resume job"
+        resume_fn = submits[1][0]
+        resume_fn()  # Execute the resume job
+        gui._stream_client.start_sender.assert_called_once()
+
+    def test_auto_resume_sets_stream_active_on_success(self):
+        """After successful resume, _stream_active should be True."""
+        gui = _make_gui_for_polling()
+        gui._stream_active = False
+        gui._stream_poll_active = True
+        gui._stream_client.start_sender.return_value = True
+
+        on_done, submits = _capture_poll_on_done(gui)
+        on_done({"active": True, "state": "live", "owner_device_id": None})
+
+        # Execute resume job
+        resume_fn, resume_on_done = submits[1]
+        result = resume_fn()
+        assert result is True
+        # Call the resume callback
+        resume_on_done(True)
+        assert gui._stream_active is True
+
+    def test_auto_resume_failure_keeps_polling(self):
+        """If sender fails to resume, keep polling to retry."""
+        gui = _make_gui_for_polling()
+        gui._stream_active = False
+        gui._stream_poll_active = True
+        gui._stream_client.start_sender.return_value = False
+
+        on_done, submits = _capture_poll_on_done(gui)
+        on_done({"active": True, "state": "live", "owner_device_id": None})
+
+        resume_fn, resume_on_done = submits[1]
+        result = resume_fn()
+        assert result is False
+        resume_on_done(False)
+        # _stream_active stays False (will retry on next poll)
+        assert gui._stream_active is False
+        assert gui._stream_poll_active is True
+
+    def test_no_auto_resume_when_idle(self):
+        """When receiver is idle and sender was stopped, no resume happens."""
+        gui = _make_gui_for_polling()
+        gui._stream_active = False
+        gui._stream_poll_active = True
+
+        on_done, submits = _capture_poll_on_done(gui)
+        on_done({"active": False, "state": "idle", "owner_device_id": None})
+
+        # Only the status-fetch submit, no resume submit
+        assert len(submits) == 1
+        gui._stream_client.start_sender.assert_not_called()
+
+    def test_full_flow_stop_then_panel_restart(self):
+        """E2E: exe streaming → panel stop → panel start → agent auto-resumes."""
+        gui = _make_gui_for_polling()
+        gui._stream_active = True
+        gui._stream_poll_active = True
+
+        # Step 1: Panel stops stream — agent detects idle
+        on_done1, submits1 = _capture_poll_on_done(gui)
+        on_done1({"active": False, "state": "idle", "owner_device_id": None})
+        assert gui._stream_active is False
+        assert gui._stream_poll_active is True  # Poll stays active!
+
+        # Step 2: Panel starts stream again — agent detects live
+        gui._stream_client.start_sender.return_value = True
+        gui._stream_client.reset_mock()
+        on_done2, submits2 = _capture_poll_on_done(gui)
+        on_done2({"active": True, "state": "live", "owner_device_id": None})
+
+        # Auto-resume triggered
+        assert len(submits2) >= 2
+        resume_fn, resume_cb = submits2[1]
+        resume_fn()
+        gui._stream_client.start_sender.assert_called_once()
+        resume_cb(True)
+        assert gui._stream_active is True
 
 
 # --------------- 11. Hostname display ---------------
