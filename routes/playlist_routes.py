@@ -134,7 +134,7 @@ def api_playlist_start_all():
     file_paths = [f["filepath"] for f in music_files]
 
     # Set playlist and start playing (loop=True)
-    data = request.get_json() or {}
+    data = request.get_json(force=True, silent=True) or {}
     shuffle = data.get("shuffle", False)
     player = get_player()
     player.set_playlist(file_paths, loop=True, shuffle=shuffle)
