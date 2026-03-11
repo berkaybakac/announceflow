@@ -356,12 +356,12 @@ class TestLogoutInHeader:
 
 
 class TestWindowSize:
-    def test_geometry_larger_than_before(self):
-        """Window geometry should be at least 420x760."""
+    def test_geometry_compact(self):
+        """Window geometry should stay compact for operator-friendly usage."""
         source_path = os.path.join(_agent_dir, "agent.py")
         with open(source_path) as f:
             source = f.read()
-        assert "420x760" in source
+        assert "420x540" in source
 
     def test_minsize_set(self):
         """minsize should be set to prevent content clipping."""
