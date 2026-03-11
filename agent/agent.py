@@ -790,9 +790,17 @@ class AgentGUI:
     def run(self):
         """Run the GUI application."""
         self.root = tk.Tk()
-        self.root.title("AnnounceFlow")
-        self.root.geometry("420x760")
-        self.root.minsize(400, 700)
+        self.root.title("StatekSound")
+        self.root.geometry("420x540")
+        self.root.minsize(400, 500)
+
+        # Set window icon
+        try:
+            ico_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "icons", "logo.ico")
+            if os.path.exists(ico_path):
+                self.root.iconbitmap(ico_path)
+        except Exception:
+            pass
         self.root.configure(bg=_BG)
         self.network_worker = NetworkWorker(self.root)
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
@@ -938,10 +946,19 @@ class AgentGUI:
         loading_frame = tk.Frame(self.root, bg=_BG)
         loading_frame.pack(expand=True)
 
+        # Logo on auto-login screen
+        try:
+            logo_img = get_icon("logo", size=(48, 48))
+            if logo_img:
+                logo_lbl = tk.Label(loading_frame, image=logo_img, bg=_BG)
+                logo_lbl.image = logo_img
+                logo_lbl.pack(pady=(30, 8))
+        except Exception:
+            pass
         tk.Label(
             loading_frame, text="StatekSound",
             font=("Segoe UI", 20, "bold"), bg=_BG, fg=_FG,
-        ).pack(pady=(40, 10))
+        ).pack(pady=(0, 10))
         tk.Label(
             loading_frame, text="Otomatik giriş yapılıyor...",
             bg=_BG, fg=_AMBER, font=("Segoe UI", 10),
@@ -987,10 +1004,19 @@ class AgentGUI:
         frame.pack(expand=True)
 
         # Title
+        # Logo on login screen
+        try:
+            login_logo = get_icon("logo", size=(56, 56))
+            if login_logo:
+                logo_lbl = tk.Label(frame, image=login_logo, bg=_BG)
+                logo_lbl.image = login_logo
+                logo_lbl.pack(pady=(20, 8))
+        except Exception:
+            pass
         tk.Label(
             frame, text="StatekSound",
             font=("Segoe UI", 20, "bold"), bg=_BG, fg=_FG,
-        ).pack(pady=(30, 5))
+        ).pack(pady=(0, 5))
 
         tk.Label(
             frame, text="Ses Yönetim Sistemi",
@@ -1138,8 +1164,17 @@ class AgentGUI:
         header_content = tk.Frame(header, bg=_BG_HEADER)
         header_content.pack(fill="x", padx=16)
 
+        # Logo in header
+        try:
+            header_logo = get_icon("logo", size=(24, 24))
+            if header_logo:
+                hl = tk.Label(header_content, image=header_logo, bg=_BG_HEADER)
+                hl.image = header_logo
+                hl.pack(side="left", padx=(0, 8))
+        except Exception:
+            pass
         tk.Label(
-            header_content, text="AnnounceFlow",
+            header_content, text="StatekSound",
             font=("Segoe UI", 14, "bold"), bg=_BG_HEADER, fg=_FG,
         ).pack(side="left")
 
@@ -1155,7 +1190,7 @@ class AgentGUI:
 
 
         # Scrollable content
-        content = tk.Frame(self.root, bg=_BG, padx=16, pady=12)
+        content = tk.Frame(self.root, bg=_BG, padx=16, pady=6)
         content.pack(fill="both", expand=True)
 
         # ── Music Section ──
