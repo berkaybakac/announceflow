@@ -133,6 +133,38 @@
     @keyframes uploadSpin {
         to { transform: rotate(360deg); }
     }
+
+    .upload-warning-banner {
+        display: none;
+        background: rgba(245, 158, 11, 0.1);
+        border: 1px solid rgba(245, 158, 11, 0.3);
+        border-radius: 10px;
+        padding: 12px;
+        margin-bottom: 16px;
+        align-items: flex-start;
+        gap: 10px;
+    }
+
+    .upload-warning-banner svg {
+        width: 20px;
+        height: 20px;
+        color: var(--warning);
+        margin-top: 2px;
+        flex-shrink: 0;
+    }
+
+    .upload-warning-text {
+        font-size: 0.9rem;
+        color: var(--text-primary);
+        line-height: 1.4;
+    }
+
+    .upload-warning-title {
+        color: var(--warning);
+        display: block;
+        margin-bottom: 2px;
+        font-weight: 700;
+    }
 </style>
 {% endblock %}
 
@@ -196,6 +228,15 @@
     </form>
 
     <div id="uploadProgressPanel" class="upload-progress-panel" style="display: none;">
+        <div id="uploadWarningBanner" class="upload-warning-banner">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z" />
+            </svg>
+            <div class="upload-warning-text">
+                <span class="upload-warning-title">DİKKAT: Yükleme Devam Ediyor</span>
+                Müzik yükleme işlemi bitmeden bu sayfadan ayrılırsanız veya sekmeyi kapatırsanız yükleme işlemi yarıda kalacaktır.
+            </div>
+        </div>
         <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
             <span id="uploadProgressTitle" style="color: var(--text-primary); font-weight: 600; font-size: 0.95rem;"></span>
             <button type="button" id="uploadCancelBtn" class="btn btn-outline btn-sm" onclick="cancelBatchUpload()" style="display: none;">İptal</button>
@@ -620,6 +661,8 @@
 
         _uploadInProgress = true;
         window.addEventListener('beforeunload', handleBeforeUnload);
+        const banner = document.getElementById('uploadWarningBanner');
+        if (banner) banner.style.display = 'flex';
 
         _batchAbortController = new AbortController();
         let successCount = 0;
@@ -676,6 +719,8 @@
         _batchAbortController = null;
         _uploadInProgress = false;
         window.removeEventListener('beforeunload', handleBeforeUnload);
+        const bannerElement = document.getElementById('uploadWarningBanner');
+        if (bannerElement) bannerElement.style.display = 'none';
         cancelBtn.style.display = 'none';
 
         let summaryText;
