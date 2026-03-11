@@ -564,6 +564,17 @@ class AnnounceFlowAgent:
         except ValueError:
             return []
 
+    def get_now_playing(self) -> Dict[str, Any]:
+        """Fetch current playback state (auth required)."""
+        response = self._request("GET", "/api/now-playing", auth_required=True)
+        if response is None:
+            return {}
+        try:
+            data = response.json() if response.ok else {}
+            return data if isinstance(data, dict) else {}
+        except ValueError:
+            return {}
+
     def get_health(self):
         """Fetch system health including current volume (no auth required)."""
         response = self._request("GET", "/api/health", auth_required=False)
@@ -1299,24 +1310,24 @@ class AgentGUI:
         self.volume_slider.pack(fill="x")
 
         # Sync volume from server
-        def _load_health():
-            return self.agent.get_health()
+        def _load_now_playing():
+            return self.agent.get_now_playing()
 
-        def _apply_health(health):
+        def _apply_now_playing(state):
             if not self._root_alive():
                 return
             if not hasattr(self, "volume_slider"):
                 return
-            player = health.get("player", {}) if isinstance(health, dict) else {}
-            current = player.get("volume")
+            current = state.get("volume") if isinstance(state, dict) else None
             if isinstance(current, (int, float)):
                 self.volume_slider.set_value(int(current))
-            player_state = player.get("state", "")
-            if isinstance(player_state, str) and player_state.lower() in ("playing", "running"):
-                self._music_active = True
+            playlist = state.get("playlist", {}) if isinstance(state, dict) else {}
+            is_playlist_active = bool(playlist.get("active")) if isinstance(playlist, dict) else False
+            if self._music_active != is_playlist_active:
+                self._music_active = is_playlist_active
                 self._refresh_music_buttons()
 
-        self._submit_network_job(_load_health, on_success=_apply_health)
+        self._submit_network_job(_load_now_playing, on_success=_apply_now_playing)
         self._start_volume_polling_loop()
 
         # ── Status Bar ──
@@ -1605,15 +1616,14 @@ class AgentGUI:
             return
 
         def _job():
-            return self.agent.get_health()
+            return self.agent.get_now_playing()
 
-        def _on_done(health):
+        def _on_done(state):
             if not getattr(self, "_volume_poll_active", False) or not self._root_alive():
                 return
 
             self._volume_poll_failures = 0
-            player = health.get("player", {}) if isinstance(health, dict) else {}
-            remote_volume = player.get("volume")
+            remote_volume = state.get("volume") if isinstance(state, dict) else None
             if (
                 hasattr(self, "volume_slider")
                 and isinstance(remote_volume, (int, float))
@@ -1623,6 +1633,12 @@ class AgentGUI:
                 next_volume = int(remote_volume)
                 if local_volume != next_volume:
                     self.volume_slider.set_value(next_volume)
+
+            playlist = state.get("playlist", {}) if isinstance(state, dict) else {}
+            is_playlist_active = bool(playlist.get("active")) if isinstance(playlist, dict) else False
+            if self._music_active != is_playlist_active:
+                self._music_active = is_playlist_active
+                self._refresh_music_buttons()
 
             self._schedule_next_volume_poll(self._VOLUME_POLL_INTERVAL_MS)
 

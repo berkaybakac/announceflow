@@ -810,16 +810,20 @@ class TestVolumeSyncPoll:
         gui._volume_poll_job = None
         gui._volume_poll_failures = 0
         gui._volume_local_change_until = 0.0
+        gui._music_active = False
         gui.volume_slider = MagicMock()
         gui.volume_slider.value = 30
         gui._schedule_next_volume_poll = MagicMock()
+        gui._refresh_music_buttons = MagicMock()
 
         on_success, _ = self._capture_volume_poll_callbacks(gui)
         assert on_success is not None
 
-        on_success({"player": {"volume": 55}})
+        on_success({"volume": 55, "playlist": {"active": True}})
 
         gui.volume_slider.set_value.assert_called_once_with(55)
+        assert gui._music_active is True
+        gui._refresh_music_buttons.assert_called_once()
         gui._schedule_next_volume_poll.assert_called_once_with(
             gui._VOLUME_POLL_INTERVAL_MS
         )
@@ -830,16 +834,20 @@ class TestVolumeSyncPoll:
         gui._volume_poll_job = None
         gui._volume_poll_failures = 0
         gui._volume_local_change_until = float("inf")
+        gui._music_active = False
         gui.volume_slider = MagicMock()
         gui.volume_slider.value = 30
         gui._schedule_next_volume_poll = MagicMock()
+        gui._refresh_music_buttons = MagicMock()
 
         on_success, _ = self._capture_volume_poll_callbacks(gui)
         assert on_success is not None
 
-        on_success({"player": {"volume": 55}})
+        on_success({"volume": 55, "playlist": {"active": True}})
 
         gui.volume_slider.set_value.assert_not_called()
+        assert gui._music_active is True
+        gui._refresh_music_buttons.assert_called_once()
         gui._schedule_next_volume_poll.assert_called_once_with(
             gui._VOLUME_POLL_INTERVAL_MS
         )
@@ -850,6 +858,8 @@ class TestVolumeSyncPoll:
         gui._volume_poll_job = None
         gui._volume_poll_failures = 0
         gui._schedule_next_volume_poll = MagicMock()
+        gui._music_active = False
+        gui._refresh_music_buttons = MagicMock()
 
         _, on_error = self._capture_volume_poll_callbacks(gui)
         assert on_error is not None
@@ -857,6 +867,7 @@ class TestVolumeSyncPoll:
         on_error(RuntimeError("network"))
 
         assert gui._volume_poll_failures == 1
+        gui._refresh_music_buttons.assert_not_called()
         gui._schedule_next_volume_poll.assert_called_once_with(
             gui._VOLUME_POLL_INTERVAL_MS * 2
         )
