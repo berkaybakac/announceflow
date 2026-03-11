@@ -783,3 +783,80 @@ class TestModernSliderCardBg:
         source = self._source()
         # The init should store bg = card_bg or _BG
         assert "bg = card_bg or _BG" in source
+
+
+# --------------- 13. Volume sync poll ---------------
+
+
+class TestVolumeSyncPoll:
+    """Background volume polling keeps EXE slider consistent with web changes."""
+
+    def _capture_volume_poll_callbacks(self, gui):
+        captured_success = None
+        captured_error = None
+
+        def fake_submit(fn, *, on_success=None, on_error=None):
+            nonlocal captured_success, captured_error
+            captured_success = on_success
+            captured_error = on_error
+
+        gui._submit_network_job = fake_submit
+        gui._run_volume_poll()
+        return captured_success, captured_error
+
+    def test_remote_volume_updates_slider(self):
+        gui = _make_gui_for_polling()
+        gui._volume_poll_active = True
+        gui._volume_poll_job = None
+        gui._volume_poll_failures = 0
+        gui._volume_local_change_until = 0.0
+        gui.volume_slider = MagicMock()
+        gui.volume_slider.value = 30
+        gui._schedule_next_volume_poll = MagicMock()
+
+        on_success, _ = self._capture_volume_poll_callbacks(gui)
+        assert on_success is not None
+
+        on_success({"player": {"volume": 55}})
+
+        gui.volume_slider.set_value.assert_called_once_with(55)
+        gui._schedule_next_volume_poll.assert_called_once_with(
+            gui._VOLUME_POLL_INTERVAL_MS
+        )
+
+    def test_local_cooldown_prevents_remote_overwrite(self):
+        gui = _make_gui_for_polling()
+        gui._volume_poll_active = True
+        gui._volume_poll_job = None
+        gui._volume_poll_failures = 0
+        gui._volume_local_change_until = float("inf")
+        gui.volume_slider = MagicMock()
+        gui.volume_slider.value = 30
+        gui._schedule_next_volume_poll = MagicMock()
+
+        on_success, _ = self._capture_volume_poll_callbacks(gui)
+        assert on_success is not None
+
+        on_success({"player": {"volume": 55}})
+
+        gui.volume_slider.set_value.assert_not_called()
+        gui._schedule_next_volume_poll.assert_called_once_with(
+            gui._VOLUME_POLL_INTERVAL_MS
+        )
+
+    def test_poll_error_applies_backoff(self):
+        gui = _make_gui_for_polling()
+        gui._volume_poll_active = True
+        gui._volume_poll_job = None
+        gui._volume_poll_failures = 0
+        gui._schedule_next_volume_poll = MagicMock()
+
+        _, on_error = self._capture_volume_poll_callbacks(gui)
+        assert on_error is not None
+
+        on_error(RuntimeError("network"))
+
+        assert gui._volume_poll_failures == 1
+        gui._schedule_next_volume_poll.assert_called_once_with(
+            gui._VOLUME_POLL_INTERVAL_MS * 2
+        )
