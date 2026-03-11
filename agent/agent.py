@@ -762,6 +762,9 @@ class AgentGUI:
     """GUI for the agent."""
 
     _STATUS_DISPLAY_MS = 4000  # How long status messages stay visible
+    _VOLUME_POLL_INTERVAL_MS = 2500
+    _VOLUME_POLL_MAX_BACKOFF_STEPS = 3
+    _VOLUME_LOCAL_COOLDOWN_SEC = 0.8
 
     def __init__(self, agent):
         self.agent = agent
@@ -786,6 +789,10 @@ class AgentGUI:
         self._music_active = False
         self._heartbeat_job = None
         self._poll_job = None
+        self._volume_poll_active = False
+        self._volume_poll_job = None
+        self._volume_poll_failures = 0
+        self._volume_local_change_until = 0.0
 
     def run(self):
         """Run the GUI application."""
@@ -906,6 +913,8 @@ class AgentGUI:
             return
         self._closing = True
 
+        self._stop_volume_polling_loop()
+
         if self.root and self._volume_update_job is not None:
             try:
                 self.root.after_cancel(self._volume_update_job)
@@ -990,6 +999,7 @@ class AgentGUI:
 
     def show_login_frame(self, error_message: str = None):
         """Show login screen."""
+        self._stop_volume_polling_loop()
         if self.root and self._volume_update_job is not None:
             try:
                 self.root.after_cancel(self._volume_update_job)
@@ -1307,6 +1317,7 @@ class AgentGUI:
                 self._refresh_music_buttons()
 
         self._submit_network_job(_load_health, on_success=_apply_health)
+        self._start_volume_polling_loop()
 
         # ── Status Bar ──
         status_frame = tk.Frame(self.root, bg=_BG_HEADER, pady=6)
@@ -1545,6 +1556,7 @@ class AgentGUI:
     def on_volume_change(self, value):
         """Handle volume change."""
         self._pending_volume = int(float(value))
+        self._volume_local_change_until = time.monotonic() + self._VOLUME_LOCAL_COOLDOWN_SEC
         if not self.root:
             return
         if self._volume_update_job is not None:
@@ -1558,6 +1570,73 @@ class AgentGUI:
         volume = self._pending_volume
         self._pending_volume = None
         self._submit_network_job(lambda: self.agent.set_volume(volume))
+
+    def _start_volume_polling_loop(self):
+        """Start periodic health polling to keep slider in sync with remote changes."""
+        if not self._root_alive():
+            return
+        if getattr(self, "_volume_poll_active", False):
+            return
+        self._volume_poll_active = True
+        self._volume_poll_failures = 0
+        self._schedule_next_volume_poll(200)
+
+    def _stop_volume_polling_loop(self):
+        self._volume_poll_active = False
+        if getattr(self, "_volume_poll_job", None) is not None and self.root:
+            try:
+                self.root.after_cancel(self._volume_poll_job)
+            except tk.TclError:
+                pass
+        self._volume_poll_job = None
+
+    def _schedule_next_volume_poll(self, delay_ms: int):
+        if not getattr(self, "_volume_poll_active", False) or not self._root_alive():
+            return
+        if getattr(self, "_volume_poll_job", None) is not None:
+            try:
+                self.root.after_cancel(self._volume_poll_job)
+            except tk.TclError:
+                pass
+        self._volume_poll_job = self.root.after(delay_ms, self._run_volume_poll)
+
+    def _run_volume_poll(self):
+        if not getattr(self, "_volume_poll_active", False) or not self._root_alive():
+            return
+
+        def _job():
+            return self.agent.get_health()
+
+        def _on_done(health):
+            if not getattr(self, "_volume_poll_active", False) or not self._root_alive():
+                return
+
+            self._volume_poll_failures = 0
+            player = health.get("player", {}) if isinstance(health, dict) else {}
+            remote_volume = player.get("volume")
+            if (
+                hasattr(self, "volume_slider")
+                and isinstance(remote_volume, (int, float))
+                and time.monotonic() >= getattr(self, "_volume_local_change_until", 0.0)
+            ):
+                local_volume = int(getattr(self.volume_slider, "value", 80))
+                next_volume = int(remote_volume)
+                if local_volume != next_volume:
+                    self.volume_slider.set_value(next_volume)
+
+            self._schedule_next_volume_poll(self._VOLUME_POLL_INTERVAL_MS)
+
+        def _on_error(_exc):
+            if not getattr(self, "_volume_poll_active", False) or not self._root_alive():
+                return
+            self._volume_poll_failures = min(
+                getattr(self, "_volume_poll_failures", 0) + 1,
+                self._VOLUME_POLL_MAX_BACKOFF_STEPS,
+            )
+            delay = self._VOLUME_POLL_INTERVAL_MS * (2 ** self._volume_poll_failures)
+            self._schedule_next_volume_poll(delay)
+
+        self._submit_network_job(_job, on_success=_on_done, on_error=_on_error)
 
     def logout(self):
         """Logout and return to login screen."""
