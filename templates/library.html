@@ -507,6 +507,15 @@
     }
 
     let _batchAbortController = null;
+    let _uploadInProgress = false;
+
+    function handleBeforeUnload(e) {
+        if (_uploadInProgress) {
+            e.preventDefault();
+            e.returnValue = '';
+            return '';
+        }
+    }
 
     function cancelBatchUpload() {
         if (_batchAbortController) _batchAbortController.abort();
@@ -609,6 +618,9 @@
             _setFileStatus(i, 'pending', 'Bekliyor');
         });
 
+        _uploadInProgress = true;
+        window.addEventListener('beforeunload', handleBeforeUnload);
+
         _batchAbortController = new AbortController();
         let successCount = 0;
         let failCount = 0;
@@ -662,6 +674,8 @@
         }
 
         _batchAbortController = null;
+        _uploadInProgress = false;
+        window.removeEventListener('beforeunload', handleBeforeUnload);
         cancelBtn.style.display = 'none';
 
         let summaryText;
