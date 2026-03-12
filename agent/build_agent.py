@@ -23,7 +23,7 @@ def build():
         "--clean",  # Build from a clean state
         "--onefile",  # Single executable
         "--noconsole",  # No console window (GUI app)
-        "--name", "AnnounceFlowAgent",
+        "--name", "StatekSound",
         "--add-data",
         config_data,
         # Keyring backend modules are resolved dynamically; include all submodules.
@@ -58,7 +58,7 @@ def build():
         subprocess.run(cmd, check=True)
         print("-" * 50)
         print("Build complete!")
-        print("Executable location: dist/AnnounceFlowAgent.exe")
+        print("Executable location: dist/StatekSound.exe")
     except subprocess.CalledProcessError as e:
         print(f"Build failed: {e}")
         sys.exit(1)
