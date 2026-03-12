@@ -11,6 +11,7 @@ import webbrowser
 import logging
 import time
 import uuid
+import ipaddress
 import tkinter as tk
 from tkinter import ttk, filedialog
 from typing import Optional, Dict, Any
@@ -190,6 +191,26 @@ def save_agent_config(config):
     """Save agent configuration."""
     with open(CONFIG_FILE, "w") as f:
         json.dump(config, f, indent=2)
+
+
+def _host_from_url(url: str) -> str:
+    """Extract hostname from URL-like string."""
+    try:
+        parsed = urlparse((url or "").strip())
+        return (parsed.hostname or "").strip().lower()
+    except Exception:
+        return ""
+
+
+def _is_ip_host(host: str) -> bool:
+    """Return True if host is IPv4/IPv6 literal."""
+    if not host:
+        return False
+    try:
+        ipaddress.ip_address(host)
+        return True
+    except ValueError:
+        return False
 
 
 def _load_or_create_device_id() -> str:
@@ -518,7 +539,59 @@ class AnnounceFlowAgent:
             logger.error("Login error: %s", e)
             return {"success": False, "error": "unknown"}
 
-    def discover_server(self, port=5001):
+    def get_expected_identity(self) -> Dict[str, str]:
+        """Get expected server identity pinned from prior successful connection."""
+        instance_id = str(self.config.get("expected_instance_id", "")).strip()
+        site_name = str(self.config.get("expected_site_name", "")).strip()
+        return {"instance_id": instance_id, "site_name": site_name}
+
+    def get_cached_ip_url(self, preferred_url: str) -> Optional[str]:
+        """Get cached IP URL for a configured hostname."""
+        host = _host_from_url(preferred_url)
+        if not host or _is_ip_host(host):
+            return None
+        cache = self.config.get("host_ip_cache", {})
+        if not isinstance(cache, dict):
+            return None
+        cached = str(cache.get(host, "")).strip().rstrip("/")
+        return cached or None
+
+    def remember_successful_connection(
+        self,
+        configured_url: str,
+        resolved_url: str,
+        identity: Optional[Dict[str, str]] = None,
+    ) -> None:
+        """Persist host->IP cache and pinned identity after successful login."""
+        configured = (configured_url or "").strip().rstrip("/")
+        resolved = (resolved_url or "").strip().rstrip("/")
+
+        cfg_host = _host_from_url(configured)
+        resolved_host = _host_from_url(resolved)
+        cache = self.config.get("host_ip_cache", {})
+        if not isinstance(cache, dict):
+            cache = {}
+
+        if cfg_host and resolved_host and not _is_ip_host(cfg_host) and _is_ip_host(resolved_host):
+            cache[cfg_host] = resolved
+            self.config["host_ip_cache"] = cache
+
+        if identity and isinstance(identity, dict):
+            instance_id = str(identity.get("instance_id", "")).strip()
+            site_name = str(identity.get("site_name", "")).strip()
+            if instance_id:
+                self.config["expected_instance_id"] = instance_id
+            if site_name:
+                self.config["expected_site_name"] = site_name
+
+        save_agent_config(self.config)
+
+    def discover_server(
+        self,
+        port=5001,
+        expected_instance_id: str = "",
+        expected_site_name: str = "",
+    ):
         """Scan local network for AnnounceFlow server on given port."""
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -546,8 +619,27 @@ class AnnounceFlowAgent:
                     try:
                         url = f"http://{ip}:{port}"
                         resp = requests.get(f"{url}/api/health", timeout=DEFAULT_TIMEOUT)
-                        if resp.ok and "player" in resp.json():
-                            return url
+                        if not resp.ok:
+                            continue
+                        try:
+                            payload_raw = resp.json()
+                        except ValueError:
+                            payload_raw = {}
+                        payload = payload_raw if isinstance(payload_raw, dict) else {}
+                        if "player" not in payload:
+                            continue
+                        identity = payload.get("identity", {})
+                        found_instance_id = str(identity.get("instance_id", "")).strip()
+                        found_site_name = str(identity.get("site_name", "")).strip()
+                        if expected_instance_id and found_instance_id != expected_instance_id:
+                            continue
+                        if expected_site_name and found_site_name and found_site_name != expected_site_name:
+                            continue
+                        return {
+                            "url": url,
+                            "instance_id": found_instance_id,
+                            "site_name": found_site_name,
+                        }
                     except Exception:
                         pass
             except Exception:
@@ -804,6 +896,7 @@ class AgentGUI:
         self._volume_poll_job = None
         self._volume_poll_failures = 0
         self._volume_local_change_until = 0.0
+        self._advanced_visible = False
 
     def run(self):
         """Run the GUI application."""
@@ -1044,37 +1137,56 @@ class AgentGUI:
             font=("Segoe UI", 10), bg=_BG, fg=_FG_DIM,
         ).pack(pady=(0, 25))
 
-        # Server URL
-        url_frame = tk.Frame(frame, bg=_BG)
-        url_frame.pack(pady=0, fill="x", padx=40)
-
-        tk.Label(url_frame, text="Sunucu Adresi:", bg=_BG, fg=_FG_DIM).pack(anchor="w")
-        self.url_entry = tk.Entry(url_frame, font=("Segoe UI", 10), width=35)
-        self.url_entry.insert(0, self.agent.api_base)
-        self.url_entry.pack(fill="x", pady=5)
+        form_frame = tk.Frame(frame, bg=_BG)
+        form_frame.pack(pady=0, fill="x", padx=40)
 
         # Username
-        tk.Label(url_frame, text="Kullanıcı Adı:", bg=_BG, fg=_FG_DIM).pack(
+        tk.Label(form_frame, text="Kullanıcı Adı:", bg=_BG, fg=_FG_DIM).pack(
             anchor="w", pady=(10, 0)
         )
-        self.username_entry = tk.Entry(url_frame, font=("Segoe UI", 10), width=35)
+        self.username_entry = tk.Entry(form_frame, font=("Segoe UI", 10), width=35)
         self.username_entry.insert(0, "admin")
         self.username_entry.pack(fill="x", pady=5)
 
         # Password
-        tk.Label(url_frame, text="Şifre:", bg=_BG, fg=_FG_DIM).pack(
+        tk.Label(form_frame, text="Şifre:", bg=_BG, fg=_FG_DIM).pack(
             anchor="w", pady=(10, 0)
         )
         self.password_entry = tk.Entry(
-            url_frame, font=("Segoe UI", 10), width=35, show="*"
+            form_frame, font=("Segoe UI", 10), width=35, show="*"
         )
         self.password_entry.pack(fill="x", pady=5)
         self.username_entry.bind("<Return>", lambda *_: self.do_login())
         self.password_entry.bind("<Return>", lambda *_: self.do_login())
 
+        # Advanced server address controls (for technical staff)
+        self._advanced_toggle_btn = tk.Button(
+            form_frame,
+            text="Gelişmiş: Sunucu Adresi",
+            command=self._toggle_advanced,
+            bg=_BG,
+            fg=_BLUE,
+            relief="flat",
+            cursor="hand2",
+            activebackground=_BG,
+            activeforeground=_BLUE_HOVER,
+            font=("Segoe UI", 9, "underline"),
+            anchor="w",
+        )
+        self._advanced_toggle_btn.pack(fill="x", pady=(12, 0))
+
+        self._advanced_frame = tk.Frame(form_frame, bg=_BG)
+        tk.Label(self._advanced_frame, text="Sunucu Adresi:", bg=_BG, fg=_FG_DIM).pack(
+            anchor="w"
+        )
+        self.url_entry = tk.Entry(self._advanced_frame, font=("Segoe UI", 10), width=35)
+        self.url_entry.insert(0, self.agent.api_base)
+        self.url_entry.pack(fill="x", pady=5)
+        self._advanced_visible = False
+
         # Remember Me checkbox
         self.remember_var = tk.BooleanVar(value=True)
-        remember_frame = tk.Frame(url_frame, bg=_BG)
+        remember_frame = tk.Frame(form_frame, bg=_BG)
         remember_frame.pack(fill="x", pady=(10, 0))
 
         remember_cb = tk.Checkbutton(
@@ -1098,12 +1210,34 @@ class AgentGUI:
         if error_message:
             self.status_label.config(text=error_message, fg=_AMBER)
 
+    def _toggle_advanced(self):
+        """Toggle visibility of server address controls."""
+        if not hasattr(self, "_advanced_frame"):
+            return
+        try:
+            if self._advanced_visible:
+                self._advanced_frame.pack_forget()
+                self._advanced_visible = False
+            else:
+                self._advanced_frame.pack(fill="x", pady=(8, 0))
+                self._advanced_visible = True
+        except tk.TclError:
+            return
+
     def do_login(self):
         """Handle login."""
-        url = self.url_entry.get().strip().rstrip("/")
+        if hasattr(self, "url_entry"):
+            url = self.url_entry.get().strip().rstrip("/")
+        else:
+            url = str(self.agent.api_base).strip().rstrip("/")
+        if not url:
+            url = str(self.agent.api_base).strip().rstrip("/") or API_BASE
         username = self.username_entry.get().strip()
         password = self.password_entry.get()
         remember = self.remember_var.get()
+        expected = self.agent.get_expected_identity()
+        expected_instance_id = str(expected.get("instance_id", "")).strip()
+        expected_site_name = str(expected.get("site_name", "")).strip()
 
         self.agent.api_base = url
         self.agent.config["api_base"] = url
@@ -1114,17 +1248,51 @@ class AgentGUI:
         def _job():
             first = self.agent.login(username, password)
             if first.get("success"):
-                return {"result": first, "resolved_url": self.agent.api_base}
+                return {
+                    "result": first,
+                    "resolved_url": self.agent.api_base,
+                    "configured_url": url,
+                    "resolution_source": "configured",
+                }
             if first.get("error") != "connection_error":
-                return {"result": first, "resolved_url": self.agent.api_base}
+                return {
+                    "result": first,
+                    "resolved_url": self.agent.api_base,
+                    "configured_url": url,
+                    "resolution_source": "configured",
+                }
 
-            found_url = self.agent.discover_server()
-            if not found_url:
-                return {"result": first, "resolved_url": None}
+            cached_url = self.agent.get_cached_ip_url(url)
+            if cached_url:
+                self.agent.api_base = cached_url
+                cached = self.agent.login(username, password)
+                if cached.get("success"):
+                    return {
+                        "result": cached,
+                        "resolved_url": cached_url,
+                        "configured_url": url,
+                        "resolution_source": "cached_ip",
+                    }
 
-            self.agent.api_base = found_url
-            retry = self.agent.login(username, password)
-            return {"result": retry, "resolved_url": found_url}
+            discovery = self.agent.discover_server(
+                expected_instance_id=expected_instance_id,
+                expected_site_name=expected_site_name,
+            )
+            if not discovery:
+                return {
+                    "result": {"success": False, "error": "connection_error"},
+                    "resolved_url": None,
+                    "configured_url": url,
+                    "resolution_source": "discovery",
+                }
+
+            return {
+                "result": {"success": False, "error": "discovery_confirmation_required"},
+                "resolved_url": None,
+                "configured_url": url,
+                "resolution_source": "discovery",
+                "discovery": discovery,
+            }
 
         def _on_done(payload):
             if not self._root_alive():
@@ -1132,23 +1300,42 @@ class AgentGUI:
 
             result = payload.get("result", {})
             resolved_url = payload.get("resolved_url")
+            configured_url = str(payload.get("configured_url", url)).strip().rstrip("/")
+            resolution_source = payload.get("resolution_source")
+            discovery = payload.get("discovery", {})
 
             if result.get("success"):
-                final_url = resolved_url or url
-                self.agent.config["api_base"] = final_url
+                final_url = str(resolved_url or configured_url).strip().rstrip("/")
+                configured_host = _host_from_url(configured_url)
+                keep_host_preference = bool(configured_host and not _is_ip_host(configured_host))
+                preferred_url = configured_url if keep_host_preference else final_url
+
+                self.agent.api_base = preferred_url
+                self.agent.config["api_base"] = preferred_url
                 save_agent_config(self.agent.config)
+                identity = self.agent.get_health().get("identity", {})
+                if not isinstance(identity, dict):
+                    identity = {}
+                self.agent.remember_successful_connection(
+                    configured_url=configured_url,
+                    resolved_url=final_url,
+                    identity=identity,
+                )
                 if hasattr(self, "url_entry"):
                     try:
                         if self.url_entry.winfo_exists():
                             self.url_entry.delete(0, tk.END)
-                            self.url_entry.insert(0, final_url)
+                            self.url_entry.insert(0, preferred_url)
                     except tk.TclError:
                         pass
 
                 if remember:
-                    save_credentials(final_url, username, password)
+                    save_credentials(preferred_url, username, password)
                 else:
-                    delete_credentials(final_url)
+                    delete_credentials(preferred_url)
+
+                if resolution_source == "cached_ip":
+                    self._show_status("Ağ değişti, önbellek IP ile bağlanıldı.")
 
                 self.logged_in = True
                 self._stream_poll_active = True
@@ -1157,6 +1344,27 @@ class AgentGUI:
                 return
 
             error = result.get("error", "unknown")
+            if error == "discovery_confirmation_required":
+                found_url = str(discovery.get("url", "")).strip()
+                found_site_name = str(discovery.get("site_name", "")).strip() or "Bilinmeyen Site"
+                found_instance = str(discovery.get("instance_id", "")).strip() or "unknown"
+                if found_url and hasattr(self, "url_entry"):
+                    try:
+                        if self.url_entry.winfo_exists():
+                            if not self._advanced_visible:
+                                self._toggle_advanced()
+                            self.url_entry.delete(0, tk.END)
+                            self.url_entry.insert(0, found_url)
+                    except tk.TclError:
+                        pass
+                self.status_label.config(
+                    text=(
+                        f"Bulunan sunucu: {found_site_name} ({found_instance[:8]}). "
+                        "Onay için Giriş Yap'a tekrar basın."
+                    ),
+                    fg=_AMBER,
+                )
+                return
             if error == "invalid_credentials":
                 self.status_label.config(
                     text="Giriş başarısız! Bilgileri kontrol edin.", fg=_RED
