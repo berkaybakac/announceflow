@@ -8,7 +8,6 @@ import logging
 import signal
 import time
 import socket
-import json
 from logging.handlers import RotatingFileHandler
 
 # Add current directory to path
@@ -19,6 +18,7 @@ from scheduler import get_scheduler
 from player import get_player
 from logger import log_system, log_error
 from services.config_service import load_config
+from services.release_service import load_release_stamp
 from services.silence_policy import resolve_silence_policy
 
 
@@ -49,28 +49,8 @@ def _is_port_available(port: int) -> bool:
 
 
 def _load_release_stamp(path: str = "release_stamp.json") -> dict:
-    """Load release metadata generated during deployment."""
-    fallback = {
-        "commit": "unknown",
-        "commit_short": "unknown",
-        "ref": "unknown",
-        "branch": "unknown",
-        "deployed_at_utc": "unknown",
-    }
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            loaded = json.load(f)
-        if not isinstance(loaded, dict):
-            return dict(fallback)
-    except (OSError, json.JSONDecodeError):
-        return dict(fallback)
-
-    release = dict(fallback)
-    for key in fallback:
-        value = loaded.get(key)
-        if isinstance(value, str) and value.strip():
-            release[key] = value.strip()
-    return release
+    """Backward-compatible wrapper for release metadata loading."""
+    return load_release_stamp(path)
 
 
 def setup_logging():

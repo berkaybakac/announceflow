@@ -18,6 +18,53 @@ def test_settings_requires_auth():
     assert "/login" in resp.headers.get("Location", "")
 
 
+def test_settings_shows_release_ref_when_available(monkeypatch):
+    app.config["TESTING"] = True
+    client = app.test_client()
+    _login(client)
+
+    monkeypatch.setattr(
+        "web_panel.load_release_stamp",
+        lambda _path: {
+            "commit": "abc123",
+            "commit_short": "abc123",
+            "ref": "v2.0.1",
+            "branch": "main",
+            "deployed_at_utc": "2026-03-12T00:00:00Z",
+        },
+    )
+
+    resp = client.get("/settings")
+
+    assert resp.status_code == 200
+    html = resp.get_data(as_text=True)
+    assert "Sürüm v2.0.1" in html
+    assert "Sürüm bilinmiyor" not in html
+
+
+def test_settings_shows_release_unknown_fallback(monkeypatch):
+    app.config["TESTING"] = True
+    client = app.test_client()
+    _login(client)
+
+    monkeypatch.setattr(
+        "web_panel.load_release_stamp",
+        lambda _path: {
+            "commit": "unknown",
+            "commit_short": "unknown",
+            "ref": "unknown",
+            "branch": "unknown",
+            "deployed_at_utc": "unknown",
+        },
+    )
+
+    resp = client.get("/settings")
+
+    assert resp.status_code == 200
+    html = resp.get_data(as_text=True)
+    assert "Sürüm bilinmiyor" in html
+
+
 def test_settings_shows_agent_card_missing_state(monkeypatch):
     app.config["TESTING"] = True
     client = app.test_client()
