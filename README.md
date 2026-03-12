@@ -183,6 +183,30 @@ python main.py
 
 The deployment script handles file synchronization via rsync, dependency installation, systemd service configuration, automatic restart, and health check verification.
 
+### Windows Agent Download (Web Panel)
+
+To avoid sending the EXE file manually, the technical team can download it from the web panel:
+
+- Login to panel and open: `Settings > Windows Agent`
+- Click `Agent İndir` button
+
+Server-side source file:
+
+- `agent/releases/StatekSound.exe`
+
+Operational flow:
+
+1. Place/update the EXE at `agent/releases/StatekSound.exe` on your deployment machine.
+2. Run normal Pi deployment: `./deploy.sh <pi-host>`
+3. EXE is copied to the Pi together with project files and served by `/downloads/agent/latest`.
+
+Notes:
+
+- Keep a single latest EXE with the same filename.
+- EXE files are gitignored; do not commit binaries.
+- LAN speed optimization: deploy uses rsync without compression by default. If needed, enable compression with:
+  `DEPLOY_RSYNC_COMPRESS=1 ./deploy.sh <pi-host>`
+
 ---
 
 ## Testing
@@ -209,7 +233,7 @@ Option A (helper files, easiest):
 
 Copy these files from your Mac repo to the Windows machine:
 
-- `agent/dist/AnnounceFlowAgent.exe`
+- `agent/dist/StatekSound.exe`
 - `scripts/preflight_windows_audio.ps1`
 - `scripts/preflight_windows_audio.cmd`
 - `scripts/collect_windows_agent_logs.ps1`

@@ -32,6 +32,8 @@ agent/build/
 agent/dist/
 *.spec
 *.exe
+agent/releases/*
+!agent/releases/.gitkeep
 
 # Cache
 *_cache.json

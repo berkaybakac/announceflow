@@ -410,6 +410,18 @@ def settings():
     if config.get("prayer_times_enabled") and prayer_city:
         next_prayer = pt.get_next_prayer_time(prayer_city, prayer_district)
 
+    agent_exe_path = os.path.join(
+        app.root_path, "agent", "releases", "StatekSound.exe"
+    )
+    agent_available = os.path.isfile(agent_exe_path)
+    agent_size_mb = 0.0
+    if agent_available:
+        try:
+            stat = os.stat(agent_exe_path)
+            agent_size_mb = round(stat.st_size / (1024 * 1024), 2)
+        except OSError:
+            agent_available = False
+
     return render_template(
         "settings.html",
         active_page="settings",
@@ -426,6 +438,8 @@ def settings():
         cities=cities,
         districts_json="{}",  # Now loaded via AJAX
         next_prayer=next_prayer,
+        agent_available=agent_available,
+        agent_size_mb=agent_size_mb,
     )
 
 

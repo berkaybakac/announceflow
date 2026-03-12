@@ -179,7 +179,7 @@ Bu dosya V1 disi ama sonraki fazlarda degerli teknik isleri toplar.
 - ID: `BL-FAZ6-FROZEN-EXE`
 - Oncelik: `P0`
 - Neden/Risk: Farkli Windows 10/11 cihazlarda kurulum, stream baslatma ve ses kalitesi farkli davranabiliyor. Bir cihazda temiz calisan EXE diger cihazda kurulum veya bozuk ses problemi uretebilir.
-- Kabul Kriteri: En az iki farkli Windows 10/11 cihazda `AnnounceFlowAgent.exe` kurulup acilir, stream baslat/durdur akisi calisir, ses kabul edilebilir kalitededir ve belirleyici loglar toplanir.
+- Kabul Kriteri: En az iki farkli Windows 10/11 cihazda `StatekSound.exe` kurulup acilir, stream baslat/durdur akisi calisir, ses kabul edilebilir kalitededir ve belirleyici loglar toplanir.
 - Durum: `Acik`
 - Release'i Bloklar mi?: `Evet`
 

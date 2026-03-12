@@ -21,6 +21,13 @@ RELEASE_STAMP_FILE="release_stamp.json"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEPLOYED_AT_UTC="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
+RSYNC_FLAGS=(-av --progress)
+RSYNC_COMPRESSION_STATE="off"
+if [ "${DEPLOY_RSYNC_COMPRESS:-0}" = "1" ]; then
+    RSYNC_FLAGS=(-avz --progress)
+    RSYNC_COMPRESSION_STATE="on"
+fi
+
 if git -C "${SCRIPT_DIR}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     RELEASE_COMMIT="$(git -C "${SCRIPT_DIR}" rev-parse HEAD 2>/dev/null || echo unknown)"
     RELEASE_COMMIT_SHORT="$(git -C "${SCRIPT_DIR}" rev-parse --short HEAD 2>/dev/null || echo unknown)"
@@ -79,8 +86,8 @@ echo "[1.5/5] Cleaning remote pycache..."
 ssh ${SSH_OPTS} ${PI_USER}@${PI_HOST} "find ${DEST_DIR} -name '__pycache__' -type d -exec rm -rf {} +"
 
 # 2. Sync files
-echo "[2/5] Syncing project files..."
-rsync -avz --progress \
+echo "[2/5] Syncing project files... (compression: ${RSYNC_COMPRESSION_STATE})"
+rsync "${RSYNC_FLAGS[@]}" \
     -e "ssh ${SSH_OPTS}" \
     --exclude '__pycache__' \
     --exclude 'venv/' \

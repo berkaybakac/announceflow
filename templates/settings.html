@@ -20,6 +20,45 @@
     <p class="page-subtitle">Sistem ayarlarını yapılandırın</p>
 </div>
 
+<!-- Windows Agent Download -->
+<div class="card animate-in">
+    <div class="card-header">
+        <h3 class="card-title" style="display: flex; align-items: center; gap: 8px;">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor"
+                style="width: 20px; height: 20px; color: var(--primary);">
+                <path stroke-linecap="round" stroke-linejoin="round"
+                    d="M9 17.25v-7.5m6 7.5v-7.5M4.5 19.5h15M7.5 4.5h9a1.5 1.5 0 011.5 1.5V9a1.5 1.5 0 01-1.5 1.5h-9A1.5 1.5 0 016 9V6a1.5 1.5 0 011.5-1.5z" />
+            </svg>
+            Windows Agent
+        </h3>
+        <span class="badge {{ 'badge-success' if agent_available else 'badge-danger' }}">
+            {{ 'Hazır' if agent_available else 'Yok' }}
+        </span>
+    </div>
+
+    <div style="color: var(--text-secondary);">
+        <div style="margin-top: 12px; padding: 12px; background: var(--bg-input); border-radius: 8px;">
+            <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+                <span>Dosya:</span>
+                <strong>StatekSound.exe</strong>
+            </div>
+            <div style="display: flex; justify-content: space-between;">
+                <span>Boyut:</span>
+                <strong>{{ '%.2f MB'|format(agent_size_mb) if agent_available else '-' }}</strong>
+            </div>
+        </div>
+
+        <a href="/downloads/agent/latest" class="btn btn-primary"
+            style="margin-top: 16px; display: inline-flex; align-items: center; gap: 8px;">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 18px; height: 18px;">
+                <path stroke-linecap="round" stroke-linejoin="round"
+                    d="M12 3.75v10.5m0 0l3.75-3.75M12 14.25L8.25 10.5M4.5 20.25h15" />
+            </svg>
+            Agent İndir
+        </a>
+    </div>
+</div>
+
 <!-- Working Hours Settings -->
 <div class="card animate-in">
     <div class="card-header">

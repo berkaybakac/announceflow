@@ -4,7 +4,8 @@ API endpoints for settings management (credentials, working hours, prayer times)
 """
 import logging
 import re
-from flask import Blueprint, request, jsonify
+from pathlib import Path
+from flask import Blueprint, request, jsonify, send_file
 from werkzeug.security import generate_password_hash
 from services.config_service import load_config, save_config
 from utils.helpers import login_required, _flash_redirect
@@ -13,6 +14,8 @@ from utils.helpers import login_required, _flash_redirect
 settings_bp = Blueprint("settings", __name__)
 
 logger = logging.getLogger(__name__)
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+AGENT_EXE_PATH = PROJECT_ROOT / "agent" / "releases" / "StatekSound.exe"
 
 
 def _is_valid_hhmm(value: str) -> bool:
@@ -109,3 +112,22 @@ def api_update_prayer_times():
 
     save_config(config)
     return _flash_redirect("Ezan vakitleri ayarları güncellendi", "success", "settings")
+
+
+@settings_bp.route("/downloads/agent/latest", methods=["GET"])
+@login_required
+def download_latest_agent():
+    """Download latest Windows agent executable."""
+    if not AGENT_EXE_PATH.is_file():
+        logger.warning("Agent download requested but file missing: %s", AGENT_EXE_PATH)
+        return _flash_redirect(
+            "Agent paketi bulunamadı. Lütfen teknik ekibe haber verin.",
+            "error",
+            "settings",
+        )
+
+    return send_file(
+        AGENT_EXE_PATH,
+        as_attachment=True,
+        download_name="StatekSound.exe",
+    )
