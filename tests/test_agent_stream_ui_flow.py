@@ -85,8 +85,8 @@ def _make_gui():
     AgentGUI = agent_mod.AgentGUI
 
     agent_mock = MagicMock()
-    agent_mock.api_base = "http://aflow.local:5001"
-    agent_mock.config = {"api_base": "http://aflow.local:5001"}
+    agent_mock.api_base = "http://stateksound.local:5001"
+    agent_mock.config = {"api_base": "http://stateksound.local:5001"}
 
     gui = AgentGUI.__new__(AgentGUI)
     gui.agent = agent_mock
@@ -132,7 +132,7 @@ class TestStartStreamJob:
 
         assert _job() == "ok"
         gui.agent.start_stream.assert_called_once()
-        gui._stream_client.start_sender.assert_called_once_with("aflow.local", 5800)
+        gui._stream_client.start_sender.assert_called_once_with("stateksound.local", 5800)
         gui.agent.stop_stream.assert_not_called()
 
 
@@ -208,8 +208,8 @@ class TestStopStreamJob:
 class TestResolveStreamHost:
     def test_valid_url(self):
         gui = _make_gui()
-        gui.agent.api_base = "http://aflow.local:5001"
-        assert gui._resolve_stream_host() == "aflow.local"
+        gui.agent.api_base = "http://stateksound.local:5001"
+        assert gui._resolve_stream_host() == "stateksound.local"
 
     def test_ip_url(self):
         gui = _make_gui()
@@ -223,12 +223,12 @@ class TestResolveStreamHost:
     def test_invalid_url_fallback(self):
         gui = _make_gui()
         gui.agent.api_base = "not-a-valid-url"
-        assert gui._resolve_stream_host() == "aflow.local"
+        assert gui._resolve_stream_host() == "stateksound.local"
 
     def test_empty_url_fallback(self):
         gui = _make_gui()
         gui.agent.api_base = ""
-        assert gui._resolve_stream_host() == "aflow.local"
+        assert gui._resolve_stream_host() == "stateksound.local"
 
 
 # --------------- 8. _on_done callbacks are UI-only ---------------
@@ -470,9 +470,9 @@ def _make_gui_for_polling():
     AgentGUI = agent_mod.AgentGUI
 
     agent_mock = MagicMock()
-    agent_mock.api_base = "http://aflow.local:5001"
+    agent_mock.api_base = "http://stateksound.local:5001"
     agent_mock.device_id = "agent-device-abc"
-    agent_mock.config = {"api_base": "http://aflow.local:5001"}
+    agent_mock.config = {"api_base": "http://stateksound.local:5001"}
 
     gui = AgentGUI.__new__(AgentGUI)
     gui.agent = agent_mock
@@ -745,8 +745,8 @@ class TestHostnameDisplay:
 
     def test_hostname_from_local_url(self):
         gui = _make_gui_for_polling()
-        gui.agent.api_base = "http://rpi001.local:5001"
-        assert gui._resolve_stream_host() == "rpi001.local"
+        gui.agent.api_base = "http://stateksound.local:5001"
+        assert gui._resolve_stream_host() == "stateksound.local"
 
     def test_hostname_from_ip_url(self):
         gui = _make_gui_for_polling()
@@ -756,7 +756,7 @@ class TestHostnameDisplay:
     def test_hostname_fallback_on_empty(self):
         gui = _make_gui_for_polling()
         gui.agent.api_base = ""
-        assert gui._resolve_stream_host() == "aflow.local"
+        assert gui._resolve_stream_host() == "stateksound.local"
 
 
 # --------------- 12. ModernSlider card_bg ---------------

@@ -12,7 +12,7 @@ PI_USER="${PI_USER:-admin}"
 if [ -n "$1" ] && [ "$1" != "local" ]; then
     PI_HOST="$1"
 else
-    PI_HOST="${PI_HOST:-aflow.local}"
+    PI_HOST="${PI_HOST:-stateksound.local}"
 fi
 
 DEST_DIR="/home/${PI_USER}/announceflow"

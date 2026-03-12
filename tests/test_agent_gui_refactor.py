@@ -62,8 +62,8 @@ def _make_gui():
     AgentGUI = agent_mod.AgentGUI
 
     agent_mock = MagicMock()
-    agent_mock.api_base = "http://aflow.local:5001"
-    agent_mock.config = {"api_base": "http://aflow.local:5001"}
+    agent_mock.api_base = "http://stateksound.local:5001"
+    agent_mock.config = {"api_base": "http://stateksound.local:5001"}
 
     gui = AgentGUI.__new__(AgentGUI)
     gui.agent = agent_mock

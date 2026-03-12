@@ -36,7 +36,7 @@ from credential_manager import (
 from stream_client import StreamClient
 
 # Configuration
-API_BASE = "http://aflow.local:5001"
+API_BASE = "http://stateksound.local:5001"
 CONFIG_FILE = "agent_config.json"
 DEFAULT_TIMEOUT = (2, 5)
 LOGIN_TIMEOUT = (2, 10)
@@ -1625,7 +1625,7 @@ class AgentGUI:
     def _resolve_stream_host(self) -> str:
         """Extract Pi4 hostname from api_base URL."""
         parsed = urlparse(self.agent.api_base)
-        return parsed.hostname or "aflow.local"
+        return parsed.hostname or "stateksound.local"
 
     def start_stream(self):
         """Start live stream to Pi4."""

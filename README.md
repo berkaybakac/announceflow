@@ -178,10 +178,17 @@ python main.py
 **Production (Raspberry Pi):**
 
 ```bash
-./deploy.sh pi4.local
+./deploy.sh stateksound.local
 ```
 
 The deployment script handles file synchronization via rsync, dependency installation, systemd service configuration, automatic restart, and health check verification.
+
+### Hostname Standard (Single Branch = Single Pi)
+
+- Standard LAN endpoint for agent login: `http://stateksound.local:5001`
+- Daily operation should use hostname (not raw IP) to avoid DHCP/IP change issues.
+- For remote support sessions, keep Alpemix labels unique per customer/branch (example: `ALPMX-AYDIN-M01`).
+- If VPN is added later (Tailscale/ZeroTier), keep LAN hostname as-is and set unique VPN node names (example: `ss-aydin-gaziantep`).
 
 ### Windows Agent Download (Web Panel)
 
@@ -197,7 +204,7 @@ Server-side source file:
 Operational flow:
 
 1. Place/update the EXE at `agent/releases/StatekSound.exe` on your deployment machine.
-2. Run normal Pi deployment: `./deploy.sh <pi-host>`
+2. Run normal Pi deployment: `./deploy.sh stateksound.local`
 3. EXE is copied to the Pi together with project files and served by `/downloads/agent/latest`.
 
 Notes:
@@ -205,7 +212,7 @@ Notes:
 - Keep a single latest EXE with the same filename.
 - EXE files are gitignored; do not commit binaries.
 - LAN speed optimization: deploy uses rsync without compression by default. If needed, enable compression with:
-  `DEPLOY_RSYNC_COMPRESS=1 ./deploy.sh <pi-host>`
+  `DEPLOY_RSYNC_COMPRESS=1 ./deploy.sh stateksound.local`
 
 ---
 

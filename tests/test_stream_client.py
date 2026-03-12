@@ -525,9 +525,9 @@ class TestDiagnostics:
             "stream_client.socket.gethostbyname",
             side_effect=socket.gaierror("name not known"),
         ), patch.object(client, "_capture_loop", side_effect=fake_capture):
-            assert client.start_sender("nonexistent.local", 5800) is True
+            assert client.start_sender("nonexistent-host", 5800) is True
             snap = client.get_attempt_snapshot()
-            assert snap["resolved_host"] == "nonexistent.local"
+            assert snap["resolved_host"] == "nonexistent-host"
             assert snap["error_code"] is None
             stages = [entry["stage"] for entry in snap["stages"]]
             assert "host_resolve_warning" in stages
