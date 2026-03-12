@@ -5,10 +5,12 @@ API endpoints for player control.
 import logging
 import os
 import threading
+import socket
+import uuid
 from typing import Optional
 from flask import Blueprint, jsonify, request
 import database as db
-from services.config_service import load_config
+from services.config_service import load_config, save_config
 from scheduler import is_within_working_hours
 from player import get_player
 from scheduler import get_scheduler
@@ -48,6 +50,27 @@ def _get_preview_context() -> dict:
         return dict(_preview_context)
 
 
+def _resolve_instance_identity() -> tuple[str, str]:
+    """Return stable server identity for agent discovery checks."""
+    config = load_config()
+    instance_id = str(config.get("instance_id", "")).strip()
+    site_name = str(config.get("site_name", "")).strip()
+    dirty = False
+
+    if not instance_id:
+        instance_id = f"af-{uuid.uuid4().hex[:12]}"
+        config["instance_id"] = instance_id
+        dirty = True
+
+    if not site_name:
+        site_name = str(config.get("device_name", "")).strip() or socket.gethostname()
+
+    if dirty:
+        save_config(config)
+
+    return instance_id, site_name
+
+
 @player_bp.route("/api/health")
 def api_health():
     """System health check endpoint (no auth required)."""
@@ -55,6 +78,7 @@ def api_health():
 
     player = get_player()
     scheduler = get_scheduler()
+    instance_id, site_name = _resolve_instance_identity()
 
     return jsonify(
         {
@@ -65,6 +89,10 @@ def api_health():
                 "volume": player.get_volume(),
             },
             "scheduler": {"running": scheduler.is_running()},
+            "identity": {
+                "instance_id": instance_id,
+                "site_name": site_name,
+            },
             "timestamp": int(time_module.time()),
         }
     )
