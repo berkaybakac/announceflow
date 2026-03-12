@@ -128,12 +128,12 @@ def test_host_ip_cache_prefers_host_profile(agent_mod, monkeypatch):
     agent.config = {}
 
     agent.remember_successful_connection(
-        configured_url="http://rpi001.local:5001",
+        configured_url="http://stateksound.local:5001",
         resolved_url="http://192.168.1.50:5001",
         identity={"instance_id": "inst-1", "site_name": "Site 1"},
     )
 
-    cached = agent.get_cached_ip_url("http://rpi001.local:5001")
+    cached = agent.get_cached_ip_url("http://stateksound.local:5001")
     assert cached == "http://192.168.1.50:5001"
     assert agent.config.get("expected_instance_id") == "inst-1"
     assert agent.config.get("expected_site_name") == "Site 1"

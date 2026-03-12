@@ -69,7 +69,7 @@ def _make_gui(agent_mod):
     gui._root_alive = lambda: True
 
     gui.url_entry = MagicMock()
-    gui.url_entry.get.return_value = "http://rpi001.local:5001"
+    gui.url_entry.get.return_value = "http://stateksound.local:5001"
     gui.url_entry.winfo_exists.return_value = True
     gui.username_entry = MagicMock()
     gui.username_entry.get.return_value = "admin"
@@ -80,8 +80,8 @@ def _make_gui(agent_mod):
     gui.status_label = MagicMock()
 
     agent = MagicMock()
-    agent.api_base = "http://rpi001.local:5001"
-    agent.config = {"api_base": "http://rpi001.local:5001"}
+    agent.api_base = "http://stateksound.local:5001"
+    agent.config = {"api_base": "http://stateksound.local:5001"}
     agent.get_expected_identity.return_value = {
         "instance_id": "inst-expected",
         "site_name": "Site Expected",
@@ -123,10 +123,10 @@ def test_login_success_host_keeps_host_profile(monkeypatch):
     gui.do_login()
 
     assert gui.logged_in is True
-    assert gui.agent.api_base == "http://rpi001.local:5001"
+    assert gui.agent.api_base == "http://stateksound.local:5001"
     gui.agent.remember_successful_connection.assert_called_once()
     save_credentials.assert_called_once_with(
-        "http://rpi001.local:5001", "admin", "secret"
+        "http://stateksound.local:5001", "admin", "secret"
     )
     delete_credentials.assert_not_called()
     gui.agent.discover_server.assert_not_called()
@@ -170,16 +170,16 @@ def test_login_connection_error_uses_cached_ip_then_keeps_host(monkeypatch):
 
     assert gui.logged_in is True
     assert gui.agent.login.call_count == 2
-    assert gui.agent.api_base == "http://rpi001.local:5001"
+    assert gui.agent.api_base == "http://stateksound.local:5001"
     gui.agent.remember_successful_connection.assert_called_once_with(
-        configured_url="http://rpi001.local:5001",
+        configured_url="http://stateksound.local:5001",
         resolved_url="http://192.168.1.99:5001",
         identity={"instance_id": "inst-expected", "site_name": "Site Expected"},
     )
     gui._show_status.assert_called_once()
     assert "önbellek IP" in str(gui._show_status.call_args)
     save_credentials.assert_called_once_with(
-        "http://rpi001.local:5001", "admin", "secret"
+        "http://stateksound.local:5001", "admin", "secret"
     )
 
 
@@ -287,7 +287,7 @@ def test_login_when_remember_disabled_deletes_credentials(monkeypatch):
 
     gui.do_login()
 
-    delete_credentials.assert_called_once_with("http://rpi001.local:5001")
+    delete_credentials.assert_called_once_with("http://stateksound.local:5001")
     save_credentials.assert_not_called()
 
 
@@ -295,8 +295,8 @@ def test_login_empty_url_falls_back_to_current_api_base(monkeypatch):
     agent_mod = _import_agent()
     gui = _make_gui(agent_mod)
     gui.url_entry.get.return_value = ""
-    gui.agent.api_base = "http://current.local:5001"
-    gui.agent.config = {"api_base": "http://current.local:5001"}
+    gui.agent.api_base = "http://stateksound.local:5001"
+    gui.agent.config = {"api_base": "http://stateksound.local:5001"}
     gui.agent.login.return_value = {"success": True}
 
     monkeypatch.setattr(agent_mod, "save_agent_config", lambda cfg: True)
@@ -305,4 +305,4 @@ def test_login_empty_url_falls_back_to_current_api_base(monkeypatch):
 
     gui.do_login()
 
-    assert gui.agent.api_base == "http://current.local:5001"
+    assert gui.agent.api_base == "http://stateksound.local:5001"
