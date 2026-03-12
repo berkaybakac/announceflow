@@ -28,6 +28,7 @@ from player import get_player
 from scheduler import get_scheduler
 from logger import log_web
 from services.config_service import load_config, save_config, load_dotenv_if_present
+from services.release_service import load_release_stamp
 
 app = Flask(__name__)
 load_dotenv_if_present()
@@ -422,6 +423,9 @@ def settings():
         except OSError:
             agent_available = False
 
+    release = load_release_stamp(os.path.join(app.root_path, "release_stamp.json"))
+    release_ref = str(release.get("ref", "unknown")).strip() or "unknown"
+
     return render_template(
         "settings.html",
         active_page="settings",
@@ -440,6 +444,7 @@ def settings():
         next_prayer=next_prayer,
         agent_available=agent_available,
         agent_size_mb=agent_size_mb,
+        release_ref=release_ref,
     )
 
 

@@ -319,7 +319,11 @@
         </svg>
         <h4 style="font-size: 1.25rem; margin-bottom: 8px; color: var(--text-primary);">StatekSound</h4>
         <p>Planlı müzik ve anons sistemi</p>
-        <p style="font-size: 0.85rem; margin-top: 16px; color: var(--text-muted);">Sürüm v2.0.0</p>
+        {% if release_ref and release_ref != "unknown" %}
+        <p style="font-size: 0.85rem; margin-top: 16px; color: var(--text-muted);">Sürüm {{ release_ref }}</p>
+        {% else %}
+        <p style="font-size: 0.85rem; margin-top: 16px; color: var(--text-muted);">Sürüm bilinmiyor</p>
+        {% endif %}
         <p style="font-size: 0.85rem; margin-top: 6px; color: var(--text-muted);">Statek Stabil Teknoloji tarafından
             geliştirilmiştir.</p>
         <p style="font-size: 0.85rem; margin-top: 12px; color: var(--text-muted);">
