@@ -35,7 +35,7 @@ jobs:
       - name: Smoke test - EXE exists
         working-directory: agent
         run: |
-          $exe = "dist\AnnounceFlowAgent.exe"
+          $exe = "dist\StatekSound.exe"
           if (!(Test-Path $exe)) {
             Write-Error "EXE not found at $exe"
             exit 1
@@ -46,5 +46,5 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: AnnounceFlowAgent-Windows
-          path: agent/dist/AnnounceFlowAgent.exe
+          name: StatekSound-Windows
+          path: agent/dist/StatekSound.exe

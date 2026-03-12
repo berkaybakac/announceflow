@@ -34,7 +34,7 @@ jobs:
       - name: Smoke test - EXE exists
         working-directory: agent
         run: |
-          $exe = "dist\AnnounceFlowAgent.exe"
+          $exe = "dist\StatekSound.exe"
           if (!(Test-Path $exe)) {
             Write-Error "EXE not found at $exe"
             exit 1
@@ -45,14 +45,14 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: AnnounceFlowAgent-Windows-${{ github.ref_name }}
-          path: agent/dist/AnnounceFlowAgent.exe
+          name: StatekSound-Windows-${{ github.ref_name }}
+          path: agent/dist/StatekSound.exe
 
       - name: Create Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v1
         with:
-          files: agent/dist/AnnounceFlowAgent.exe
+          files: agent/dist/StatekSound.exe
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
