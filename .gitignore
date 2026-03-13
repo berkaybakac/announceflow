@@ -8,10 +8,16 @@ __pycache__/
 **/.DS_Store
 Thumbs.db
 
+# Markdown Policy (repo: only selected root docs)
+*.md
+!README.md
+!CONTRIBUTING.md
+
 # Development Environment
 .env
 .venv/
 .venv*/
+.venv_test/
 
 # IDE
 .vscode/
@@ -46,22 +52,18 @@ release_stamp.json
 # Logs
 logs/
 runtime/
+agent/logs/
 
 # Test & Coverage
 .coverage
 .coverage.*
 htmlcov/
+.pytest_cache/
 
 # Script bytecode
 scripts/__pycache__/
 
-# Private Notes (credentials, device info)
-DEVICE_NOTES.md
-README.backup.md
-
-# Docs
-/docs/**
-!/docs/
-!/docs/backlog.md
+# Docs (local-only, never versioned)
+docs/
 agent/VBCABLE_Driver_Pack45/
 agent/VBCABLE_Setup_x64.exe

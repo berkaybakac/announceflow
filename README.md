@@ -134,7 +134,7 @@ announceflow/
 ├── templates/              # Jinja templates
 ├── scripts/                # diagnostics and preflight scripts
 ├── tests/                  # pytest suite
-└── docs/                   # runbooks and checklists
+└── docs/                   # local notes (not versioned in Git)
 ```
 
 ---
@@ -153,8 +153,17 @@ python main.py
 ### Production (Raspberry Pi)
 
 ```bash
+# Standard deploy (dev/test)
 ./deploy.sh stateksound.local
+
+# Customer delivery deploy (clean content)
+DEPLOY_PROFILE=clean-delivery ./deploy.sh stateksound.local
 ```
+
+Deploy profiles:
+
+- `standard`: routine deploy for development and regression validation.
+- `clean-delivery`: handoff-only deploy. It clears existing `media/`, `logs/`, `runtime/`, and local `*.db` files on target before first customer upload.
 
 ### Hostname Standard (Single Branch = Single Pi)
 
@@ -165,9 +174,8 @@ python main.py
 ### Windows Agent Distribution Flow
 
 1. Put the latest EXE at `agent/releases/StatekSound.exe`.
-2. Deploy to Pi with `./deploy.sh stateksound.local`.
-3. Technical staff downloads EXE from panel (`/downloads/agent/latest`).
-4. First Windows login should use `http://stateksound.local:5001`.
+2. After deployment, technical staff downloads EXE from panel (`/downloads/agent/latest`).
+3. First Windows login should use `http://stateksound.local:5001`.
 
 ### Version Visibility in Settings
 
@@ -178,20 +186,27 @@ If release metadata is missing, UI shows `Sürüm bilinmiyor`.
 
 1. Build/update `StatekSound.exe`.
 2. Place EXE under `agent/releases/StatekSound.exe`.
-3. Deploy Pi (`./deploy.sh stateksound.local`).
-4. Validate panel health and agent download path.
-5. Run test gate (`python -m pytest -q`).
+3. Run standard deploy (`./deploy.sh stateksound.local`).
+4. Run test gate (`python -m pytest -q`).
+5. Validate panel health and agent download path.
 6. Commit -> tag -> release notes.
-7. Keep operational details in runbooks, not in release body.
+7. Keep operational details in internal ops notes, not in release body.
+
+### Customer Handoff Checklist
+
+1. Run delivery deploy:
+   `DEPLOY_PROFILE=clean-delivery ./deploy.sh stateksound.local`
+2. Verify health:
+   `curl -s http://stateksound.local:5001/api/health`
+3. Verify panel opens and `Settings > Windows Agent` download works.
+4. Confirm library has no legacy/test media content.
+5. Upload first customer content from panel.
 
 ### Operational Roles
 
 - **Technical staff**: network onboarding, first login, EXE setup, and fallback diagnostics.
 - **Store operator**: daily playback/announcement usage from the web panel.
 - **Developer/maintainer**: deploys releases, monitors regressions, and publishes release notes.
-
-For full operational commands and troubleshooting steps, see:
-- [`docs/OPERATIONS_RUNBOOK.md`](docs/OPERATIONS_RUNBOOK.md)
 
 ---
 
@@ -237,15 +252,7 @@ Test coverage includes API/auth flows, stream lifecycle, agent login/discovery b
 
 ---
 
-## Docs Index
-
-- [Operations Runbook](docs/OPERATIONS_RUNBOOK.md)
-- [Stream Log Runbook](docs/LOG_RUNBOOK.md)
-- [Release Checklist](docs/RELEASE_CHECKLIST.md)
-- [Architecture Notes (Archive)](docs/ARCHITECTURE_V1.md)
-
----
-
 ## License
 
-Proprietary. All rights reserved.
+Proprietary. All rights reserved. See `LICENSE`.
+Contribution policy: see `CONTRIBUTING.md`.
