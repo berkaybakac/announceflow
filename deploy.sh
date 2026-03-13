@@ -28,6 +28,44 @@ if [ "${DEPLOY_RSYNC_COMPRESS:-0}" = "1" ]; then
     RSYNC_COMPRESSION_STATE="on"
 fi
 
+DEPLOY_PROFILE="${DEPLOY_PROFILE:-standard}"
+case "${DEPLOY_PROFILE}" in
+    standard|clean-delivery)
+        ;;
+    *)
+        echo "Invalid DEPLOY_PROFILE: ${DEPLOY_PROFILE}"
+        echo "Allowed values: standard, clean-delivery"
+        exit 1
+        ;;
+esac
+
+BASE_RSYNC_EXCLUDES=(
+    "__pycache__"
+    "venv/"
+    ".venv/"
+    ".venv*/"
+    "*.pyc"
+    ".git"
+    ".DS_Store"
+    ".env"
+    "config.json"
+    "agent/build"
+    "agent/dist"
+    "logs/"
+    "*.db"
+    "*.log"
+    "*.md"
+)
+
+PROFILE_RSYNC_EXCLUDES=()
+if [ "${DEPLOY_PROFILE}" = "clean-delivery" ]; then
+    PROFILE_RSYNC_EXCLUDES=(
+        "media/"
+        "runtime/"
+        "announceflow.db"
+    )
+fi
+
 if git -C "${SCRIPT_DIR}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     RELEASE_COMMIT="$(git -C "${SCRIPT_DIR}" rev-parse HEAD 2>/dev/null || echo unknown)"
     RELEASE_COMMIT_SHORT="$(git -C "${SCRIPT_DIR}" rev-parse --short HEAD 2>/dev/null || echo unknown)"
@@ -66,6 +104,8 @@ echo "========================================"
 echo " AnnounceFlow - Deployment Script"
 echo "========================================"
 echo ""
+echo "Deploy profile: ${DEPLOY_PROFILE}"
+echo ""
 
 # Check if we're deploying to Pi or running locally
 if [ "$1" == "local" ]; then
@@ -86,25 +126,28 @@ echo "[1.5/5] Cleaning remote pycache..."
 ssh ${SSH_OPTS} ${PI_USER}@${PI_HOST} "find ${DEST_DIR} -name '__pycache__' -type d -exec rm -rf {} +"
 
 # 2. Sync files
-echo "[2/5] Syncing project files... (compression: ${RSYNC_COMPRESSION_STATE})"
-rsync "${RSYNC_FLAGS[@]}" \
-    -e "ssh ${SSH_OPTS}" \
-    --exclude '__pycache__' \
-    --exclude 'venv/' \
-    --exclude '.venv/' \
-    --exclude '.venv*/' \
-    --exclude '*.pyc' \
-    --exclude '.git' \
-    --exclude '.DS_Store' \
-    --exclude '.env' \
-    --exclude 'config.json' \
-    --exclude 'agent/build' \
-    --exclude 'agent/dist' \
-    --exclude 'logs/' \
-    --exclude '*.db' \
-    --exclude '*.log' \
-    --exclude 'SUNUM_REHBERI.md' \
-    ./ ${PI_USER}@${PI_HOST}:${DEST_DIR}/
+echo "[2/5] Syncing project files... (compression: ${RSYNC_COMPRESSION_STATE}, profile: ${DEPLOY_PROFILE})"
+RSYNC_CMD=(rsync "${RSYNC_FLAGS[@]}" -e "ssh ${SSH_OPTS}")
+for exclude in "${BASE_RSYNC_EXCLUDES[@]}"; do
+    RSYNC_CMD+=(--exclude "${exclude}")
+done
+for exclude in "${PROFILE_RSYNC_EXCLUDES[@]}"; do
+    RSYNC_CMD+=(--exclude "${exclude}")
+done
+RSYNC_CMD+=(./ "${PI_USER}@${PI_HOST}:${DEST_DIR}/")
+"${RSYNC_CMD[@]}"
+
+if [ "${DEPLOY_PROFILE}" = "clean-delivery" ]; then
+    echo ""
+    echo "[2.1/5] Applying clean-delivery sanitization on target..."
+    ssh ${SSH_OPTS} ${PI_USER}@${PI_HOST} "\
+mkdir -p ${DEST_DIR}/media ${DEST_DIR}/logs ${DEST_DIR}/runtime; \
+find ${DEST_DIR}/media -mindepth 1 -delete; \
+find ${DEST_DIR}/logs -mindepth 1 -delete; \
+find ${DEST_DIR}/runtime -mindepth 1 -delete; \
+find ${DEST_DIR} -maxdepth 1 -type f -name '*.db' -delete; \
+touch ${DEST_DIR}/media/.gitkeep"
+fi
 
 echo ""
 # 2.2 Upload release stamp (commit metadata)
