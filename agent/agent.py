@@ -2050,22 +2050,13 @@ class AgentGUI:
 
             # ── 3. Auto-resume: receiver is live, sender stopped, and we are owner ────
             elif is_active and state == "live" and not self._stream_active:
-                if not (
-                    owner_device_id
-                    and my_device_id
-                    and owner_device_id == my_device_id
-                ):
-                    reason = "owner_unknown"
-                    if owner_device_id and not my_device_id:
-                        reason = "local_device_missing"
-                    elif (
-                        owner_device_id
-                        and my_device_id
-                        and owner_device_id != my_device_id
-                    ):
-                        reason = "owner_mismatch"
+                # Critical Guard: Only resume if we are the designated owner.
+                # If owner is 'panel' (None) or someone else, we DO NOT resume automatically.
+                if not owner_device_id or not my_device_id or owner_device_id != my_device_id:
+                    reason = "owner_mismatch" if owner_device_id else "owner_unknown_or_panel"
                     stream_logger.info(
-                        "stream_auto_resume_skipped owner=%s reason=%s",
+                        "stream_auto_resume_skipped local=%s owner=%s reason=%s",
+                        my_device_id or "unknown",
                         owner_device_id or "panel",
                         reason,
                     )
@@ -2076,7 +2067,7 @@ class AgentGUI:
                 stream_logger.info(
                     "stream_auto_resume: receiver is live (owner=%s) "
                     "but local sender stopped — restarting sender",
-                    owner_device_id or "panel",
+                    owner_device_id,
                 )
                 host = self._resolve_stream_host()
                 correlation_id = f"agent-resume-{int(time.time() * 1000)}"

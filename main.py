@@ -220,6 +220,14 @@ def main():
         logger.info("Kapatma sinyali alındı. Sistem durduruluyor...")
         signal_name = "SIGINT" if signum == signal.SIGINT else "SIGTERM"
         log_system("shutdown", {"signal": signal_name})
+        
+        # Stop stream receiver and playback
+        try:
+            from services.stream_service import get_stream_service
+            get_stream_service().stop()
+        except Exception as exc:
+            logger.debug("WebStream: shutdown error: %s", exc)
+
         scheduler.stop()
         player.stop()
         sys.exit(0)
