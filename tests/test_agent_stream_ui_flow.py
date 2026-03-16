@@ -461,6 +461,39 @@ class TestGuiUsesDetailedStreamApi:
         gui.agent.start_stream_with_details.assert_called_once()
         gui.agent.start_stream.assert_not_called()
 
+    def test_start_stream_api_takeover_in_progress_message(self):
+        """GUI should show retry-friendly message for takeover_in_progress."""
+        gui = _make_gui()
+        gui._show_status = MagicMock()
+
+        captured_on_done = None
+
+        def fake_submit(fn, *, on_success=None, on_error=None):
+            nonlocal captured_on_done
+            captured_on_done = on_success
+
+        gui.network_worker = MagicMock()
+        gui._closing = False
+        gui.root = MagicMock()
+        gui.root.winfo_exists.return_value = True
+
+        original_submit = gui._submit_network_job
+        gui._submit_network_job = fake_submit
+        gui.start_stream()
+        gui._submit_network_job = original_submit
+
+        assert captured_on_done is not None
+        captured_on_done(
+            {
+                "result": "api_fail",
+                "api": {"error": "takeover_in_progress", "http_status": 409},
+            }
+        )
+
+        assert gui._show_status.called
+        shown = gui._show_status.call_args[0][0]
+        assert "tekrar deneyin" in shown.lower()
+
     @patch("agent.time.sleep", return_value=None)
     def test_stop_stream_job_uses_stop_stream_with_details(self, _mock_sleep):
         gui = _make_gui()
@@ -512,6 +545,7 @@ def _make_gui_for_polling():
     gui._status_clear_job = None
     gui._stream_active = True
     gui._stream_poll_active = True
+    gui._last_known_owner = None
     gui._heartbeat_job = None
     gui._poll_job = None
     gui._btn_stream_start = None
@@ -936,3 +970,272 @@ class TestVolumeSyncPoll:
         gui._schedule_next_volume_poll.assert_called_once_with(
             gui._VOLUME_POLL_INTERVAL_MS * 2
         )
+
+
+# --------------- 14. _last_known_owner poll deduplication ---------------
+
+
+class TestPollLastKnownOwner:
+    """Tests for _last_known_owner flag preventing repeated takeover messages."""
+
+    def test_first_remote_stream_detected_shows_message(self):
+        """Device B (not streaming) sees Device A streaming → shows 'Başka cihaz yayında' once."""
+        gui = _make_gui_for_polling()
+        gui._stream_active = False  # B is not streaming
+        gui._last_known_owner = None
+        gui.agent.device_id = "device-B"
+        gui._show_status = MagicMock()
+
+        on_done, submits = _capture_poll_on_done(gui)
+        on_done({
+            "active": True,
+            "state": "live",
+            "owner_device_id": "device-A",
+        })
+
+        gui._show_status.assert_called_once_with("Başka cihaz yayında")
+        assert gui._last_known_owner == "device-A"
+        assert gui._stream_active is False
+
+    def test_repeated_poll_same_owner_no_message(self):
+        """Second poll with same owner → no repeated message."""
+        gui = _make_gui_for_polling()
+        gui._stream_active = False
+        gui._last_known_owner = "device-A"  # Already know about A
+        gui.agent.device_id = "device-B"
+        gui._show_status = MagicMock()
+
+        on_done, submits = _capture_poll_on_done(gui)
+        on_done({
+            "active": True,
+            "state": "live",
+            "owner_device_id": "device-A",
+        })
+
+        gui._show_status.assert_not_called()
+        assert gui._last_known_owner == "device-A"
+        # Poll continues
+        gui.root.after.assert_called()
+
+    def test_owner_change_triggers_new_message(self):
+        """Known owner A → owner changes to C → new message shown."""
+        gui = _make_gui_for_polling()
+        gui._stream_active = False
+        gui._last_known_owner = "device-A"
+        gui.agent.device_id = "device-B"
+        gui._show_status = MagicMock()
+
+        on_done, submits = _capture_poll_on_done(gui)
+        on_done({
+            "active": True,
+            "state": "live",
+            "owner_device_id": "device-C",
+        })
+
+        gui._show_status.assert_called_once_with("Başka cihaz yayında")
+        assert gui._last_known_owner == "device-C"
+
+    def test_remote_stop_shows_yayin_durduruldu(self):
+        """Known owner A stops streaming → 'Yayın durduruldu' shown, _last_known_owner cleared."""
+        gui = _make_gui_for_polling()
+        gui._stream_active = False
+        gui._last_known_owner = "device-A"
+        gui.agent.device_id = "device-B"
+        gui._show_status = MagicMock()
+
+        on_done, submits = _capture_poll_on_done(gui)
+        on_done({
+            "active": False,
+            "state": "idle",
+            "owner_device_id": None,
+        })
+
+        gui._show_status.assert_called_once_with("Yayın durduruldu")
+        assert gui._last_known_owner is None
+
+    def test_takeover_while_actively_streaming_stops_sender(self):
+        """Device was streaming, another device takes over → stops sender, shows error."""
+        gui = _make_gui_for_polling()
+        gui._stream_active = True  # This device WAS streaming
+        gui._last_known_owner = None
+        gui.agent.device_id = "device-B"
+        gui._show_status = MagicMock()
+
+        on_done, submits = _capture_poll_on_done(gui)
+        on_done({
+            "active": True,
+            "state": "live",
+            "owner_device_id": "device-A",
+        })
+
+        assert gui._stream_active is False
+        assert gui._last_known_owner == "device-A"
+        # Should have submitted stop_sender job
+        assert len(submits) >= 2
+        stop_fn, stop_cb = submits[1]
+        stop_fn()
+        gui._stream_client.stop_sender.assert_called_once()
+
+    def test_stop_stream_clears_last_known_owner(self):
+        """User clicks stop → _last_known_owner is cleared."""
+        gui = _make_gui_for_polling()
+        gui._stream_active = True
+        gui._last_known_owner = "device-A"
+        gui._show_status = MagicMock()
+
+        # Capture stop_stream's _on_done callback
+        captured_on_done = None
+
+        def fake_submit(fn, *, on_success=None, on_error=None):
+            nonlocal captured_on_done
+            captured_on_done = on_success
+
+        gui.network_worker = MagicMock()
+        gui._closing = False
+        gui.root = MagicMock()
+        gui.root.winfo_exists.return_value = True
+
+        original_submit = gui._submit_network_job
+        gui._submit_network_job = fake_submit
+        gui.stop_stream()
+        gui._submit_network_job = original_submit
+
+        assert captured_on_done is not None
+        captured_on_done({"success": True})
+
+        assert gui._last_known_owner is None
+
+    def test_after_remote_stop_new_stream_detected_again(self):
+        """After remote stop (A stops) → idle → A starts again → detected as new."""
+        gui = _make_gui_for_polling()
+        gui._stream_active = False
+        gui._last_known_owner = "device-A"
+        gui.agent.device_id = "device-B"
+        gui._show_status = MagicMock()
+
+        # Step 1: Remote stop
+        on_done1, _ = _capture_poll_on_done(gui)
+        on_done1({
+            "active": False,
+            "state": "idle",
+            "owner_device_id": None,
+        })
+
+        gui._show_status.assert_called_once_with("Yayın durduruldu")
+        assert gui._last_known_owner is None
+        gui._show_status.reset_mock()
+
+        # Step 2: Same device starts again
+        on_done2, _ = _capture_poll_on_done(gui)
+        on_done2({
+            "active": True,
+            "state": "live",
+            "owner_device_id": "device-A",
+        })
+
+        gui._show_status.assert_called_once_with("Başka cihaz yayında")
+        assert gui._last_known_owner == "device-A"
+
+    def test_no_false_remote_stop_when_never_knew_owner(self):
+        """If _last_known_owner is None and stream is idle, no 'Yayın durduruldu' shown."""
+        gui = _make_gui_for_polling()
+        gui._stream_active = False
+        gui._last_known_owner = None
+        gui.agent.device_id = "device-B"
+        gui._show_status = MagicMock()
+
+        on_done, submits = _capture_poll_on_done(gui)
+        on_done({
+            "active": False,
+            "state": "idle",
+            "owner_device_id": None,
+        })
+
+        gui._show_status.assert_not_called()
+
+    def test_full_flow_remote_lifecycle(self):
+        """E2E: idle → A starts → A stops → C starts → C stops.
+
+        Verifies the complete lifecycle with owner tracking.
+        """
+        gui = _make_gui_for_polling()
+        gui._stream_active = False
+        gui._last_known_owner = None
+        gui.agent.device_id = "device-B"
+        gui._show_status = MagicMock()
+
+        # 1. Idle — no message
+        on_done, _ = _capture_poll_on_done(gui)
+        on_done({"active": False, "state": "idle", "owner_device_id": None})
+        gui._show_status.assert_not_called()
+
+        # 2. A starts streaming — "Başka cihaz yayında"
+        gui._show_status.reset_mock()
+        on_done, _ = _capture_poll_on_done(gui)
+        on_done({"active": True, "state": "live", "owner_device_id": "device-A"})
+        gui._show_status.assert_called_once_with("Başka cihaz yayında")
+        assert gui._last_known_owner == "device-A"
+
+        # 3. A still streaming — no repeated message
+        gui._show_status.reset_mock()
+        on_done, _ = _capture_poll_on_done(gui)
+        on_done({"active": True, "state": "live", "owner_device_id": "device-A"})
+        gui._show_status.assert_not_called()
+
+        # 4. A stops — "Yayın durduruldu"
+        gui._show_status.reset_mock()
+        on_done, _ = _capture_poll_on_done(gui)
+        on_done({"active": False, "state": "idle", "owner_device_id": None})
+        gui._show_status.assert_called_once_with("Yayın durduruldu")
+        assert gui._last_known_owner is None
+
+        # 5. C starts streaming — "Başka cihaz yayında"
+        gui._show_status.reset_mock()
+        on_done, _ = _capture_poll_on_done(gui)
+        on_done({"active": True, "state": "live", "owner_device_id": "device-C"})
+        gui._show_status.assert_called_once_with("Başka cihaz yayında")
+        assert gui._last_known_owner == "device-C"
+
+        # 6. C stops — "Yayın durduruldu"
+        gui._show_status.reset_mock()
+        on_done, _ = _capture_poll_on_done(gui)
+        on_done({"active": False, "state": "idle", "owner_device_id": None})
+        gui._show_status.assert_called_once_with("Yayın durduruldu")
+        assert gui._last_known_owner is None
+
+    def test_takeover_then_external_stop_no_double_message(self):
+        """P2 regression: B sees A → B takes over → panel stops → only ONE 'Yayın durduruldu'.
+
+        Without the fix (clearing _last_known_owner on start), this would
+        produce a second 'Yayın durduruldu' from case 1b on the next poll.
+        """
+        gui = _make_gui_for_polling()
+        gui._stream_active = False
+        gui._last_known_owner = None
+        gui.agent.device_id = "device-B"
+        gui._show_status = MagicMock()
+
+        # Step 1: B sees A streaming
+        on_done, _ = _capture_poll_on_done(gui)
+        on_done({"active": True, "state": "live", "owner_device_id": "device-A"})
+        gui._show_status.assert_called_once_with("Başka cihaz yayında")
+        assert gui._last_known_owner == "device-A"
+
+        # Step 2: B starts streaming (takeover) — simulate start success callback
+        gui._stream_active = True
+        gui._last_known_owner = None  # This is what the fix does at agent.py:1743
+        gui._show_status.reset_mock()
+
+        # Step 3: Panel stops stream externally → case 2 fires
+        on_done2, submits2 = _capture_poll_on_done(gui)
+        on_done2({"active": False, "state": "idle", "owner_device_id": None})
+        # Case 2 sets _stream_active = False, submits stop_sender
+        assert gui._stream_active is False
+
+        # Step 4: Next poll — case 1b should NOT fire (no stale _last_known_owner)
+        gui._show_status.reset_mock()
+        on_done3, _ = _capture_poll_on_done(gui)
+        on_done3({"active": False, "state": "idle", "owner_device_id": None})
+
+        # No message should be shown — _last_known_owner was cleared at start
+        gui._show_status.assert_not_called()

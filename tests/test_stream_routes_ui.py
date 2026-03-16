@@ -173,7 +173,7 @@ class TestStreamUILifecycle:
     def test_ui_lifecycle(self, mock_svc, client):
         state = {"current": StreamStatus().to_dict()}
 
-        def fake_start():
+        def fake_start(**kwargs):
             state["current"] = StreamStatus(active=True, state="live").to_dict()
             return {"success": True, "status": state["current"]}
 
