@@ -107,6 +107,7 @@ def main() -> int:
                 "immediate_exit": 0,
                 "duration_seconds": None,
                 "return_code": None,
+                "exit_class": None,
             },
         )
 
@@ -127,6 +128,7 @@ def main() -> int:
             duration = data.get("duration_seconds")
             row["duration_seconds"] = float(duration) if duration is not None else None
             row["return_code"] = data.get("return_code")
+            row["exit_class"] = data.get("exit_class")
         elif event == "stream_receiver_first_input":
             row["first_input_at"] = _parse_ts(data.get("at")) or ts
         elif event == "stream_receiver_first_output":
@@ -135,6 +137,14 @@ def main() -> int:
             row["udp_overrun"] = max(row["udp_overrun"], int(data.get("overrun_count") or 0))
         elif event == "stream_receiver_alsa_xrun":
             row["alsa_xrun"] = max(row["alsa_xrun"], int(data.get("xrun_count") or 0))
+        elif event == "stream_receiver_exit_controlled":
+            row["exit_class"] = "controlled"
+            if row.get("return_code") is None:
+                row["return_code"] = data.get("return_code")
+        elif event == "stream_receiver_exit_nonzero":
+            row["exit_class"] = data.get("exit_class") or "unexpected"
+            if row.get("return_code") is None:
+                row["return_code"] = data.get("return_code")
 
     ordered = sorted(
         rows.values(),
@@ -166,7 +176,31 @@ def main() -> int:
             f"{int(r.get('immediate_exit') or 0)} | {duration_text} | {r.get('return_code')}"
         )
 
+    total_sessions = len(ordered)
+    xrun_sessions = sum(1 for r in ordered if int(r.get("alsa_xrun") or 0) > 0)
+    xrun_ratio = round((xrun_sessions / total_sessions), 4) if total_sessions else 0.0
+    output_latencies = []
+    for r in ordered:
+        latency = _ms_between(r.get("first_input_at"), r.get("first_output_at"))
+        if latency is not None:
+            output_latencies.append(latency)
+    mean_output_latency = (
+        round(sum(output_latencies) / len(output_latencies), 1)
+        if output_latencies
+        else None
+    )
+    controlled_exits = sum(1 for r in ordered if r.get("exit_class") == "controlled")
+    unexpected_exits = sum(1 for r in ordered if r.get("exit_class") == "unexpected")
+
     print("\nrows=", len(ordered))
+    print("sessions_with_xrun=", xrun_sessions)
+    print("xrun_session_ratio=", xrun_ratio)
+    print(
+        "first_input_to_output_ms_mean=",
+        "-" if mean_output_latency is None else f"{mean_output_latency:.1f}",
+    )
+    print("controlled_exit_sessions=", controlled_exits)
+    print("unexpected_exit_sessions=", unexpected_exits)
     return 0
 
 

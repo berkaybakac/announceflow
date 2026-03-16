@@ -342,6 +342,23 @@ def stop_process(proc: subprocess.Popen) -> None:
         except Exception:
             pass
 
+
+def _classify_receiver_exit(
+    return_code: Optional[int], shutdown_signal_name: Optional[str]
+) -> str:
+    """Classify receiver exit for telemetry.
+
+    Returns:
+        success: Expected clean exit (None/0)
+        controlled: Non-zero exit after explicit receiver signal handling
+        unexpected: Non-zero exit without controlled shutdown context
+    """
+    if return_code in (None, 0):
+        return "success"
+    if shutdown_signal_name:
+        return "controlled"
+    return "unexpected"
+
 def main():
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 5800
     ffmpeg_bin = _find_ffmpeg()
@@ -436,14 +453,33 @@ def main():
     )
     drain_thread.start()
 
-    def _cleanup():
+    cleanup_reason: Optional[str] = None
+    cleanup_started = False
+    shutdown_signal_num: Optional[int] = None
+    shutdown_signal_name: Optional[str] = None
+
+    def _cleanup(reason: str = "internal"):
         """Gracefully stop ffmpeg via stdin 'q' + SIGTERM."""
+        nonlocal cleanup_reason, cleanup_started
+        if cleanup_started:
+            return
+        cleanup_started = True
+        cleanup_reason = reason
         stop_process(proc)
 
-    atexit.register(_cleanup)
+    def _cleanup_on_exit():
+        _cleanup("atexit")
+
+    atexit.register(_cleanup_on_exit)
 
     def _handle_signal(signum, frame):
-        _cleanup()
+        nonlocal shutdown_signal_num, shutdown_signal_name
+        shutdown_signal_num = int(signum)
+        try:
+            shutdown_signal_name = signal.Signals(signum).name
+        except Exception:
+            shutdown_signal_name = str(signum)
+        _cleanup("signal")
 
     signal.signal(signal.SIGTERM, _handle_signal)
     signal.signal(signal.SIGINT, _handle_signal)
@@ -465,6 +501,7 @@ def main():
             stderr_log.flush()
 
         duration_seconds = round(time.monotonic() - started_mono, 3)
+        exit_class = _classify_receiver_exit(return_code, shutdown_signal_name)
         summary = {
             "correlation_id": correlation_id,
             "port": port,
@@ -483,6 +520,10 @@ def main():
             "last_xrun_at": counters["last_xrun_at"],
             "duration_seconds": duration_seconds,
             "return_code": return_code,
+            "exit_class": exit_class,
+            "shutdown_signal_num": shutdown_signal_num,
+            "shutdown_signal": shutdown_signal_name,
+            "cleanup_reason": cleanup_reason,
             "stderr_drain_timeout": stderr_drain_timeout,
             "ended_at": _utc_iso_ms(),
         }
@@ -490,6 +531,7 @@ def main():
         stderr_log.write(
             f"{_local_log_ts()} [receiver] summary correlation_id={correlation_id} "
             f"return_code={return_code} duration_seconds={duration_seconds} "
+            f"exit_class={exit_class} shutdown_signal={shutdown_signal_name} "
             f"udp_overrun={counters['udp_overrun']} alsa_xrun={counters['alsa_xrun']} "
             f"demux_errors={counters['demux_errors']} "
             f"immediate_exit={counters['immediate_exit']} "
@@ -530,12 +572,23 @@ def main():
                 },
             )
 
-        if return_code not in (None, 0, -15):
+        if exit_class == "controlled":
+            _safe_log_system(
+                "stream_receiver_exit_controlled",
+                {
+                    "correlation_id": correlation_id,
+                    "return_code": return_code,
+                    "shutdown_signal": shutdown_signal_name,
+                    "duration_seconds": duration_seconds,
+                },
+            )
+        elif exit_class == "unexpected":
             _safe_log_error(
                 "stream_receiver_exit_nonzero",
                 {
                     "correlation_id": correlation_id,
                     "return_code": return_code,
+                    "exit_class": exit_class,
                 },
             )
 

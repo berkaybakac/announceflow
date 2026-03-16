@@ -128,3 +128,67 @@ def test_stream_telemetry_report_uses_first_input_output_events_without_summary(
     assert proc.returncode == 0
     assert "cid-2 | 100.0 | 200.0 | 150.0 | 0 | 0 | 0 | 0 | - | None" in proc.stdout
     assert "rows= 1" in proc.stdout
+
+
+def test_stream_telemetry_report_backward_compat_no_exit_class(tmp_path):
+    """Old events without exit_class field should not crash the report."""
+    events_file = tmp_path / "events.jsonl"
+    rows = [
+        {
+            "ts": "2026-03-05T20:30:00.000Z",
+            "cat": "SYSTEM",
+            "event": "stream_receiver_summary",
+            "data": {
+                "correlation_id": "old-cid",
+                "first_input_at": "2026-03-05T20:30:00.100Z",
+                "first_output_at": "2026-03-05T20:30:00.200Z",
+                "alsa_xrun": 0,
+                "return_code": 255,
+                # No exit_class field — old format
+            },
+        },
+    ]
+    events_file.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+
+    proc = _run_script("scripts/stream_telemetry_report.py", "--file", str(events_file))
+    assert proc.returncode == 0
+    assert "old-cid" in proc.stdout
+    # Old event without exit_class should count as neither controlled nor unexpected
+    assert "controlled_exit_sessions= 0" in proc.stdout
+    assert "unexpected_exit_sessions= 0" in proc.stdout
+
+
+def test_stream_telemetry_report_summarizes_controlled_vs_unexpected_exits(tmp_path):
+    events_file = tmp_path / "events.jsonl"
+    rows = [
+        {
+            "ts": "2026-03-05T20:30:00.000Z",
+            "cat": "SYSTEM",
+            "event": "stream_receiver_summary",
+            "data": {
+                "correlation_id": "cid-a",
+                "first_input_at": "2026-03-05T20:30:00.100Z",
+                "first_output_at": "2026-03-05T20:30:00.200Z",
+                "alsa_xrun": 1,
+                "return_code": 255,
+                "exit_class": "controlled",
+            },
+        },
+        {
+            "ts": "2026-03-05T20:31:00.000Z",
+            "cat": "ERROR",
+            "event": "stream_receiver_exit_nonzero",
+            "data": {
+                "correlation_id": "cid-b",
+                "return_code": 42,
+                "exit_class": "unexpected",
+            },
+        },
+    ]
+    events_file.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+
+    proc = _run_script("scripts/stream_telemetry_report.py", "--file", str(events_file))
+    assert proc.returncode == 0
+    assert "sessions_with_xrun= 1" in proc.stdout
+    assert "controlled_exit_sessions= 1" in proc.stdout
+    assert "unexpected_exit_sessions= 1" in proc.stdout

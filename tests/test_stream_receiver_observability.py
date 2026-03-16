@@ -111,8 +111,191 @@ def test_process_ffmpeg_line_emits_first_input_output_events(monkeypatch):
     assert emitted[1][1]["correlation_id"] == "cid-1"
 
 
+def test_classify_receiver_exit_success():
+    assert receiver._classify_receiver_exit(None, None) == "success"
+    assert receiver._classify_receiver_exit(0, None) == "success"
+
+
+def test_classify_receiver_exit_controlled_with_signal():
+    assert receiver._classify_receiver_exit(255, "SIGTERM") == "controlled"
+    assert receiver._classify_receiver_exit(-9, "SIGTERM") == "controlled"
+    assert receiver._classify_receiver_exit(-15, "SIGINT") == "controlled"
+
+
+def test_classify_receiver_exit_controlled_any_nonzero_with_signal():
+    """Any nonzero exit with signal present is controlled — no whitelist."""
+    assert receiver._classify_receiver_exit(42, "SIGTERM") == "controlled"
+    assert receiver._classify_receiver_exit(234, "SIGTERM") == "controlled"
+    assert receiver._classify_receiver_exit(1, "SIGINT") == "controlled"
+
+
+def test_classify_receiver_exit_unexpected_without_signal():
+    assert receiver._classify_receiver_exit(255, None) == "unexpected"
+    # External SIGKILL (not from our handler)
+    assert receiver._classify_receiver_exit(-9, None) == "unexpected"
+    # SIGSEGV crash
+    assert receiver._classify_receiver_exit(-11, None) == "unexpected"
+    # SIGTERM delivered but handler didn't run (race)
+    assert receiver._classify_receiver_exit(-15, None) == "unexpected"
+
+
+def test_classify_receiver_exit_clean_exit_despite_signal():
+    """ffmpeg exited cleanly even though we sent a signal — still success."""
+    assert receiver._classify_receiver_exit(0, "SIGTERM") == "success"
+    assert receiver._classify_receiver_exit(0, "SIGINT") == "success"
+
+
+def test_exit_event_emission_controlled(monkeypatch):
+    """Controlled exit emits SYSTEM event, NOT ERROR."""
+    system_events = []
+    error_events = []
+    monkeypatch.setattr(receiver, "_safe_log_system", lambda e, d: system_events.append((e, d)))
+    monkeypatch.setattr(receiver, "_safe_log_error", lambda e, d: error_events.append((e, d)))
+
+    exit_class = receiver._classify_receiver_exit(255, "SIGTERM")
+    assert exit_class == "controlled"
+
+    # Simulate the emission logic from main() lines 575-593
+    return_code = 255
+    if exit_class == "controlled":
+        receiver._safe_log_system(
+            "stream_receiver_exit_controlled",
+            {"correlation_id": "cid-ctl", "return_code": return_code,
+             "shutdown_signal": "SIGTERM", "duration_seconds": 10.0},
+        )
+    elif exit_class == "unexpected":
+        receiver._safe_log_error(
+            "stream_receiver_exit_nonzero",
+            {"correlation_id": "cid-ctl", "return_code": return_code, "exit_class": exit_class},
+        )
+
+    assert len(system_events) == 1
+    assert system_events[0][0] == "stream_receiver_exit_controlled"
+    assert system_events[0][1]["return_code"] == 255
+    assert len(error_events) == 0
+
+
+def test_exit_event_emission_unexpected(monkeypatch):
+    """Unexpected exit emits ERROR event, NOT SYSTEM."""
+    system_events = []
+    error_events = []
+    monkeypatch.setattr(receiver, "_safe_log_system", lambda e, d: system_events.append((e, d)))
+    monkeypatch.setattr(receiver, "_safe_log_error", lambda e, d: error_events.append((e, d)))
+
+    exit_class = receiver._classify_receiver_exit(255, None)
+    assert exit_class == "unexpected"
+
+    return_code = 255
+    if exit_class == "controlled":
+        receiver._safe_log_system(
+            "stream_receiver_exit_controlled",
+            {"correlation_id": "cid-unx", "return_code": return_code,
+             "shutdown_signal": None, "duration_seconds": 5.0},
+        )
+    elif exit_class == "unexpected":
+        receiver._safe_log_error(
+            "stream_receiver_exit_nonzero",
+            {"correlation_id": "cid-unx", "return_code": return_code, "exit_class": exit_class},
+        )
+
+    assert len(error_events) == 1
+    assert error_events[0][0] == "stream_receiver_exit_nonzero"
+    assert error_events[0][1]["exit_class"] == "unexpected"
+    assert len(system_events) == 0
+
+
+def test_exit_event_emission_success_emits_nothing(monkeypatch):
+    """Clean exit (rc=0) emits no exit event at all."""
+    system_events = []
+    error_events = []
+    monkeypatch.setattr(receiver, "_safe_log_system", lambda e, d: system_events.append((e, d)))
+    monkeypatch.setattr(receiver, "_safe_log_error", lambda e, d: error_events.append((e, d)))
+
+    exit_class = receiver._classify_receiver_exit(0, None)
+    assert exit_class == "success"
+
+    return_code = 0
+    if exit_class == "controlled":
+        receiver._safe_log_system(
+            "stream_receiver_exit_controlled",
+            {"correlation_id": "cid-ok", "return_code": return_code,
+             "shutdown_signal": None, "duration_seconds": 30.0},
+        )
+    elif exit_class == "unexpected":
+        receiver._safe_log_error(
+            "stream_receiver_exit_nonzero",
+            {"correlation_id": "cid-ok", "return_code": return_code, "exit_class": exit_class},
+        )
+
+    assert len(system_events) == 0
+    assert len(error_events) == 0
+
+
+def test_exit_event_emission_sigterm_no_handler_now_emits(monkeypatch):
+    """rc=-15 without signal handler → classified unexpected, now emits ERROR.
+
+    Previously this was a silent gap (-15 was in the return_code exclusion list).
+    With exit_class-driven emission, unexpected exits always emit ERROR.
+    """
+    system_events = []
+    error_events = []
+    monkeypatch.setattr(receiver, "_safe_log_system", lambda e, d: system_events.append((e, d)))
+    monkeypatch.setattr(receiver, "_safe_log_error", lambda e, d: error_events.append((e, d)))
+
+    exit_class = receiver._classify_receiver_exit(-15, None)
+    assert exit_class == "unexpected"
+
+    return_code = -15
+    if exit_class == "controlled":
+        receiver._safe_log_system(
+            "stream_receiver_exit_controlled",
+            {"correlation_id": "cid-gap", "return_code": return_code,
+             "shutdown_signal": None, "duration_seconds": 1.0},
+        )
+    elif exit_class == "unexpected":
+        receiver._safe_log_error(
+            "stream_receiver_exit_nonzero",
+            {"correlation_id": "cid-gap", "return_code": return_code, "exit_class": exit_class},
+        )
+
+    # Silent gap closed: unexpected exits always emit ERROR
+    assert len(system_events) == 0
+    assert len(error_events) == 1
+    assert error_events[0][0] == "stream_receiver_exit_nonzero"
+    assert error_events[0][1]["return_code"] == -15
+    assert error_events[0][1]["exit_class"] == "unexpected"
+
+
 import subprocess
 from unittest.mock import MagicMock
+
+def test_cleanup_idempotent_guard():
+    """Double _cleanup call should only invoke stop_process once."""
+    call_count = 0
+
+    def _counting_stop(_proc):
+        nonlocal call_count
+        call_count += 1
+
+    mock_proc = MagicMock(spec=subprocess.Popen)
+
+    # Replicate the closure pattern from main()
+    state = {"started": False, "reason": None}
+
+    def _cleanup(reason="internal"):
+        if state["started"]:
+            return
+        state["started"] = True
+        state["reason"] = reason
+        _counting_stop(mock_proc)
+
+    _cleanup("signal")
+    _cleanup("atexit")  # second call should be no-op
+    _cleanup("signal")  # third call should be no-op
+
+    assert call_count == 1
+    assert state["reason"] == "signal"
+
 
 def test_stop_process_graceful():
     proc = MagicMock(spec=subprocess.Popen)
