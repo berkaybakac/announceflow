@@ -78,6 +78,7 @@ class StreamService:
         self._user_stopped = False
         self._active_correlation_id: Optional[str] = None
         self._active_device_id: Optional[str] = None
+        self._active_device_name: Optional[str] = None
         # Monotonic timestamp of the last accepted heartbeat.
         # Stays 0.0 until the first heartbeat() call is received so that
         # old clients that never call heartbeat are never auto-stopped.
@@ -166,6 +167,7 @@ class StreamService:
         self,
         correlation_id: Optional[str] = None,
         device_id: Optional[str] = None,
+        device_name: Optional[str] = None,
     ) -> dict:
         """Start a stream session.
 
@@ -187,6 +189,7 @@ class StreamService:
         request_device_id = device_id.strip() if isinstance(device_id, str) else ""
         if not request_device_id:
             request_device_id = None
+        request_device_name = device_name.strip() if isinstance(device_name, str) else None
 
         # ── Phase 1 (inside lock): decide action ──────────────────────
         with self._lock:
@@ -209,6 +212,8 @@ class StreamService:
                     )
                     self._policy_resume_armed = True
                     self._user_stopped = False
+                    if request_device_name:
+                        self._active_device_name = request_device_name
                     # Treat an explicit re-start as a heartbeat so the timer resets.
                     if self._last_heartbeat_at > 0:
                         self._last_heartbeat_at = time.monotonic()
@@ -264,6 +269,7 @@ class StreamService:
                         )
                         self._active_correlation_id = None
                         self._active_device_id = None
+                        self._active_device_name = None
                         self._policy_resume_armed = False
                         self._last_heartbeat_at = 0.0
                         log_error(
@@ -287,6 +293,7 @@ class StreamService:
                     )
                     self._active_correlation_id = request_correlation_id
                     self._active_device_id = request_device_id
+                    self._active_device_name = request_device_name
                     self._policy_resume_armed = True
                     self._user_stopped = False
                     self._last_heartbeat_at = time.monotonic()  # Fix 2: Always monitor from start
@@ -353,6 +360,7 @@ class StreamService:
                     )
                     self._active_correlation_id = None
                     self._active_device_id = None
+                    self._active_device_name = None
                     self._policy_resume_armed = False
                     log_error(
                         "stream_start_failed",
@@ -371,6 +379,7 @@ class StreamService:
                 )
                 self._active_correlation_id = request_correlation_id
                 self._active_device_id = request_device_id
+                self._active_device_name = request_device_name
                 self._policy_resume_armed = True
                 self._last_heartbeat_at = time.monotonic()  # Fix 2: Always monitor from start
                 log_system(
@@ -391,6 +400,7 @@ class StreamService:
                 )
                 self._active_correlation_id = None
                 self._active_device_id = None
+                self._active_device_name = None
                 self._policy_resume_armed = False
                 log_error(
                     "stream_start_exception",
@@ -419,6 +429,7 @@ class StreamService:
                 self._user_stopped = True
                 self._active_correlation_id = None
                 self._active_device_id = None
+                self._active_device_name = None
                 return {"success": True, "status": self._status.to_dict()}
 
             try:
@@ -454,6 +465,7 @@ class StreamService:
                 )
                 self._active_correlation_id = None
                 self._active_device_id = None
+                self._active_device_name = None
                 self._last_heartbeat_at = 0.0
                 return {"success": True, "status": self._status.to_dict()}
 
@@ -473,6 +485,7 @@ class StreamService:
                 )
                 self._active_correlation_id = None
                 self._active_device_id = None
+                self._active_device_name = None
                 return {"success": False, "status": self._status.to_dict()}
 
     def status(self) -> dict:
@@ -497,11 +510,13 @@ class StreamService:
                 self._policy_resume_armed = False
                 self._active_correlation_id = None
                 self._active_device_id = None
+                self._active_device_name = None
             result = self._status.to_dict()
             result["owner_device_id"] = self._active_device_id
+            result["owner_device_name"] = self._active_device_name
             return result
 
-    def heartbeat(self, device_id: Optional[str] = None) -> dict:
+    def heartbeat(self, device_id: Optional[str] = None, device_name: Optional[str] = None) -> dict:
         """Record a sender heartbeat to prevent auto-stop.
 
         Once called at least once, the heartbeat timer is active.  If no
@@ -535,6 +550,11 @@ class StreamService:
                     }
 
             self._last_heartbeat_at = time.monotonic()
+            request_device_name = (
+                device_name.strip() if isinstance(device_name, str) else None
+            )
+            if request_device_name:
+                self._active_device_name = request_device_name
             return {"accepted": True, "status": self._status.to_dict()}
 
     def policy_sender_alive(self) -> bool:
@@ -584,6 +604,7 @@ class StreamService:
                 self._policy_resume_armed = False
                 self._active_correlation_id = None
                 self._active_device_id = None
+                self._active_device_name = None
                 return {"success": True, "status": self._status.to_dict()}
 
             if self._manager and not self._manager.start_receiver(

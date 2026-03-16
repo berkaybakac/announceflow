@@ -405,6 +405,20 @@ class StreamClient:
             if self._running:
                 return True
 
+            # Fail-safe: do not start a new sender while a stale capture thread
+            # from a previous session is still alive.
+            if self._thread is not None and not self._thread.is_alive():
+                self._thread = None
+            if self._thread is not None and self._thread.is_alive():
+                self.last_error = "capture_thread_stuck"
+                self.last_error_details = (
+                    "Previous capture thread is still alive; start blocked"
+                )
+                logger.error(
+                    "StreamClient: start blocked, previous capture thread still alive"
+                )
+                return False
+
             attempt_id = self._new_attempt(target_host, target_port, correlation_id)
             self._mark_stage("host_resolve_start")
 
@@ -542,16 +556,43 @@ class StreamClient:
         """
         with self._lock:
             if not self._running:
+                if self._thread is not None and self._thread.is_alive():
+                    self.last_error = "capture_thread_stuck"
+                    self.last_error_details = (
+                        "Capture thread is still alive after previous stop request"
+                    )
+                    logger.error(
+                        "StreamClient: stop reported inactive but capture thread still alive"
+                    )
+                    return False
                 return True
             self._mark_stage("stop_requested")
             self._running = False
+            thread = self._thread
 
         # Wait outside lock so capture loop can finish
-        if self._thread is not None:
-            self._thread.join(timeout=3)
-            self._thread = None
+        thread_alive = False
+        if thread is not None:
+            thread.join(timeout=3)
+            thread_alive = thread.is_alive()
 
         with self._lock:
+            if thread is not None and thread_alive:
+                self._thread = thread
+                self._record_failure(
+                    "capture_thread_stuck",
+                    "Capture thread did not stop within timeout",
+                    stage="stop_timeout",
+                )
+                self._finalize_attempt(success=False)
+                logger.error(
+                    "StreamClient: capture thread did not stop within timeout"
+                )
+                return False
+
+            if thread is not None and self._thread is thread:
+                self._thread = None
+
             if self.last_error is None:
                 self._mark_stage("stopped")
                 self._finalize_attempt(success=True)

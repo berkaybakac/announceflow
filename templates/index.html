@@ -785,7 +785,8 @@
         badge.className = `badge ${cfg.badgeClass}`.trim();
 
         if (state === 'live') {
-            ownerLabel.textContent = owner ? `Cihaz: ${escapeHtml(owner)}` : 'Panel';
+            const displayName = data.owner_device_name || owner;
+            ownerLabel.textContent = displayName ? `Cihaz: ${escapeHtml(displayName)}` : 'Panel';
         } else if (state === 'paused_for_announcement') {
             ownerLabel.textContent = 'Anons için duraklıyor';
         } else if (state === 'stopped_by_policy') {

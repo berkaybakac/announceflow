@@ -1,3 +1,4 @@
 {
-  "api_base": "http://stateksound.local:5001"
+  "api_base": "http://stateksound.local:5001",
+  "device_name": ""
 }
