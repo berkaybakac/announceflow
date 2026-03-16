@@ -777,16 +777,22 @@ class TestPlaylistStreamGuard:
         )
         assert resp.status_code == 409
 
+    @patch("routes.playlist_routes._reject_if_outside_working_hours", return_value=None)
     @patch("routes.playlist_routes.get_stream_service")
-    def test_start_all_blocked_when_stream_live(self, mock_get_svc, client):
+    def test_start_all_blocked_when_stream_live(
+        self, mock_get_svc, _mock_working_hours_guard, client
+    ):
         mock_svc = MagicMock()
         mock_svc.status.return_value = {"active": True, "state": "live"}
         mock_get_svc.return_value = mock_svc
         resp = client.post("/api/playlist/start-all")
         assert resp.status_code == 409
 
+    @patch("routes.playlist_routes._reject_if_outside_working_hours", return_value=None)
     @patch("routes.playlist_routes.get_stream_service")
-    def test_play_blocked_when_stream_live(self, mock_get_svc, client):
+    def test_play_blocked_when_stream_live(
+        self, mock_get_svc, _mock_working_hours_guard, client
+    ):
         mock_svc = MagicMock()
         mock_svc.status.return_value = {"active": True, "state": "live"}
         mock_get_svc.return_value = mock_svc
