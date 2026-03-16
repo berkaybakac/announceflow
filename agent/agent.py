@@ -768,13 +768,13 @@ class AnnounceFlowAgent:
             result["error"] = payload.get("error", "api_stop_failed")
         return result
 
-    def send_heartbeat(self) -> bool:
-        """Send stream heartbeat to keep the session alive."""
+    def send_heartbeat_with_details(self) -> Dict[str, Any]:
+        """Send stream heartbeat and return structured result."""
         device_id = getattr(self, "device_id", None)
         headers = {}
         if isinstance(device_id, str) and device_id.strip():
             headers["X-Stream-Device-Id"] = device_id.strip()
-            
+
         response = self._request(
             "POST",
             "/api/stream/heartbeat",
@@ -782,7 +782,35 @@ class AnnounceFlowAgent:
             headers=headers if headers else None,
             timeout=DEFAULT_TIMEOUT,
         )
-        return bool(response and response.ok)
+        if response is None:
+            return {"success": False, "error": "api_heartbeat_failed"}
+
+        http_status = getattr(response, "status_code", None)
+        payload = {}
+        try:
+            payload_raw = response.json()
+            if isinstance(payload_raw, dict):
+                payload = payload_raw
+        except (ValueError, AttributeError):
+            payload = {}
+
+        if response.ok and bool(payload.get("success")):
+            return {
+                "success": True,
+                "http_status": http_status,
+                "status": payload.get("status"),
+            }
+
+        return {
+            "success": False,
+            "http_status": http_status,
+            "error": payload.get("error", "api_heartbeat_failed"),
+            "status": payload.get("status"),
+        }
+
+    def send_heartbeat(self) -> bool:
+        """Backward-compatible bool API for stream heartbeat."""
+        return bool(self.send_heartbeat_with_details().get("success"))
 
     def get_stream_status(self) -> Dict[str, Any]:
         """Get stream status to detect if someone else took over."""
@@ -1930,28 +1958,48 @@ class AgentGUI:
         """Send a heartbeat. Loop if still active."""
         if not self._stream_active or not self._root_alive():
             return
-            
+
         def _job():
-            return self.agent.send_heartbeat()
-            
-        def _on_done(success):
+            return self.agent.send_heartbeat_with_details()
+
+        def _on_done(result):
             if not self._root_alive():
                 return
+            if not isinstance(result, dict):
+                result = {"success": bool(result)}
+            success = bool(result.get("success"))
             if not success:
-                logger.warning("Agent stream heartbeat failed")
-            # Schedule next regardless of success, server drops us if too many fail
+                error_code = str(result.get("error", "")).strip()
+                if error_code == "not_stream_owner":
+                    stream_logger.info(
+                        "stream_heartbeat_not_owner: stopping local sender"
+                    )
+                    self._stream_active = False
+                    self._stop_heartbeat_only()
+                    self._refresh_stream_buttons()
+                    self._submit_network_job(
+                        lambda: self._stream_client.stop_sender(),
+                        on_success=lambda _: self._show_status(
+                            "Yayın başka bir cihaza devredildi!", error=True
+                        ),
+                    )
+                else:
+                    logger.warning(
+                        "Agent stream heartbeat failed (error=%s, status=%s)",
+                        error_code or "unknown",
+                        result.get("http_status"),
+                    )
             if self._stream_active:
                 self._heartbeat_job = self.root.after(4500, self._run_heartbeat)
-                
+
         self._submit_network_job(_job, on_success=_on_done)
 
     def _run_status_poll(self):
         """Check stream state and react: takeover, external stop, or auto-resume.
 
         Keeps polling as long as _stream_poll_active is True, even when
-        _stream_active (sender running) is False.  This allows the agent
-        to detect when the panel re-starts the receiver and auto-resume
-        the local sender.
+        _stream_active (sender running) is False. Auto-resume is gated
+        by ownership to prevent multiple agents from sending together.
         """
         if not getattr(self, "_stream_poll_active", False) or not self._root_alive():
             return
@@ -2000,8 +2048,31 @@ class AgentGUI:
                 )
                 # Keep polling — don't return, schedule next poll below
 
-            # ── 3. Auto-resume: receiver is live but sender stopped ────
+            # ── 3. Auto-resume: receiver is live, sender stopped, and we are owner ────
             elif is_active and state == "live" and not self._stream_active:
+                if not (
+                    owner_device_id
+                    and my_device_id
+                    and owner_device_id == my_device_id
+                ):
+                    reason = "owner_unknown"
+                    if owner_device_id and not my_device_id:
+                        reason = "local_device_missing"
+                    elif (
+                        owner_device_id
+                        and my_device_id
+                        and owner_device_id != my_device_id
+                    ):
+                        reason = "owner_mismatch"
+                    stream_logger.info(
+                        "stream_auto_resume_skipped owner=%s reason=%s",
+                        owner_device_id or "panel",
+                        reason,
+                    )
+                    if getattr(self, "_stream_poll_active", False):
+                        self._poll_job = self.root.after(3000, self._run_status_poll)
+                    return
+
                 stream_logger.info(
                     "stream_auto_resume: receiver is live (owner=%s) "
                     "but local sender stopped — restarting sender",

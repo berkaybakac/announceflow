@@ -397,6 +397,36 @@ class TestStreamApiDetailedWrappers:
         assert result["error"] == "api_stop_invalid_response"
         assert result["http_status"] == 200
 
+    def test_send_heartbeat_with_details_not_owner(self):
+        agent_mod = _import_agent()
+        agent = agent_mod.AnnounceFlowAgent.__new__(agent_mod.AnnounceFlowAgent)
+        agent.device_id = "dev-heartbeat-1"
+        response = MagicMock()
+        response.ok = False
+        response.status_code = 409
+        response.json.return_value = {"success": False, "error": "not_stream_owner"}
+        agent._request = MagicMock(return_value=response)
+
+        result = agent.send_heartbeat_with_details()
+        assert result["success"] is False
+        assert result["error"] == "not_stream_owner"
+        assert result["http_status"] == 409
+
+    def test_send_heartbeat_with_details_success(self):
+        agent_mod = _import_agent()
+        agent = agent_mod.AnnounceFlowAgent.__new__(agent_mod.AnnounceFlowAgent)
+        agent.device_id = "dev-heartbeat-2"
+        response = MagicMock()
+        response.ok = True
+        response.status_code = 200
+        response.json.return_value = {"success": True, "status": {"state": "live"}}
+        agent._request = MagicMock(return_value=response)
+
+        result = agent.send_heartbeat_with_details()
+        assert result["success"] is True
+        assert result["status"]["state"] == "live"
+        assert result["http_status"] == 200
+
 
 class TestGuiUsesDetailedStreamApi:
     """Ensure GUI stream jobs use detailed API wrappers."""
@@ -635,15 +665,14 @@ class TestStatusPollExternalStop:
         gui._stream_client.stop_sender.assert_called_once()
 
 
-# --------------- 13. Auto-resume: panel starts receiver, agent resumes sender -----
+# --------------- 13. Auto-resume: owner is me, agent resumes sender -----
 
 
 class TestStatusPollAutoResume:
-    """The CORE fix: when panel starts receiver and agent's sender is stopped,
-    the status poll should auto-resume the sender."""
+    """Auto-resume should run only when this device owns the live stream."""
 
     def test_auto_resume_when_receiver_live_sender_stopped(self):
-        """Panel starts receiver → poll sees live → agent starts sender."""
+        """Live + owner is me + sender stopped -> resume sender."""
         gui = _make_gui_for_polling()
         gui._stream_active = False  # Sender stopped (e.g., after panel stop)
         gui._stream_poll_active = True  # But poll still running
@@ -653,7 +682,13 @@ class TestStatusPollAutoResume:
         on_done, submits = _capture_poll_on_done(gui)
         assert on_done is not None
 
-        on_done({"active": True, "state": "live", "owner_device_id": None})
+        on_done(
+            {
+                "active": True,
+                "state": "live",
+                "owner_device_id": "agent-device-abc",
+            }
+        )
 
         # Auto-resume should have submitted a job that calls start_sender
         assert len(submits) >= 2, "Auto-resume should submit a resume job"
@@ -669,7 +704,13 @@ class TestStatusPollAutoResume:
         gui._stream_client.start_sender.return_value = True
 
         on_done, submits = _capture_poll_on_done(gui)
-        on_done({"active": True, "state": "live", "owner_device_id": None})
+        on_done(
+            {
+                "active": True,
+                "state": "live",
+                "owner_device_id": "agent-device-abc",
+            }
+        )
 
         # Execute resume job
         resume_fn, resume_on_done = submits[1]
@@ -687,7 +728,13 @@ class TestStatusPollAutoResume:
         gui._stream_client.start_sender.return_value = False
 
         on_done, submits = _capture_poll_on_done(gui)
-        on_done({"active": True, "state": "live", "owner_device_id": None})
+        on_done(
+            {
+                "active": True,
+                "state": "live",
+                "owner_device_id": "agent-device-abc",
+            }
+        )
 
         resume_fn, resume_on_done = submits[1]
         result = resume_fn()
@@ -710,8 +757,20 @@ class TestStatusPollAutoResume:
         assert len(submits) == 1
         gui._stream_client.start_sender.assert_not_called()
 
-    def test_full_flow_stop_then_panel_restart(self):
-        """E2E: exe streaming → panel stop → panel start → agent auto-resumes."""
+    def test_no_auto_resume_when_owner_unknown(self):
+        """Live + no owner info should not auto-resume to avoid multi-agent overlap."""
+        gui = _make_gui_for_polling()
+        gui._stream_active = False
+        gui._stream_poll_active = True
+
+        on_done, submits = _capture_poll_on_done(gui)
+        on_done({"active": True, "state": "live", "owner_device_id": None})
+
+        assert len(submits) == 1
+        gui._stream_client.start_sender.assert_not_called()
+
+    def test_full_flow_stop_then_owner_live(self):
+        """E2E: exe streaming -> idle stop -> live as same owner -> auto-resume."""
         gui = _make_gui_for_polling()
         gui._stream_active = True
         gui._stream_poll_active = True
@@ -722,11 +781,17 @@ class TestStatusPollAutoResume:
         assert gui._stream_active is False
         assert gui._stream_poll_active is True  # Poll stays active!
 
-        # Step 2: Panel starts stream again — agent detects live
+        # Step 2: Stream is live again and owned by this device
         gui._stream_client.start_sender.return_value = True
         gui._stream_client.reset_mock()
         on_done2, submits2 = _capture_poll_on_done(gui)
-        on_done2({"active": True, "state": "live", "owner_device_id": None})
+        on_done2(
+            {
+                "active": True,
+                "state": "live",
+                "owner_device_id": "agent-device-abc",
+            }
+        )
 
         # Auto-resume triggered
         assert len(submits2) >= 2
