@@ -137,3 +137,28 @@ def test_host_ip_cache_prefers_host_profile(agent_mod, monkeypatch):
     assert cached == "http://192.168.1.50:5001"
     assert agent.config.get("expected_instance_id") == "inst-1"
     assert agent.config.get("expected_site_name") == "Site 1"
+
+
+def test_device_id_path_uses_active_runtime_dir(agent_mod, monkeypatch, tmp_path):
+    active_runtime = tmp_path / "active_runtime"
+    stale_runtime = tmp_path / "stale_runtime"
+    active_runtime.mkdir()
+    stale_runtime.mkdir()
+
+    # Even if module-level constants point elsewhere, env-selected runtime must win.
+    monkeypatch.setenv("ANNOUNCEFLOW_AGENT_RUNTIME_DIR", str(active_runtime))
+    monkeypatch.setattr(agent_mod, "AGENT_RUNTIME_DIR", str(stale_runtime), raising=False)
+    monkeypatch.setattr(
+        agent_mod,
+        "AGENT_DEVICE_ID_FILE",
+        str(stale_runtime / "device_id.txt"),
+        raising=False,
+    )
+
+    device_id = agent_mod._load_or_create_device_id()
+    active_file = active_runtime / "device_id.txt"
+    stale_file = stale_runtime / "device_id.txt"
+
+    assert active_file.exists()
+    assert active_file.read_text(encoding="utf-8").strip() == device_id
+    assert not stale_file.exists()

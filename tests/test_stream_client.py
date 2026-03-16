@@ -31,6 +31,20 @@ class _NoRecorderSpeaker:
         self.name = name
         self.id = speaker_id
 
+
+class _FakeJoinThread:
+    """Minimal thread stub with controllable alive state."""
+
+    def __init__(self, alive=True):
+        self._alive = alive
+        self.join_calls = []
+
+    def is_alive(self):
+        return self._alive
+
+    def join(self, timeout=None):
+        self.join_calls.append(timeout)
+
 # numpy mock for environments where numpy is not installed
 try:
     import numpy as _real_np
@@ -120,6 +134,17 @@ class TestStartSender:
             assert client.start_sender("127.0.0.1", 5800) is True
             assert client.start_sender("127.0.0.1", 5800) is True
             client.stop_sender()
+
+    def test_start_rejected_when_previous_capture_thread_alive(self):
+        """Fail-safe: block restart when stale capture thread is still alive."""
+        client = StreamClient()
+        stale = _FakeJoinThread(alive=True)
+        client._thread = stale
+        client._running = False
+
+        assert client.start_sender("127.0.0.1", 5800) is False
+        assert client.last_error == "capture_thread_stuck"
+        assert client._thread is stale
 
     def test_start_sender_uses_loopback_microphone_when_speaker_has_no_recorder(self):
         """When speaker lacks recorder(), client should resolve loopback microphone."""
@@ -234,6 +259,41 @@ class TestStopSender:
         """Stopping when already stopped returns True."""
         client = StreamClient()
         assert client.stop_sender() is True
+
+    def test_stop_sender_timeout_sets_capture_thread_stuck(self):
+        """Timeout on join should mark capture_thread_stuck and keep stale thread ref."""
+        client = StreamClient()
+        stale = _FakeJoinThread(alive=True)
+        client._thread = stale
+        client._running = True
+        client._new_attempt("127.0.0.1", 5800)
+
+        assert client.stop_sender() is False
+        assert stale.join_calls == [3]
+        assert client.last_error == "capture_thread_stuck"
+        snap = client.get_attempt_snapshot()
+        assert snap["error_code"] == "capture_thread_stuck"
+        assert client._thread is stale
+
+    def test_no_restart_until_stale_thread_clears(self):
+        """Start stays blocked while stale thread alive, resumes once thread is dead."""
+        client = StreamClient()
+        stale = _FakeJoinThread(alive=True)
+        client._thread = stale
+        client._running = False
+
+        assert client.start_sender("127.0.0.1", 5800) is False
+        assert client.last_error == "capture_thread_stuck"
+
+        stale._alive = False
+
+        def fake_capture(host, port):
+            while client._running:
+                time.sleep(0.01)
+
+        with patch.object(client, "_capture_loop", side_effect=fake_capture):
+            assert client.start_sender("127.0.0.1", 5800) is True
+            assert client.stop_sender() is True
 
 
 # --------------- 5. is_alive states ---------------

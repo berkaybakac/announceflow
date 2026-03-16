@@ -268,6 +268,7 @@ class TestStreamServiceStatus:
             "source_before_stream",
             "last_error",
             "owner_device_id",
+            "owner_device_name",
         }
 
     def test_status_owner_device_id_is_none_when_idle(self, mock_manager, mock_player):
@@ -527,7 +528,7 @@ class TestStreamRoutes:
         data = resp.get_json()
         assert data["success"] is True
         assert data["status"]["active"] is True
-        mock_svc.start.assert_called_once_with()
+        mock_svc.start.assert_called_once_with(device_name=None)
 
     @patch("routes.stream_routes._stream_service")
     def test_start_endpoint_forwards_correlation_header(self, mock_svc, client):
@@ -543,6 +544,7 @@ class TestStreamRoutes:
         mock_svc.start.assert_called_once_with(
             correlation_id="cid-route-1",
             device_id=None,
+            device_name=None,
         )
 
     @patch("routes.stream_routes._stream_service")
@@ -559,6 +561,27 @@ class TestStreamRoutes:
         mock_svc.start.assert_called_once_with(
             correlation_id=None,
             device_id="dev-route-1",
+            device_name=None,
+        )
+
+    @patch("routes.stream_routes._stream_service")
+    def test_start_endpoint_forwards_device_name_header(self, mock_svc, client):
+        mock_svc.start.return_value = {
+            "success": True,
+            "status": StreamStatus(active=True, state="live").to_dict(),
+        }
+        resp = client.post(
+            "/api/stream/start",
+            headers={
+                "X-Stream-Device-Id": "dev-route-1",
+                "X-Stream-Device-Name": "Kasa-1",
+            },
+        )
+        assert resp.status_code == 200
+        mock_svc.start.assert_called_once_with(
+            correlation_id=None,
+            device_id="dev-route-1",
+            device_name="Kasa-1",
         )
 
     @patch("routes.stream_routes._stream_service")
@@ -639,6 +662,16 @@ class TestStreamRoutes:
         resp = client.post("/api/stream/start")
         assert resp.status_code == 409
 
+    @patch("routes.stream_routes._stream_service")
+    def test_takeover_in_progress_returns_409(self, mock_svc, client):
+        mock_svc.start.return_value = {
+            "success": False,
+            "error": "takeover_in_progress",
+            "status": StreamStatus(active=True, state="live").to_dict(),
+        }
+        resp = client.post("/api/stream/start")
+        assert resp.status_code == 409
+
 
 # --------------- Heartbeat route tests ---------------
 
@@ -655,7 +688,7 @@ class TestHeartbeatRoute:
             headers={"X-Stream-Device-Id": "dev-1"},
         )
         assert resp.status_code == 200
-        mock_svc.heartbeat.assert_called_once_with(device_id="dev-1")
+        mock_svc.heartbeat.assert_called_once_with(device_id="dev-1", device_name=None)
 
     @patch("routes.stream_routes._stream_service")
     def test_heartbeat_not_owner_returns_409(self, mock_svc, client):
@@ -699,7 +732,7 @@ class TestHeartbeatRoute:
             "/api/stream/heartbeat",
             headers={"X-Stream-Device-Id": "dev-xyz"},
         )
-        mock_svc.heartbeat.assert_called_once_with(device_id="dev-xyz")
+        mock_svc.heartbeat.assert_called_once_with(device_id="dev-xyz", device_name=None)
 
     @patch("routes.stream_routes._stream_service")
     def test_heartbeat_without_device_header_passes_none(self, mock_svc, client):
@@ -708,7 +741,22 @@ class TestHeartbeatRoute:
             "status": StreamStatus(active=True, state="live").to_dict(),
         }
         client.post("/api/stream/heartbeat")
-        mock_svc.heartbeat.assert_called_once_with(device_id=None)
+        mock_svc.heartbeat.assert_called_once_with(device_id=None, device_name=None)
+
+    @patch("routes.stream_routes._stream_service")
+    def test_heartbeat_forwards_device_name_header(self, mock_svc, client):
+        mock_svc.heartbeat.return_value = {
+            "accepted": True,
+            "status": StreamStatus(active=True, state="live").to_dict(),
+        }
+        client.post(
+            "/api/stream/heartbeat",
+            headers={
+                "X-Stream-Device-Id": "dev-1",
+                "X-Stream-Device-Name": "Kasa-2",
+            },
+        )
+        mock_svc.heartbeat.assert_called_once_with(device_id="dev-1", device_name="Kasa-2")
 
 
 # --------------- Playlist stream guard ---------------
@@ -774,7 +822,7 @@ class TestStreamMiniGate:
     def test_full_lifecycle(self, mock_svc, client):
         status_state = {"current": StreamStatus().to_dict()}
 
-        def fake_start():
+        def fake_start(**kwargs):
             status_state["current"] = StreamStatus(
                 active=True, state="live"
             ).to_dict()

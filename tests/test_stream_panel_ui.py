@@ -106,7 +106,7 @@ class TestPanelStart:
             resp = client.post("/api/stream/start")  # no X-Stream-Device-Id
             assert resp.status_code == 200
             # Route must call start() with no arguments when headers are absent
-            mock_svc.start.assert_called_once_with()
+            mock_svc.start.assert_called_once_with(device_name=None)
 
 
 # --------------- 2. Agent heartbeat after panel start ---------------
