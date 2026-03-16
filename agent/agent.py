@@ -64,6 +64,19 @@ AGENT_STREAM_LOG_FILE = os.path.join(AGENT_LOG_DIR, "agent_stream.log")
 AGENT_DEVICE_ID_FILE = os.path.join(AGENT_RUNTIME_DIR, "device_id.txt")
 
 
+def _get_agent_runtime_dir() -> str:
+    """Get active runtime dir; env override wins after fallback resolution."""
+    env_runtime = os.environ.get("ANNOUNCEFLOW_AGENT_RUNTIME_DIR", "").strip()
+    if env_runtime:
+        return env_runtime
+    return AGENT_RUNTIME_DIR
+
+
+def _get_agent_device_id_file() -> str:
+    """Get device_id file path from active runtime dir."""
+    return os.path.join(_get_agent_runtime_dir(), "device_id.txt")
+
+
 def setup_agent_logging() -> None:
     """Configure rotating logs for app-wide and stream-specific diagnostics."""
     root = logging.getLogger()
@@ -215,13 +228,15 @@ def _is_ip_host(host: str) -> bool:
 
 def _load_or_create_device_id() -> str:
     """Load stable device_id from disk or create one on first run."""
+    runtime_dir = _get_agent_runtime_dir()
+    device_id_file = _get_agent_device_id_file()
     try:
-        os.makedirs(AGENT_RUNTIME_DIR, exist_ok=True)
+        os.makedirs(runtime_dir, exist_ok=True)
     except OSError:
         pass
 
     try:
-        with open(AGENT_DEVICE_ID_FILE, "r", encoding="utf-8") as f:
+        with open(device_id_file, "r", encoding="utf-8") as f:
             existing = f.read().strip()
         if existing:
             return existing
@@ -230,7 +245,7 @@ def _load_or_create_device_id() -> str:
 
     device_id = f"agent-{uuid.uuid4()}"
     try:
-        with open(AGENT_DEVICE_ID_FILE, "w", encoding="utf-8") as f:
+        with open(device_id_file, "w", encoding="utf-8") as f:
             f.write(device_id)
     except OSError as exc:
         logger.warning("Could not persist device_id, using volatile id: %s", exc)
@@ -470,6 +485,7 @@ class AnnounceFlowAgent:
         self.config = load_agent_config()
         self.api_base = self.config.get("api_base", API_BASE)
         self.device_id = _load_or_create_device_id()
+        self.device_name = str(self.config.get("device_name", "")).strip() or None
         self.session = None
         self._session_lock = threading.RLock()
 
@@ -716,6 +732,9 @@ class AnnounceFlowAgent:
         device_id = getattr(self, "device_id", None)
         if isinstance(device_id, str) and device_id.strip():
             headers["X-Stream-Device-Id"] = device_id.strip()
+        device_name = getattr(self, "device_name", None)
+        if isinstance(device_name, str) and device_name.strip():
+            headers["X-Stream-Device-Name"] = device_name.strip()
         response = self._request(
             "POST",
             "/api/stream/start",
@@ -774,6 +793,9 @@ class AnnounceFlowAgent:
         headers = {}
         if isinstance(device_id, str) and device_id.strip():
             headers["X-Stream-Device-Id"] = device_id.strip()
+        device_name = getattr(self, "device_name", None)
+        if isinstance(device_name, str) and device_name.strip():
+            headers["X-Stream-Device-Name"] = device_name.strip()
 
         response = self._request(
             "POST",
@@ -917,6 +939,7 @@ class AgentGUI:
         # State tracking for polling loops
         self._stream_active = False
         self._stream_poll_active = False
+        self._last_known_owner: Optional[str] = None
         self._music_active = False
         self._heartbeat_job = None
         self._poll_job = None
@@ -1717,6 +1740,7 @@ class AgentGUI:
                     attempt.get("packet_count"),
                 )
                 self._stream_active = True
+                self._last_known_owner = None
                 self._start_stream_polling_loops()
                 self._refresh_stream_buttons()
                 self._show_status("Canlı yayın başlatıldı")
@@ -1730,6 +1754,10 @@ class AgentGUI:
                     "recorder_open_failed": "Ses yakalama başlatılamadı",
                     "udp_send_failed": "Ağ üzerinden ses gönderilemedi",
                     "capture_thread_died": "Ses yakalama başlatıldı ama anında durdu",
+                    "capture_thread_stuck": (
+                        "Önceki yayın işlemi kapanmadı. "
+                        "Kısa bekleyip tekrar deneyin veya Agent'i yeniden başlatın"
+                    ),
                     "capture_error": "Ses yakalama hatası oluştu",
                 }
                 msg = error_messages.get(
@@ -1752,6 +1780,9 @@ class AgentGUI:
                     "api_start_invalid_response": "Sunucudan geçersiz cevap alındı",
                     "receiver_start_failed": "Sunucu yayın alıcısını başlatamadı",
                     "stream_already_live": "Yayın zaten aktif. Önce mevcut yayını durdurun.",
+                    "takeover_in_progress": (
+                        "Yayın devri sürüyor, birkaç saniye sonra tekrar deneyin"
+                    ),
                 }
                 stream_logger.error(
                     "stream_start_api_fail correlation_id=%s error_code=%s http_status=%s",
@@ -1785,6 +1816,7 @@ class AgentGUI:
             success = bool(payload.get("success"))
             
             self._stream_active = False
+            self._last_known_owner = None
             self._stop_heartbeat_only()
             self._refresh_stream_buttons()
 
@@ -2018,18 +2050,34 @@ class AgentGUI:
 
             # ── 1. Takeover: someone else owns the stream ──────────────
             if is_active and owner_device_id and my_device_id and owner_device_id != my_device_id:
-                stream_logger.info("stream_takeover_detected new_owner=%s", owner_device_id)
-                self._stream_active = False
-                self._stop_heartbeat_only()
-                self._refresh_stream_buttons()
-                self._submit_network_job(
-                    lambda: self._stream_client.stop_sender(),
-                    on_success=lambda _: self._show_status("Yayın başka bir cihaza devredildi!", error=True)
-                )
+                owner_changed = (owner_device_id != self._last_known_owner)
+                self._last_known_owner = owner_device_id
+                if self._stream_active or owner_changed:
+                    # First detection or owner changed — react once
+                    was_sending = self._stream_active
+                    self._stream_active = False
+                    self._stop_heartbeat_only()
+                    self._refresh_stream_buttons()
+                    if was_sending:
+                        self._submit_network_job(
+                            lambda: self._stream_client.stop_sender(),
+                            on_success=lambda _: self._show_status("Yayın başka bir cihaza devredildi!", error=True)
+                        )
+                    else:
+                        self._show_status("Başka cihaz yayında")
+                    stream_logger.info("stream_takeover_detected new_owner=%s first=%s", owner_device_id, owner_changed)
                 # Keep polling
                 if getattr(self, "_stream_poll_active", False):
                     self._poll_job = self.root.after(3000, self._run_status_poll)
                 return
+
+            # ── 1b. Remote stream ended: we knew someone else was streaming ──
+            if not is_active and self._last_known_owner and not self._stream_active:
+                stream_logger.info("stream_remote_stop detected prev_owner=%s", self._last_known_owner)
+                self._last_known_owner = None
+                self._refresh_stream_buttons()
+                self._show_status("Yayın durduruldu")
+                # Fall through to steady-state polling below
 
             # ── 2. External stop: server idle/error, we were sending ───
             if state in ("idle", "error") and not is_active and self._stream_active:
