@@ -306,6 +306,8 @@ class TestStreamServiceStatus:
             "last_error",
             "owner_device_id",
             "owner_device_name",
+            "command_status",
+            "desired_stream_state",
         }
 
     def test_status_owner_device_id_is_none_when_idle(self, mock_manager, mock_player):

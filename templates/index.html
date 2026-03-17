@@ -283,11 +283,11 @@
                         console.log('Started loop playback');
                     } else {
                         const data = await response.json().catch(() => ({}));
-                        showToast(data.error || 'Loop oynatma başlatılamadı', 'error');
+                        showToast(data.error || 'Loop oynatma başlatılamadı. Tekrar deneyin.', 'error');
                     }
                 } catch (error) {
                     console.error('Error starting loop playback:', error);
-                    showToast('Loop oynatma başlatılamadı', 'error');
+                    showToast('Loop oynatma başlatılamadı. Tekrar deneyin.', 'error');
                 }
             },
 
@@ -298,11 +298,11 @@
                         console.log('Skipped to next track');
                     } else {
                         const data = await response.json().catch(() => ({}));
-                        showToast(data.error || 'Sonraki parça başlatılamadı', 'error');
+                        showToast(data.error || 'Sonraki parça başlatılamadı. Tekrar deneyin.', 'error');
                     }
                 } catch (error) {
                     console.error('Error skipping:', error);
-                    showToast('Sonraki parça başlatılamadı', 'error');
+                    showToast('Sonraki parça başlatılamadı. Tekrar deneyin.', 'error');
                 }
             },
 
@@ -318,11 +318,11 @@
                         console.log('Started shuffle playback');
                     } else {
                         const data = await response.json().catch(() => ({}));
-                        showToast(data.error || 'Karışık çalma başlatılamadı', 'error');
+                        showToast(data.error || 'Karışık çalma başlatılamadı. Tekrar deneyin.', 'error');
                     }
                 } catch (error) {
                     console.error('Error starting shuffle:', error);
-                    showToast('Karışık çalma başlatılamadı', 'error');
+                    showToast('Karışık çalma başlatılamadı. Tekrar deneyin.', 'error');
                 }
             }
         }
@@ -576,13 +576,13 @@
             }, 30000);
             if (!response.ok) {
                 const data = await response.json().catch(() => ({}));
-                showToast(data.error || 'Çalma başarısız', 'error');
+                showToast(data.error || 'Çalma başarısız. Tekrar deneyin.', 'error');
                 return;
             }
             updatePlayerState();
         } catch (error) {
             console.error('Error playing:', error);
-            showToast('Çalma başarısız', 'error');
+            showToast('Çalma başarısız. Tekrar deneyin.', 'error');
         }
     }
 
@@ -615,13 +615,13 @@
             const playResult = await fetchAction('/api/playlist/play', { method: 'POST' }, 30000);
             if (!playResult.ok) {
                 const data = await playResult.json().catch(() => ({}));
-                showToast(data.error || 'Playlist başlatılamadı', 'error');
+                showToast(data.error || 'Playlist başlatılamadı. Tekrar deneyin.', 'error');
                 return;
             }
             updatePlayerState();
         } catch (error) {
             console.error('Error starting playlist:', error);
-            showToast('Playlist başlatılamadı', 'error');
+            showToast('Playlist başlatılamadı. Tekrar deneyin.', 'error');
         }
     }
 
@@ -630,13 +630,13 @@
             const response = await fetchAction('/api/playlist/next', { method: 'POST' }, 30000);
             if (!response.ok) {
                 const data = await response.json().catch(() => ({}));
-                showToast(data.error || 'Sonraki parça başlatılamadı', 'error');
+                showToast(data.error || 'Sonraki parça başlatılamadı. Tekrar deneyin.', 'error');
                 return;
             }
             updatePlayerState();
         } catch (error) {
             console.error('Error skipping:', error);
-            showToast('Sonraki parça başlatılamadı', 'error');
+            showToast('Sonraki parça başlatılamadı. Tekrar deneyin.', 'error');
         }
     }
 
@@ -720,7 +720,7 @@
     const STREAM_ERROR_MESSAGES = {
         receiver_start_failed: 'Alıcı başlatılamadı. Windows uygulamasının açık olduğundan emin olun.',
         receiver_died: 'Ses bağlantısı beklenmedik şekilde kesildi. Tekrar deneyin.',
-        stream_already_live: 'Yayın zaten aktif.',
+        stream_already_live: 'Yayın zaten aktif. Önce mevcut yayını durdurun.',
         takeover_in_progress: 'Yayın devri sürüyor, birkaç saniye sonra tekrar deneyin.',
         stream_stop_failed: 'Yayın durdurulamadı. Tekrar deneyin.',
         no_agent_available: 'Agent çevrimdışı. Windows uygulamasının açık olduğundan emin olun.',
@@ -800,12 +800,21 @@
         const state = data.state || 'idle';
         const owner = data.owner_device_id;
         const cfg = _STREAM_STATE_CONFIG[state] || _STREAM_STATE_CONFIG.idle;
-        badge.textContent = cfg.badgeText;
-        badge.className = `badge ${cfg.badgeClass}`.trim();
+        const pendingRemoteCommand = (state === 'idle' && data.command_status === 'pending');
+        if (pendingRemoteCommand) {
+            const desired = (data.desired_stream_state || '').toLowerCase();
+            badge.textContent = desired === 'on' ? 'Başlatılıyor...' : 'Durduruluyor...';
+            badge.className = 'badge badge-warning';
+        } else {
+            badge.textContent = cfg.badgeText;
+            badge.className = `badge ${cfg.badgeClass}`.trim();
+        }
 
         if (state === 'live') {
             const displayName = data.owner_device_name || owner;
             ownerLabel.textContent = displayName ? `Cihaz: ${escapeHtml(displayName)}` : 'Panel';
+        } else if (pendingRemoteCommand) {
+            ownerLabel.textContent = 'Agent komutu işliyor';
         } else if (state === 'paused_for_announcement') {
             ownerLabel.textContent = 'Anons için duraklıyor';
         } else if (state === 'stopped_by_policy') {
@@ -845,6 +854,20 @@
         } finally {
             streamPollInFlight = false;
         }
+    }
+
+    async function _awaitStreamState(targetState, timeoutMs) {
+        const deadline = Date.now() + timeoutMs;
+        while (Date.now() < deadline) {
+            await new Promise(r => setTimeout(r, 1000));
+            try {
+                const status = await fetchStreamStatus(3000);
+                const st = (status && status.state) || 'idle';
+                if (st === targetState) return { reached: true };
+                if (st === 'error') return { reached: false, error: true };
+            } catch (_) { /* network glitch, keep trying */ }
+        }
+        return { reached: false, timeout: true };
     }
 
     function scheduleNextStreamPoll(delayMs = STREAM_POLL_INTERVAL_MS) {
@@ -892,6 +915,14 @@
                 const data = await resp.json().catch(() => ({}));
                 showToast(getStreamErrorMessage(data.error, 'Yayın başlatılamadı.'), 'error');
                 logStreamInternalError('start', data.error);
+            } else {
+                const respData = await resp.json().catch(() => ({}));
+                if (respData?.control?.command_status === 'pending') {
+                    const result = await _awaitStreamState('live', 45000);
+                    if (!result.reached) {
+                        showToast('Agent yanıt vermedi. Uygulamanın açık olduğundan emin olun.', 'error');
+                    }
+                }
             }
             await updateStreamState();
         } catch (err) {
@@ -916,6 +947,11 @@
                 const data = await resp.json().catch(() => ({}));
                 showToast(getStreamErrorMessage(data.error, 'Yayın durdurulamadı.'), 'error');
                 logStreamInternalError('stop', data.error);
+            } else {
+                const respData = await resp.json().catch(() => ({}));
+                if (respData?.control?.command_status === 'pending') {
+                    await _awaitStreamState('idle', 45000);
+                }
             }
             await updateStreamState();
         } catch (err) {

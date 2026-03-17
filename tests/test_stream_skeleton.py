@@ -56,6 +56,8 @@ def test_stream_service_stub_contract_shape():
         "last_error",
         "owner_device_id",
         "owner_device_name",
+        "command_status",
+        "desired_stream_state",
     }
 
 
@@ -92,6 +94,8 @@ def test_stream_status_route_contract_when_logged_in():
         "last_error",
         "owner_device_id",
         "owner_device_name",
+        "command_status",
+        "desired_stream_state",
     }
     assert payload["state"] == "idle"
 
