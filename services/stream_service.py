@@ -181,6 +181,8 @@ class StreamService:
         result = self._status.to_dict()
         result["owner_device_id"] = self._active_device_id
         result["owner_device_name"] = self._active_device_name
+        result["command_status"] = self._command_status
+        result["desired_stream_state"] = "on" if self._desired_stream_on else "off"
         return result
 
     def _online_agent_ids_unlocked(self) -> list[str]:
