@@ -1991,6 +1991,43 @@ class AgentGUI:
                 pass
             self._heartbeat_job = None
 
+    def _deactivate_local_stream(
+        self,
+        *,
+        reason: str,
+        status_message: Optional[str] = None,
+        status_error: bool = False,
+        stop_sender: bool = True,
+    ) -> None:
+        """Apply remote/local stream-off state consistently in UI and loops."""
+        was_active = bool(self._stream_active)
+        self._stream_active = False
+        self._stop_heartbeat_only()
+        self._refresh_stream_buttons()
+        stream_logger.info(
+            "stream_local_deactivate reason=%s was_active=%s stop_sender=%s",
+            reason,
+            was_active,
+            stop_sender,
+        )
+
+        def _emit_status():
+            if not status_message:
+                return
+            if status_error:
+                self._show_status(status_message, error=True)
+            else:
+                self._show_status(status_message)
+
+        if stop_sender and was_active:
+            self._submit_network_job(
+                lambda: self._stream_client.stop_sender(),
+                on_success=(lambda _: _emit_status()) if status_message else None,
+            )
+            return
+
+        _emit_status()
+
     def _run_heartbeat(self):
         """Send a heartbeat. Loop if still active."""
         if not self._stream_active or not self._root_alive():
@@ -2007,18 +2044,38 @@ class AgentGUI:
             success = bool(result.get("success"))
             if not success:
                 error_code = str(result.get("error", "")).strip()
+                status_payload = result.get("status")
+                if not isinstance(status_payload, dict):
+                    status_payload = {}
+                remote_state = str(status_payload.get("state", "")).strip()
+                remote_active = bool(status_payload.get("active"))
+                remote_stopped = bool(status_payload) and (not remote_active) and remote_state in ("idle", "error")
                 if error_code == "not_stream_owner":
                     stream_logger.info(
                         "stream_heartbeat_not_owner: stopping local sender"
                     )
-                    self._stream_active = False
-                    self._stop_heartbeat_only()
-                    self._refresh_stream_buttons()
-                    self._submit_network_job(
-                        lambda: self._stream_client.stop_sender(),
-                        on_success=lambda _: self._show_status(
-                            "Yayın başka bir cihaza devredildi!", error=True
-                        ),
+                    self._deactivate_local_stream(
+                        reason="heartbeat_not_stream_owner",
+                        status_message="Yayın başka bir cihaza devredildi!",
+                        status_error=True,
+                        stop_sender=True,
+                    )
+                elif error_code == "no_active_stream" or remote_stopped:
+                    message = (
+                        "Yayın bağlantısı kesildi"
+                        if remote_state == "error"
+                        else "Yayın durduruldu"
+                    )
+                    stream_logger.info(
+                        "stream_heartbeat_remote_stop error=%s state=%s",
+                        error_code or "-",
+                        remote_state or "-",
+                    )
+                    self._deactivate_local_stream(
+                        reason=f"heartbeat_remote_stop:{error_code or remote_state or 'unknown'}",
+                        status_message=message,
+                        status_error=(remote_state == "error"),
+                        stop_sender=True,
                     )
                 else:
                     logger.warning(
@@ -2047,6 +2104,12 @@ class AgentGUI:
         def _on_done(status):
             if not self._root_alive():
                 return
+            if not isinstance(status, dict):
+                logger.warning(
+                    "Agent stream status poll returned non-dict payload: %r",
+                    status,
+                )
+                status = {}
 
             is_active = status.get("active")
             state = status.get("state", "idle")
@@ -2058,19 +2121,24 @@ class AgentGUI:
                 owner_changed = (owner_device_id != self._last_known_owner)
                 self._last_known_owner = owner_device_id
                 if self._stream_active or owner_changed:
-                    # First detection or owner changed — react once
-                    was_sending = self._stream_active
-                    self._stream_active = False
-                    self._stop_heartbeat_only()
-                    self._refresh_stream_buttons()
-                    if was_sending:
-                        self._submit_network_job(
-                            lambda: self._stream_client.stop_sender(),
-                            on_success=lambda _: self._show_status("Yayın başka bir cihaza devredildi!", error=True)
+                    if self._stream_active:
+                        self._deactivate_local_stream(
+                            reason="status_takeover",
+                            status_message="Yayın başka bir cihaza devredildi!",
+                            status_error=True,
+                            stop_sender=True,
                         )
                     else:
-                        self._show_status("Başka cihaz yayında")
-                    stream_logger.info("stream_takeover_detected new_owner=%s first=%s", owner_device_id, owner_changed)
+                        self._deactivate_local_stream(
+                            reason="status_other_owner",
+                            status_message="Başka cihaz yayında",
+                            stop_sender=False,
+                        )
+                    stream_logger.info(
+                        "stream_takeover_detected new_owner=%s first=%s",
+                        owner_device_id,
+                        owner_changed,
+                    )
                 # Keep polling
                 if getattr(self, "_stream_poll_active", False):
                     self._poll_job = self.root.after(3000, self._run_status_poll)
@@ -2089,15 +2157,15 @@ class AgentGUI:
                 stream_logger.info(
                     "stream_external_stop detected state=%s, stopping local sender", state
                 )
-                self._stream_active = False
-                self._stop_heartbeat_only()
-                self._refresh_stream_buttons()
-                self._submit_network_job(
-                    lambda: self._stream_client.stop_sender(),
-                    on_success=lambda _: self._show_status(
-                        "Yayın durduruldu" if state == "idle" else "Yayın bağlantısı kesildi",
-                        error=(state == "error"),
+                self._deactivate_local_stream(
+                    reason=f"status_external_stop:{state}",
+                    status_message=(
+                        "Yayın durduruldu"
+                        if state == "idle"
+                        else "Yayın bağlantısı kesildi"
                     ),
+                    status_error=(state == "error"),
+                    stop_sender=True,
                 )
                 # Keep polling — don't return, schedule next poll below
 
@@ -2162,7 +2230,14 @@ class AgentGUI:
                 interval = 2000 if self._stream_active else 3000
                 self._poll_job = self.root.after(interval, self._run_status_poll)
 
-        self._submit_network_job(_job, on_success=_on_done)
+        def _on_error(exc):
+            if not self._root_alive():
+                return
+            logger.warning("Agent stream status poll failed: %s", exc)
+            if getattr(self, "_stream_poll_active", False):
+                self._poll_job = self.root.after(3000, self._run_status_poll)
+
+        self._submit_network_job(_job, on_success=_on_done, on_error=_on_error)
 
     def clear_frame(self):
         """Clear all widgets from root."""
