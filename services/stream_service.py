@@ -296,7 +296,9 @@ class StreamService:
                     self._active_device_name = request_device_name
                     self._policy_resume_armed = True
                     self._user_stopped = False
-                    self._last_heartbeat_at = time.monotonic()  # Fix 2: Always monitor from start
+                    # Panel starts (no device_id) never send heartbeats; keep
+                    # the monitor dormant so the stream isn't auto-stopped.
+                    self._last_heartbeat_at = time.monotonic() if request_device_id else 0.0
                     log_system(
                         "stream_takeover_complete",
                         {
@@ -381,7 +383,9 @@ class StreamService:
                 self._active_device_id = request_device_id
                 self._active_device_name = request_device_name
                 self._policy_resume_armed = True
-                self._last_heartbeat_at = time.monotonic()  # Fix 2: Always monitor from start
+                # Panel starts (no device_id) never send heartbeats; keep
+                # the monitor dormant so the stream isn't auto-stopped.
+                self._last_heartbeat_at = time.monotonic() if request_device_id else 0.0
                 log_system(
                     "stream_started",
                     {

@@ -81,13 +81,17 @@ class TestPanelStart:
         st = svc.status()
         assert st["owner_device_id"] is None
 
-    def test_start_without_device_id_starts_heartbeat_monitoring(
+    def test_panel_start_without_device_id_leaves_heartbeat_dormant(
         self, mock_manager, mock_player
     ):
-        """Fix 2: _last_heartbeat_at initialised even without device_id."""
+        """Panel starts (no device_id) must not arm the heartbeat monitor.
+
+        The web panel never sends heartbeats, so _last_heartbeat_at must stay
+        at 0.0 to prevent the auto-stop from firing after HEARTBEAT_TIMEOUT.
+        """
         svc = _make_service(mock_manager, mock_player)
         svc.start()
-        assert svc._last_heartbeat_at > 0.0
+        assert svc._last_heartbeat_at == 0.0
 
     def test_panel_start_when_idle_calls_receiver_once(
         self, mock_manager, mock_player
