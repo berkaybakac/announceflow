@@ -718,38 +718,60 @@ class TestHeartbeatRoute:
     def test_heartbeat_accepted_returns_200(self, mock_svc, client):
         mock_svc.heartbeat.return_value = {
             "accepted": True,
+            "reason": None,
             "status": StreamStatus(active=True, state="live").to_dict(),
+            "control": {"command": None},
         }
         resp = client.post(
             "/api/stream/heartbeat",
             headers={"X-Stream-Device-Id": "dev-1"},
         )
         assert resp.status_code == 200
-        mock_svc.heartbeat.assert_called_once_with(device_id="dev-1", device_name=None)
+        data = resp.get_json()
+        assert data["success"] is True
+        assert data["accepted"] is True
+        mock_svc.heartbeat.assert_called_once_with(
+            device_id="dev-1",
+            device_name=None,
+            last_applied_generation=None,
+            last_command_id=None,
+            last_command_result=None,
+            last_command_error=None,
+            sender_running=None,
+        )
 
     @patch("routes.stream_routes._stream_service")
-    def test_heartbeat_not_owner_returns_409(self, mock_svc, client):
+    def test_heartbeat_not_owner_returns_200_with_reason(self, mock_svc, client):
         mock_svc.heartbeat.return_value = {
             "accepted": False,
             "reason": "not_owner",
             "owner_device_id": "dev-1",
             "status": StreamStatus().to_dict(),
+            "control": {"command": None},
         }
         resp = client.post(
             "/api/stream/heartbeat",
             headers={"X-Stream-Device-Id": "dev-2"},
         )
-        assert resp.status_code == 409
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["accepted"] is False
+        assert data["reason"] == "not_owner"
+        assert data["owner_device_id"] == "dev-1"
 
     @patch("routes.stream_routes._stream_service")
-    def test_heartbeat_no_stream_returns_400(self, mock_svc, client):
+    def test_heartbeat_no_stream_returns_200_with_reason(self, mock_svc, client):
         mock_svc.heartbeat.return_value = {
             "accepted": False,
             "reason": "no_active_stream",
             "status": StreamStatus().to_dict(),
+            "control": {"command": None},
         }
         resp = client.post("/api/stream/heartbeat")
-        assert resp.status_code == 400
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["accepted"] is False
+        assert data["reason"] == "no_active_stream"
 
     def test_heartbeat_requires_login(self):
         """Heartbeat endpoint must reject unauthenticated requests."""
@@ -763,28 +785,50 @@ class TestHeartbeatRoute:
     def test_heartbeat_forwards_device_header(self, mock_svc, client):
         mock_svc.heartbeat.return_value = {
             "accepted": True,
+            "reason": None,
             "status": StreamStatus(active=True, state="live").to_dict(),
+            "control": {"command": None},
         }
         client.post(
             "/api/stream/heartbeat",
             headers={"X-Stream-Device-Id": "dev-xyz"},
         )
-        mock_svc.heartbeat.assert_called_once_with(device_id="dev-xyz", device_name=None)
+        mock_svc.heartbeat.assert_called_once_with(
+            device_id="dev-xyz",
+            device_name=None,
+            last_applied_generation=None,
+            last_command_id=None,
+            last_command_result=None,
+            last_command_error=None,
+            sender_running=None,
+        )
 
     @patch("routes.stream_routes._stream_service")
     def test_heartbeat_without_device_header_passes_none(self, mock_svc, client):
         mock_svc.heartbeat.return_value = {
             "accepted": True,
+            "reason": None,
             "status": StreamStatus(active=True, state="live").to_dict(),
+            "control": {"command": None},
         }
         client.post("/api/stream/heartbeat")
-        mock_svc.heartbeat.assert_called_once_with(device_id=None, device_name=None)
+        mock_svc.heartbeat.assert_called_once_with(
+            device_id=None,
+            device_name=None,
+            last_applied_generation=None,
+            last_command_id=None,
+            last_command_result=None,
+            last_command_error=None,
+            sender_running=None,
+        )
 
     @patch("routes.stream_routes._stream_service")
     def test_heartbeat_forwards_device_name_header(self, mock_svc, client):
         mock_svc.heartbeat.return_value = {
             "accepted": True,
+            "reason": None,
             "status": StreamStatus(active=True, state="live").to_dict(),
+            "control": {"command": None},
         }
         client.post(
             "/api/stream/heartbeat",
@@ -793,7 +837,15 @@ class TestHeartbeatRoute:
                 "X-Stream-Device-Name": "Kasa-2",
             },
         )
-        mock_svc.heartbeat.assert_called_once_with(device_id="dev-1", device_name="Kasa-2")
+        mock_svc.heartbeat.assert_called_once_with(
+            device_id="dev-1",
+            device_name="Kasa-2",
+            last_applied_generation=None,
+            last_command_id=None,
+            last_command_result=None,
+            last_command_error=None,
+            sender_running=None,
+        )
 
 
 # --------------- Playlist stream guard ---------------
