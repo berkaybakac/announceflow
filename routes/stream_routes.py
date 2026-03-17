@@ -29,7 +29,11 @@ _stream_service = get_stream_service()
 @stream_bp.route("/api/stream/start", methods=["POST"])
 @login_required
 def stream_start():
-    """Start a stream session."""
+    """Start stream.
+
+    Agent call (device header present): immediate receiver start.
+    Panel call (no device header): desired-state command queued for agent.
+    """
     correlation_id = request.headers.get("X-Stream-Correlation-Id", "").strip() or None
     device_id = request.headers.get("X-Stream-Device-Id", "").strip() or None
     device_name = request.headers.get("X-Stream-Device-Name", "").strip() or None
@@ -40,9 +44,25 @@ def stream_start():
             device_name=device_name,
         )
     else:
-        result = _stream_service.start(device_name=device_name)
+        payload = request.get_json(silent=True) or {}
+        target_device_id = None
+        if isinstance(payload, dict):
+            target_device_id = str(payload.get("target_device_id") or "").strip() or None
+        result = _stream_service.request_remote_state(
+            should_stream=True,
+            issued_by="panel",
+            target_device_id=target_device_id,
+        )
+        if not isinstance(result, dict):
+            # Test doubles that don't implement request_remote_state yet.
+            result = _stream_service.start(device_name=device_name)
     if result["success"]:
-        return _json_success(status=result["status"])
+        control = result.get("control")
+        if not isinstance(control, dict):
+            control = None
+        return _json_success(status=result["status"], control=control)
+    if result.get("error") == "no_agent_available":
+        return _json_error("no_agent_available", status=409)
     if result.get("error") == "stream_already_live":
         return _json_error("stream_already_live", status=409)
     if result.get("error") == "takeover_in_progress":
@@ -56,10 +76,34 @@ def stream_start():
 @stream_bp.route("/api/stream/stop", methods=["POST"])
 @login_required
 def stream_stop():
-    """Stop the active stream session."""
-    result = _stream_service.stop()
+    """Stop stream.
+
+    Agent call (device header present): immediate receiver stop.
+    Panel call (no device header): desired-state command queued for agent.
+    """
+    device_id = request.headers.get("X-Stream-Device-Id", "").strip() or None
+    if device_id:
+        result = _stream_service.stop()
+    else:
+        payload = request.get_json(silent=True) or {}
+        target_device_id = None
+        if isinstance(payload, dict):
+            target_device_id = str(payload.get("target_device_id") or "").strip() or None
+        result = _stream_service.request_remote_state(
+            should_stream=False,
+            issued_by="panel",
+            target_device_id=target_device_id,
+        )
+        if not isinstance(result, dict):
+            # Test doubles that don't implement request_remote_state yet.
+            result = _stream_service.stop()
     if result["success"]:
-        return _json_success(status=result["status"])
+        control = result.get("control")
+        if not isinstance(control, dict):
+            control = None
+        return _json_success(status=result["status"], control=control)
+    if result.get("error") == "no_agent_available":
+        return _json_error("no_agent_available", status=409)
     return _json_error(
         result["status"].get("last_error", "stream_stop_failed"),
         status=500,
@@ -76,25 +120,47 @@ def stream_status():
 @stream_bp.route("/api/stream/heartbeat", methods=["POST"])
 @login_required
 def stream_heartbeat():
-    """Record a sender heartbeat to keep the stream alive.
-
-    Senders call this every ~5 s while streaming.  If no heartbeat is
-    received for HEARTBEAT_TIMEOUT (15 s), the stream is auto-stopped.
-
-    Header:
-        X-Stream-Device-Id: <device_id>  (same value used in /start)
-
-    Responses:
-        200  heartbeat accepted
-        409  caller is not the current stream owner
-        400  no stream is currently active
-    """
+    """Process keepalive + control poll over a single agent heartbeat."""
     device_id = request.headers.get("X-Stream-Device-Id", "").strip() or None
     device_name = request.headers.get("X-Stream-Device-Name", "").strip() or None
-    result = _stream_service.heartbeat(device_id=device_id, device_name=device_name)
-    if result["accepted"]:
-        return _json_success(status=result["status"])
-    reason = result.get("reason", "heartbeat_rejected")
-    if reason == "not_owner":
-        return _json_error("not_stream_owner", status=409)
-    return _json_error(reason, status=400)
+    last_applied_raw = (
+        request.headers.get("X-Stream-Last-Applied-Generation", "").strip() or None
+    )
+    last_applied_generation = None
+    if last_applied_raw is not None:
+        try:
+            last_applied_generation = int(last_applied_raw)
+        except ValueError:
+            last_applied_generation = None
+    last_command_id = request.headers.get("X-Stream-Last-Command-Id", "").strip() or None
+    last_command_result = (
+        request.headers.get("X-Stream-Last-Command-Result", "").strip() or None
+    )
+    last_command_error = (
+        request.headers.get("X-Stream-Last-Command-Error", "").strip() or None
+    )
+    sender_running_raw = (
+        request.headers.get("X-Stream-Sender-Running", "").strip().lower() or None
+    )
+    sender_running = None
+    if sender_running_raw in {"1", "true", "yes", "on"}:
+        sender_running = True
+    elif sender_running_raw in {"0", "false", "no", "off"}:
+        sender_running = False
+
+    result = _stream_service.heartbeat(
+        device_id=device_id,
+        device_name=device_name,
+        last_applied_generation=last_applied_generation,
+        last_command_id=last_command_id,
+        last_command_result=last_command_result,
+        last_command_error=last_command_error,
+        sender_running=sender_running,
+    )
+    return _json_success(
+        status=result.get("status"),
+        accepted=result.get("accepted"),
+        reason=result.get("reason"),
+        owner_device_id=result.get("owner_device_id"),
+        control=result.get("control"),
+    )
