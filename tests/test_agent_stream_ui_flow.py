@@ -593,6 +593,115 @@ def _capture_poll_on_done(gui):
     return captured_on_done, submit_calls
 
 
+def _capture_poll_callbacks(gui):
+    """Capture both status poll callbacks without executing jobs."""
+    captured_on_done = None
+    captured_on_error = None
+
+    def fake_submit(fn, *, on_success=None, on_error=None):
+        nonlocal captured_on_done, captured_on_error
+        captured_on_done = on_success
+        captured_on_error = on_error
+
+    gui._submit_network_job = fake_submit
+    gui._run_status_poll()
+    return captured_on_done, captured_on_error
+
+
+def _capture_heartbeat_callbacks(gui):
+    """Capture heartbeat callbacks and any follow-up submits."""
+    captured_on_done = None
+    submit_calls = []
+
+    def fake_submit(fn, *, on_success=None, on_error=None):
+        nonlocal captured_on_done
+        submit_calls.append((fn, on_success, on_error))
+        if len(submit_calls) == 1:
+            captured_on_done = on_success
+
+    gui._submit_network_job = fake_submit
+    gui._run_heartbeat()
+    return captured_on_done, submit_calls
+
+
+# --------------- 9b. Heartbeat remote-stop handling -----------------------
+
+
+class TestHeartbeatRemoteStop:
+    def test_no_active_stream_deactivates_local_stream(self):
+        gui = _make_gui_for_polling()
+        gui._stream_active = True
+        fake_job_id = object()
+        gui._heartbeat_job = fake_job_id
+
+        on_done, submits = _capture_heartbeat_callbacks(gui)
+        assert on_done is not None
+
+        on_done(
+            {
+                "success": False,
+                "error": "no_active_stream",
+                "status": {"active": False, "state": "idle"},
+            }
+        )
+
+        # Heartbeat is stopped and local stream is marked inactive.
+        gui.root.after_cancel.assert_called_with(fake_job_id)
+        assert gui._heartbeat_job is None
+        assert gui._stream_active is False
+
+        # stop_sender job must be submitted after heartbeat response.
+        assert len(submits) >= 2
+        stop_fn, _, _ = submits[1]
+        stop_fn()
+        gui._stream_client.stop_sender.assert_called_once()
+
+    def test_inactive_status_payload_also_deactivates(self):
+        gui = _make_gui_for_polling()
+        gui._stream_active = True
+
+        on_done, submits = _capture_heartbeat_callbacks(gui)
+        assert on_done is not None
+
+        on_done(
+            {
+                "success": False,
+                "error": "heartbeat_failed",
+                "status": {"active": False, "state": "error"},
+            }
+        )
+
+        assert gui._stream_active is False
+        assert len(submits) >= 2
+        stop_fn, _, _ = submits[1]
+        stop_fn()
+        gui._stream_client.stop_sender.assert_called_once()
+
+
+# --------------- 9c. Status poll error resiliency -------------------------
+
+
+class TestStatusPollResiliency:
+    def test_status_poll_on_error_reschedules_polling(self):
+        gui = _make_gui_for_polling()
+        _, on_error = _capture_poll_callbacks(gui)
+        assert on_error is not None
+
+        on_error(RuntimeError("network"))
+
+        gui.root.after.assert_called_once_with(3000, gui._run_status_poll)
+
+    def test_status_poll_non_dict_payload_does_not_crash(self):
+        gui = _make_gui_for_polling()
+        on_done, _ = _capture_poll_on_done(gui)
+        assert on_done is not None
+
+        on_done("invalid-payload")
+
+        assert gui._stream_active is False
+        gui.root.after.assert_called_with(3000, gui._run_status_poll)
+
+
 # --------------- 10. External stop detection (panel/panel stop) ---------------
 
 

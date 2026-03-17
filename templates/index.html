@@ -714,7 +714,7 @@
 
     // ============ YAYIN KONTROLÜ ============
 
-    const STREAM_POLL_INTERVAL_MS = 4000;
+    const STREAM_POLL_INTERVAL_MS = 3000;
     const STREAM_REQUEST_TIMEOUT_MS = 3000;
     let streamPollTimer = null;
     let streamPollInFlight = false;
@@ -843,8 +843,12 @@
 
     async function runStreamPoll() {
         if (!streamPollingEnabled || document.visibilityState === 'hidden') return;
-        await updateStreamState();
-        scheduleNextStreamPoll();
+        try {
+            await updateStreamState();
+        } finally {
+            // Always re-arm polling so transient fetch failures don't kill the loop.
+            scheduleNextStreamPoll();
+        }
     }
 
     function stopStreamPolling() {
