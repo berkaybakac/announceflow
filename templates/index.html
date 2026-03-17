@@ -723,6 +723,7 @@
         stream_already_live: 'Yayın zaten aktif.',
         takeover_in_progress: 'Yayın devri sürüyor, birkaç saniye sonra tekrar deneyin.',
         stream_stop_failed: 'Yayın durdurulamadı. Tekrar deneyin.',
+        no_agent_available: 'Agent çevrimdışı. Windows uygulamasının açık olduğundan emin olun.',
     };
     let streamPollTimer = null;
     let streamPollInFlight = false;
@@ -799,13 +800,22 @@
         const state = data.state || 'idle';
         const owner = data.owner_device_id;
         const cfg = _STREAM_STATE_CONFIG[state] || _STREAM_STATE_CONFIG.idle;
+        const pendingRemoteCommand = (state === 'idle' && data.command_status === 'pending');
 
-        badge.textContent = cfg.badgeText;
-        badge.className = `badge ${cfg.badgeClass}`.trim();
+        if (pendingRemoteCommand) {
+            const desired = (data.desired_stream_state || '').toLowerCase();
+            badge.textContent = desired === 'on' ? 'Başlatma Bekliyor' : 'Durdurma Bekliyor';
+            badge.className = 'badge badge-warning';
+        } else {
+            badge.textContent = cfg.badgeText;
+            badge.className = `badge ${cfg.badgeClass}`.trim();
+        }
 
         if (state === 'live') {
             const displayName = data.owner_device_name || owner;
             ownerLabel.textContent = displayName ? `Cihaz: ${escapeHtml(displayName)}` : 'Panel';
+        } else if (pendingRemoteCommand) {
+            ownerLabel.textContent = 'Agent komutu bekleniyor';
         } else if (state === 'paused_for_announcement') {
             ownerLabel.textContent = 'Anons için duraklıyor';
         } else if (state === 'stopped_by_policy') {
@@ -888,10 +898,12 @@
         btn.textContent = 'Başlatılıyor...';
         try {
             const resp = await fetchAction('/api/stream/start', { method: 'POST' }, 10000);
+            const data = await resp.json().catch(() => ({}));
             if (!resp.ok) {
-                const data = await resp.json().catch(() => ({}));
                 showToast(getStreamErrorMessage(data.error, 'Yayın başlatılamadı.'), 'error');
                 logStreamInternalError('start', data.error);
+            } else if (data && data.control && data.control.command_status === 'pending') {
+                showToast('Komut Agent\'a iletildi, uygulanması bekleniyor...', 'info');
             }
             await updateStreamState();
         } catch (err) {
@@ -912,10 +924,12 @@
         btn.textContent = 'Durduruluyor...';
         try {
             const resp = await fetchAction('/api/stream/stop', { method: 'POST' }, 10000);
+            const data = await resp.json().catch(() => ({}));
             if (!resp.ok) {
-                const data = await resp.json().catch(() => ({}));
                 showToast(getStreamErrorMessage(data.error, 'Yayın durdurulamadı.'), 'error');
                 logStreamInternalError('stop', data.error);
+            } else if (data && data.control && data.control.command_status === 'pending') {
+                showToast('Durdurma komutu Agent\'a iletildi...', 'info');
             }
             await updateStreamState();
         } catch (err) {

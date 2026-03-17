@@ -547,7 +547,13 @@ def _make_gui_for_polling():
     gui._stream_poll_active = True
     gui._last_known_owner = None
     gui._heartbeat_job = None
+    gui._heartbeat_in_flight = False
     gui._poll_job = None
+    gui._last_applied_generation = 0
+    gui._last_command_id = None
+    gui._last_command_result = None
+    gui._last_command_error = None
+    gui._control_command_inflight_id = None
     gui._btn_stream_start = None
     gui._btn_stream_stop = None
     gui._btn_music_start = None
@@ -645,9 +651,9 @@ class TestHeartbeatRemoteStop:
             }
         )
 
-        # Heartbeat is stopped and local stream is marked inactive.
-        gui.root.after_cancel.assert_called_with(fake_job_id)
-        assert gui._heartbeat_job is None
+        # Control heartbeat stays alive; only local stream is marked inactive.
+        gui.root.after_cancel.assert_not_called()
+        assert gui._heartbeat_job is not None
         assert gui._stream_active is False
 
         # stop_sender job must be submitted after heartbeat response.
@@ -773,8 +779,8 @@ class TestStatusPollExternalStop:
         assert gui._stream_active is True
         gui._stream_client.stop_sender.assert_not_called()
 
-    def test_idle_stops_heartbeat_but_keeps_poll(self):
-        """On external idle stop, heartbeat is cancelled but poll stays active."""
+    def test_idle_keeps_heartbeat_and_poll_active(self):
+        """On external idle stop, control heartbeat remains active for remote commands."""
         gui = _make_gui_for_polling()
         fake_job_id = object()
         gui._heartbeat_job = fake_job_id
@@ -783,8 +789,8 @@ class TestStatusPollExternalStop:
 
         on_done({"active": False, "state": "idle", "owner_device_id": None})
 
-        gui.root.after_cancel.assert_called_with(fake_job_id)
-        assert gui._heartbeat_job is None
+        gui.root.after_cancel.assert_not_called()
+        assert gui._heartbeat_job == fake_job_id
         # Poll should still be active for auto-resume
         assert gui._stream_poll_active is True
 

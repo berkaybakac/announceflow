@@ -765,7 +765,19 @@ class AnnounceFlowAgent:
 
     def stop_stream_with_details(self) -> Dict[str, Any]:
         """Stop stream receiver on server and return structured result."""
-        response = self._request("POST", "/api/stream/stop", auth_required=True)
+        headers = {}
+        device_id = getattr(self, "device_id", None)
+        if isinstance(device_id, str) and device_id.strip():
+            headers["X-Stream-Device-Id"] = device_id.strip()
+        device_name = getattr(self, "device_name", None)
+        if isinstance(device_name, str) and device_name.strip():
+            headers["X-Stream-Device-Name"] = device_name.strip()
+        response = self._request(
+            "POST",
+            "/api/stream/stop",
+            auth_required=True,
+            headers=headers if headers else None,
+        )
         if response is None:
             return {"success": False, "error": "api_stop_failed"}
         try:
@@ -787,7 +799,15 @@ class AnnounceFlowAgent:
             result["error"] = payload.get("error", "api_stop_failed")
         return result
 
-    def send_heartbeat_with_details(self) -> Dict[str, Any]:
+    def send_heartbeat_with_details(
+        self,
+        *,
+        last_applied_generation: Optional[int] = None,
+        last_command_id: Optional[str] = None,
+        last_command_result: Optional[str] = None,
+        last_command_error: Optional[str] = None,
+        sender_running: Optional[bool] = None,
+    ) -> Dict[str, Any]:
         """Send stream heartbeat and return structured result."""
         device_id = getattr(self, "device_id", None)
         headers = {}
@@ -796,6 +816,16 @@ class AnnounceFlowAgent:
         device_name = getattr(self, "device_name", None)
         if isinstance(device_name, str) and device_name.strip():
             headers["X-Stream-Device-Name"] = device_name.strip()
+        if isinstance(last_applied_generation, int):
+            headers["X-Stream-Last-Applied-Generation"] = str(last_applied_generation)
+        if isinstance(last_command_id, str) and last_command_id.strip():
+            headers["X-Stream-Last-Command-Id"] = last_command_id.strip()
+        if isinstance(last_command_result, str) and last_command_result.strip():
+            headers["X-Stream-Last-Command-Result"] = last_command_result.strip()
+        if isinstance(last_command_error, str) and last_command_error.strip():
+            headers["X-Stream-Last-Command-Error"] = last_command_error.strip()
+        if isinstance(sender_running, bool):
+            headers["X-Stream-Sender-Running"] = "true" if sender_running else "false"
 
         response = self._request(
             "POST",
@@ -820,7 +850,11 @@ class AnnounceFlowAgent:
             return {
                 "success": True,
                 "http_status": http_status,
+                "accepted": bool(payload.get("accepted")),
+                "reason": payload.get("reason"),
                 "status": payload.get("status"),
+                "control": payload.get("control"),
+                "owner_device_id": payload.get("owner_device_id"),
             }
 
         return {
@@ -942,7 +976,13 @@ class AgentGUI:
         self._last_known_owner: Optional[str] = None
         self._music_active = False
         self._heartbeat_job = None
+        self._heartbeat_in_flight = False
         self._poll_job = None
+        self._last_applied_generation = 0
+        self._last_command_id: Optional[str] = None
+        self._last_command_result: Optional[str] = None
+        self._last_command_error: Optional[str] = None
+        self._control_command_inflight_id: Optional[str] = None
         self._volume_poll_active = False
         self._volume_poll_job = None
         self._volume_poll_failures = 0
@@ -1593,6 +1633,7 @@ class AgentGUI:
         if not self._stream_poll_active:
             self._stream_poll_active = True
             self._run_status_poll()
+        self._ensure_heartbeat_loop(delay_ms=500)
 
         # ── Status Bar ──
         status_frame = tk.Frame(self.root, bg=_BG_HEADER, pady=6)
@@ -1970,7 +2011,7 @@ class AgentGUI:
         if not self._stream_poll_active:
             self._stream_poll_active = True
             self._run_status_poll()
-        self._heartbeat_job = self.root.after(4500, self._run_heartbeat)
+        self._ensure_heartbeat_loop(delay_ms=500)
 
     def _stop_stream_polling_loops(self):
         self._stream_poll_active = False
@@ -1991,6 +2032,13 @@ class AgentGUI:
                 pass
             self._heartbeat_job = None
 
+    def _ensure_heartbeat_loop(self, delay_ms: int = 4500):
+        if not self._root_alive() or not getattr(self, "_stream_poll_active", False):
+            return
+        if self._heartbeat_job is not None:
+            return
+        self._heartbeat_job = self.root.after(max(200, int(delay_ms)), self._run_heartbeat)
+
     def _deactivate_local_stream(
         self,
         *,
@@ -2002,7 +2050,6 @@ class AgentGUI:
         """Apply remote/local stream-off state consistently in UI and loops."""
         was_active = bool(self._stream_active)
         self._stream_active = False
-        self._stop_heartbeat_only()
         self._refresh_stream_buttons()
         stream_logger.info(
             "stream_local_deactivate reason=%s was_active=%s stop_sender=%s",
@@ -2024,33 +2071,269 @@ class AgentGUI:
                 lambda: self._stream_client.stop_sender(),
                 on_success=(lambda _: _emit_status()) if status_message else None,
             )
+            self._ensure_heartbeat_loop(delay_ms=500)
             return
 
         _emit_status()
+        self._ensure_heartbeat_loop(delay_ms=500)
 
-    def _run_heartbeat(self):
-        """Send a heartbeat. Loop if still active."""
-        if not self._stream_active or not self._root_alive():
+    def _record_remote_command_result(
+        self,
+        *,
+        generation: int,
+        command_id: str,
+        result: str,
+        error: Optional[str] = None,
+    ) -> None:
+        self._last_applied_generation = max(self._last_applied_generation, int(generation))
+        self._last_command_id = command_id
+        self._last_command_result = result
+        self._last_command_error = error
+        self._control_command_inflight_id = None
+
+    def _dispatch_control_command(self, control: Any) -> None:
+        if not isinstance(control, dict):
+            return
+        command = control.get("command")
+        if not isinstance(command, dict):
             return
 
+        command_id = str(command.get("id") or "").strip()
+        action = str(command.get("action") or "").strip()
+        target_device_id = str(command.get("target_device_id") or "").strip() or None
+        generation_raw = command.get("generation")
+        try:
+            generation = int(generation_raw)
+        except (TypeError, ValueError):
+            generation = 0
+
+        if not command_id or not action or generation <= 0:
+            return
+        if generation <= self._last_applied_generation:
+            return
+        if self._control_command_inflight_id == command_id:
+            return
+
+        my_device_id = getattr(self.agent, "device_id", None)
+        if target_device_id and my_device_id and target_device_id != my_device_id:
+            return
+
+        self._control_command_inflight_id = command_id
+        stream_logger.info(
+            "stream_control_command_received id=%s action=%s generation=%s target=%s",
+            command_id,
+            action,
+            generation,
+            target_device_id or "any",
+        )
+
+        if action == "start_stream":
+
+            def _job():
+                if self._stream_active and self._stream_client.is_alive():
+                    return {"ok": True, "noop": True}
+                host = self._resolve_stream_host()
+                correlation_id = f"agent-remote-{int(time.time() * 1000)}"
+                api_result = self.agent.start_stream_with_details(
+                    correlation_id=correlation_id
+                )
+                if not api_result.get("success"):
+                    return {
+                        "ok": False,
+                        "error": str(api_result.get("error") or "api_start_failed"),
+                    }
+                sender_ok = self._stream_client.start_sender(
+                    host, 5800, correlation_id=correlation_id
+                )
+                if not sender_ok:
+                    rollback = self.agent.stop_stream_with_details()
+                    return {
+                        "ok": False,
+                        "error": str(self._stream_client.last_error or "sender_start_failed"),
+                        "rollback": rollback,
+                    }
+                time.sleep(0.8)
+                if not self._stream_client.is_alive():
+                    self._stream_client.record_external_failure(
+                        "capture_thread_died",
+                        "Capture thread ended shortly after startup",
+                    )
+                    rollback = self.agent.stop_stream_with_details()
+                    return {
+                        "ok": False,
+                        "error": "capture_thread_died",
+                        "rollback": rollback,
+                    }
+                return {"ok": True}
+
+            def _on_done(payload):
+                if not self._root_alive():
+                    return
+                if not isinstance(payload, dict):
+                    payload = {"ok": bool(payload)}
+                if payload.get("ok"):
+                    self._stream_active = True
+                    self._last_known_owner = None
+                    self._start_stream_polling_loops()
+                    self._refresh_stream_buttons()
+                    self._show_status("Uzaktan komut: yayın başlatıldı")
+                    self._record_remote_command_result(
+                        generation=generation,
+                        command_id=command_id,
+                        result="applied",
+                    )
+                else:
+                    err = str(payload.get("error") or "remote_start_failed")
+                    self._show_status("Uzaktan başlatma başarısız", error=True)
+                    self._record_remote_command_result(
+                        generation=generation,
+                        command_id=command_id,
+                        result="failed",
+                        error=err,
+                    )
+                self._ensure_heartbeat_loop(delay_ms=400)
+
+            self._submit_network_job(_job, on_success=_on_done)
+            return
+
+        if action == "stop_stream":
+
+            def _job():
+                sender_ok = self._stream_client.stop_sender()
+                api_result = self.agent.stop_stream_with_details()
+                api_ok = bool(api_result.get("success"))
+                if sender_ok and api_ok:
+                    return {"ok": True}
+                return {
+                    "ok": False,
+                    "error": str(
+                        (api_result.get("error") if not api_ok else None)
+                        or (self._stream_client.last_error if not sender_ok else None)
+                        or "remote_stop_failed"
+                    ),
+                }
+
+            def _on_done(payload):
+                if not self._root_alive():
+                    return
+                if not isinstance(payload, dict):
+                    payload = {"ok": bool(payload)}
+                self._stream_active = False
+                self._refresh_stream_buttons()
+                if payload.get("ok"):
+                    self._show_status("Uzaktan komut: yayın durduruldu")
+                    self._record_remote_command_result(
+                        generation=generation,
+                        command_id=command_id,
+                        result="applied",
+                    )
+                else:
+                    err = str(payload.get("error") or "remote_stop_failed")
+                    self._show_status("Uzaktan durdurma başarısız", error=True)
+                    self._record_remote_command_result(
+                        generation=generation,
+                        command_id=command_id,
+                        result="failed",
+                        error=err,
+                    )
+                self._ensure_heartbeat_loop(delay_ms=400)
+
+            self._submit_network_job(_job, on_success=_on_done)
+            return
+
+        self._record_remote_command_result(
+            generation=generation,
+            command_id=command_id,
+            result="failed",
+            error=f"unsupported_action:{action}",
+        )
+
+    def _run_heartbeat(self):
+        """Send control heartbeat (always-on while logged in)."""
+        self._heartbeat_job = None
+        if not self._root_alive() or not getattr(self, "_stream_poll_active", False):
+            return
+        if self._heartbeat_in_flight:
+            self._ensure_heartbeat_loop(delay_ms=800)
+            return
+        self._heartbeat_in_flight = True
+
         def _job():
-            return self.agent.send_heartbeat_with_details()
+            sender_running = bool(self._stream_active and self._stream_client.is_alive())
+            return self.agent.send_heartbeat_with_details(
+                last_applied_generation=self._last_applied_generation,
+                last_command_id=self._last_command_id,
+                last_command_result=self._last_command_result,
+                last_command_error=self._last_command_error,
+                sender_running=sender_running,
+            )
+
+        def _finalize(delay_ms: int = 4500):
+            self._heartbeat_in_flight = False
+            self._ensure_heartbeat_loop(delay_ms=delay_ms)
 
         def _on_done(result):
             if not self._root_alive():
+                self._heartbeat_in_flight = False
                 return
             if not isinstance(result, dict):
                 result = {"success": bool(result)}
             success = bool(result.get("success"))
             if not success:
-                error_code = str(result.get("error", "")).strip()
+                error_code = str(result.get("error") or "").strip()
                 status_payload = result.get("status")
                 if not isinstance(status_payload, dict):
                     status_payload = {}
                 remote_state = str(status_payload.get("state", "")).strip()
                 remote_active = bool(status_payload.get("active"))
-                remote_stopped = bool(status_payload) and (not remote_active) and remote_state in ("idle", "error")
-                if error_code == "not_stream_owner":
+                remote_stopped = (
+                    bool(status_payload)
+                    and (not remote_active)
+                    and remote_state in ("idle", "error")
+                )
+                if self._stream_active and error_code == "not_stream_owner":
+                    self._deactivate_local_stream(
+                        reason="heartbeat_not_stream_owner_legacy",
+                        status_message="Yayın başka bir cihaza devredildi!",
+                        status_error=True,
+                        stop_sender=True,
+                    )
+                elif self._stream_active and (
+                    error_code == "no_active_stream" or remote_stopped
+                ):
+                    self._deactivate_local_stream(
+                        reason=f"heartbeat_remote_stop_legacy:{error_code or remote_state or 'unknown'}",
+                        status_message=(
+                            "Yayın bağlantısı kesildi"
+                            if remote_state == "error"
+                            else "Yayın durduruldu"
+                        ),
+                        status_error=(remote_state == "error"),
+                        stop_sender=True,
+                    )
+                logger.warning(
+                    "Agent stream heartbeat failed (error=%s, status=%s)",
+                    error_code or "unknown",
+                    result.get("http_status"),
+                )
+                _finalize(delay_ms=4500)
+                return
+
+            accepted = bool(result.get("accepted"))
+            reason = str(result.get("reason") or "").strip()
+            status_payload = result.get("status")
+            if not isinstance(status_payload, dict):
+                status_payload = {}
+            remote_state = str(status_payload.get("state", "")).strip()
+            remote_active = bool(status_payload.get("active"))
+            remote_stopped = (
+                bool(status_payload)
+                and (not remote_active)
+                and remote_state in ("idle", "error")
+            )
+
+            if self._stream_active and not accepted:
+                if reason == "not_owner":
                     stream_logger.info(
                         "stream_heartbeat_not_owner: stopping local sender"
                     )
@@ -2060,33 +2343,33 @@ class AgentGUI:
                         status_error=True,
                         stop_sender=True,
                     )
-                elif error_code == "no_active_stream" or remote_stopped:
+                elif reason == "no_active_stream" or remote_stopped:
                     message = (
                         "Yayın bağlantısı kesildi"
                         if remote_state == "error"
                         else "Yayın durduruldu"
                     )
                     stream_logger.info(
-                        "stream_heartbeat_remote_stop error=%s state=%s",
-                        error_code or "-",
+                        "stream_heartbeat_remote_stop reason=%s state=%s",
+                        reason or "-",
                         remote_state or "-",
                     )
                     self._deactivate_local_stream(
-                        reason=f"heartbeat_remote_stop:{error_code or remote_state or 'unknown'}",
+                        reason=f"heartbeat_remote_stop:{reason or remote_state or 'unknown'}",
                         status_message=message,
                         status_error=(remote_state == "error"),
                         stop_sender=True,
                     )
-                else:
-                    logger.warning(
-                        "Agent stream heartbeat failed (error=%s, status=%s)",
-                        error_code or "unknown",
-                        result.get("http_status"),
-                    )
-            if self._stream_active:
-                self._heartbeat_job = self.root.after(4500, self._run_heartbeat)
 
-        self._submit_network_job(_job, on_success=_on_done)
+            self._dispatch_control_command(result.get("control"))
+            _finalize(delay_ms=4500)
+
+        def _on_error(exc):
+            if self._root_alive():
+                logger.warning("Agent heartbeat job failed: %s", exc)
+            _finalize(delay_ms=4500)
+
+        self._submit_network_job(_job, on_success=_on_done, on_error=_on_error)
 
     def _run_status_poll(self):
         """Check stream state and react: takeover, external stop, or auto-resume.
