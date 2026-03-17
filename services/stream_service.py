@@ -14,7 +14,8 @@ V1 scope: single session, same LAN, no DB persistence for stream state.
 import logging
 import threading
 import time
-from typing import Optional
+from datetime import datetime, timezone
+from typing import Any, Dict, Optional
 
 from logger import log_error, log_system
 
@@ -25,10 +26,18 @@ logger = logging.getLogger(__name__)
 # (i.e. _last_heartbeat_at > 0), so senders that never call heartbeat
 # are never timed out — backward-compatible with old clients.
 HEARTBEAT_TIMEOUT = 15.0
+COMMAND_TTL_SECONDS = 45.0
+AGENT_ONLINE_TTL_SECONDS = 20.0
 
 
 def _new_correlation_id() -> str:
     return f"stream-{int(time.time() * 1000)}-{threading.get_ident()}"
+
+
+def _utc_iso(ts: float) -> str:
+    return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat(
+        timespec="seconds"
+    ).replace("+00:00", "Z")
 
 
 class StreamStatus:
@@ -87,6 +96,15 @@ class StreamService:
         # (old receiver stopped, new one not yet started).  Prevents a
         # concurrent start() from racing into an inconsistent state.
         self._mid_takeover: bool = False
+        # Desired-state command plane (panel -> agent).
+        self._desired_stream_on: bool = False
+        self._desired_generation: int = 0
+        self._desired_target_device_id: Optional[str] = None
+        self._desired_updated_at: float = 0.0
+        self._active_command_id: Optional[str] = None
+        self._command_status: str = "idle"  # idle|pending|applied|failed|expired
+        self._command_error: Optional[str] = None
+        self._agent_registry: Dict[str, Dict[str, Any]] = {}
         self._start_heartbeat_monitor()
 
     # ------------------------------------------------------------------
@@ -158,6 +176,169 @@ class StreamService:
         return bool(
             self._status.state == "stopped_by_policy" and self._active_correlation_id
         )
+
+    def _status_payload_unlocked(self) -> dict:
+        result = self._status.to_dict()
+        result["owner_device_id"] = self._active_device_id
+        result["owner_device_name"] = self._active_device_name
+        return result
+
+    def _online_agent_ids_unlocked(self) -> list[str]:
+        now = time.time()
+        stale_ids = []
+        online = []
+        for device_id, meta in self._agent_registry.items():
+            last_seen = float(meta.get("last_seen_at") or 0.0)
+            if now - last_seen <= AGENT_ONLINE_TTL_SECONDS:
+                online.append((device_id, last_seen))
+            else:
+                stale_ids.append(device_id)
+        for stale_id in stale_ids:
+            self._agent_registry.pop(stale_id, None)
+        online.sort(key=lambda item: item[1], reverse=True)
+        return [device_id for device_id, _ in online]
+
+    def _select_target_device_unlocked(
+        self, requested_device_id: Optional[str] = None
+    ) -> Optional[str]:
+        if requested_device_id:
+            return requested_device_id if requested_device_id in self._agent_registry else None
+        if self._active_device_id:
+            return self._active_device_id
+        online_ids = self._online_agent_ids_unlocked()
+        if online_ids:
+            return online_ids[0]
+        return None
+
+    def _new_command_id_unlocked(self) -> str:
+        return f"cmd-{self._desired_generation}-{int(time.time() * 1000)}"
+
+    def _set_desired_state_unlocked(
+        self,
+        *,
+        should_stream: bool,
+        target_device_id: str,
+        issued_by: str,
+    ) -> dict:
+        self._desired_generation += 1
+        self._desired_stream_on = bool(should_stream)
+        self._desired_target_device_id = target_device_id
+        self._desired_updated_at = time.time()
+        self._active_command_id = self._new_command_id_unlocked()
+        self._command_status = "pending"
+        self._command_error = None
+        action = "start_stream" if should_stream else "stop_stream"
+        command = {
+            "id": self._active_command_id,
+            "generation": self._desired_generation,
+            "action": action,
+            "target_device_id": target_device_id,
+            "issued_at": _utc_iso(self._desired_updated_at),
+            "expires_at": _utc_iso(self._desired_updated_at + COMMAND_TTL_SECONDS),
+        }
+        log_system(
+            "stream_desired_state_updated",
+            {
+                "desired_state": "on" if should_stream else "off",
+                "generation": self._desired_generation,
+                "target_device_id": target_device_id,
+                "command_id": self._active_command_id,
+                "issued_by": issued_by,
+            },
+        )
+        return command
+
+    def _build_control_envelope_unlocked(
+        self,
+        *,
+        request_device_id: Optional[str],
+    ) -> dict:
+        now = time.time()
+        if (
+            self._command_status == "pending"
+            and self._desired_updated_at > 0
+            and now - self._desired_updated_at > COMMAND_TTL_SECONDS
+        ):
+            self._command_status = "expired"
+            self._command_error = "command_ttl_expired"
+            log_error(
+                "stream_desired_command_expired",
+                {
+                    "command_id": self._active_command_id,
+                    "generation": self._desired_generation,
+                    "target_device_id": self._desired_target_device_id,
+                },
+            )
+
+        command = None
+        if (
+            request_device_id
+            and self._command_status == "pending"
+            and self._active_command_id
+            and self._desired_target_device_id
+            and request_device_id == self._desired_target_device_id
+        ):
+            meta = self._agent_registry.get(request_device_id) or {}
+            last_applied_generation = int(meta.get("last_applied_generation") or 0)
+            if last_applied_generation < self._desired_generation:
+                command = {
+                    "id": self._active_command_id,
+                    "generation": self._desired_generation,
+                    "action": "start_stream" if self._desired_stream_on else "stop_stream",
+                    "target_device_id": self._desired_target_device_id,
+                    "issued_at": _utc_iso(self._desired_updated_at),
+                    "expires_at": _utc_iso(self._desired_updated_at + COMMAND_TTL_SECONDS),
+                }
+
+        return {
+            "desired_generation": self._desired_generation,
+            "desired_stream_state": "on" if self._desired_stream_on else "off",
+            "target_device_id": self._desired_target_device_id,
+            "command_status": self._command_status,
+            "command_error": self._command_error,
+            "command": command,
+        }
+
+    def request_remote_state(
+        self,
+        *,
+        should_stream: bool,
+        issued_by: str = "panel",
+        target_device_id: Optional[str] = None,
+    ) -> dict:
+        with self._lock:
+            target = self._select_target_device_unlocked(target_device_id)
+            if not target:
+                return {
+                    "success": False,
+                    "error": "no_agent_available",
+                    "status": self._status_payload_unlocked(),
+                }
+
+            if (
+                self._command_status == "pending"
+                and self._desired_target_device_id == target
+                and self._desired_stream_on == bool(should_stream)
+            ):
+                control = self._build_control_envelope_unlocked(request_device_id=target)
+                return {
+                    "success": True,
+                    "status": self._status_payload_unlocked(),
+                    "control": control,
+                }
+
+            command = self._set_desired_state_unlocked(
+                should_stream=should_stream,
+                target_device_id=target,
+                issued_by=issued_by,
+            )
+            control = self._build_control_envelope_unlocked(request_device_id=target)
+            return {
+                "success": True,
+                "status": self._status_payload_unlocked(),
+                "control": control,
+                "command": command,
+            }
 
     # ------------------------------------------------------------------
     # Public API
@@ -296,6 +477,12 @@ class StreamService:
                     self._active_device_name = request_device_name
                     self._policy_resume_armed = True
                     self._user_stopped = False
+                    if request_device_id:
+                        self._desired_stream_on = True
+                        self._desired_target_device_id = request_device_id
+                    self._command_status = "idle"
+                    self._command_error = None
+                    self._active_command_id = None
                     # Panel starts (no device_id) never send heartbeats; keep
                     # the monitor dormant so the stream isn't auto-stopped.
                     self._last_heartbeat_at = time.monotonic() if request_device_id else 0.0
@@ -383,6 +570,12 @@ class StreamService:
                 self._active_device_id = request_device_id
                 self._active_device_name = request_device_name
                 self._policy_resume_armed = True
+                if request_device_id:
+                    self._desired_stream_on = True
+                    self._desired_target_device_id = request_device_id
+                self._command_status = "idle"
+                self._command_error = None
+                self._active_command_id = None
                 # Panel starts (no device_id) never send heartbeats; keep
                 # the monitor dormant so the stream isn't auto-stopped.
                 self._last_heartbeat_at = time.monotonic() if request_device_id else 0.0
@@ -471,6 +664,10 @@ class StreamService:
                 self._active_device_id = None
                 self._active_device_name = None
                 self._last_heartbeat_at = 0.0
+                self._desired_stream_on = False
+                self._command_status = "idle"
+                self._command_error = None
+                self._active_command_id = None
                 return {"success": True, "status": self._status.to_dict()}
 
             except Exception as exc:
@@ -526,51 +723,105 @@ class StreamService:
                         "owner_device_id": owner_device_id,
                     },
                 )
-            result = self._status.to_dict()
-            result["owner_device_id"] = self._active_device_id
-            result["owner_device_name"] = self._active_device_name
-            return result
+            return self._status_payload_unlocked()
 
-    def heartbeat(self, device_id: Optional[str] = None, device_name: Optional[str] = None) -> dict:
-        """Record a sender heartbeat to prevent auto-stop.
+    def heartbeat(
+        self,
+        device_id: Optional[str] = None,
+        device_name: Optional[str] = None,
+        *,
+        last_applied_generation: Optional[int] = None,
+        last_command_id: Optional[str] = None,
+        last_command_result: Optional[str] = None,
+        last_command_error: Optional[str] = None,
+        sender_running: Optional[bool] = None,
+    ) -> dict:
+        """Process agent heartbeat and return control-plane envelope.
 
-        Once called at least once, the heartbeat timer is active.  If no
-        heartbeat arrives within HEARTBEAT_TIMEOUT (15 s) the stream is
-        auto-stopped.  Senders that never call heartbeat are not monitored
-        (backward-compatible with old clients).
-
-        Returns:
-            dict with 'accepted' bool, optional 'reason', and 'status'.
+        The same endpoint now carries:
+        - Keepalive acceptance/rejection for active stream ownership
+        - Desired-state command envelope for remote start/stop
+        - Agent command-ack metadata (generation/result/error)
         """
         with self._lock:
             request_device_id = (
                 device_id.strip() if isinstance(device_id, str) else ""
             ) or None
-
-            active_states = {"live", "paused_for_announcement", "stopped_by_policy"}
-            if self._status.state not in active_states:
-                return {
-                    "accepted": False,
-                    "reason": "no_active_stream",
-                    "status": self._status.to_dict(),
-                }
-
-            if self._active_device_id is not None:
-                if request_device_id != self._active_device_id:
-                    return {
-                        "accepted": False,
-                        "reason": "not_owner",
-                        "owner_device_id": self._active_device_id,
-                        "status": self._status.to_dict(),
-                    }
-
-            self._last_heartbeat_at = time.monotonic()
             request_device_name = (
                 device_name.strip() if isinstance(device_name, str) else None
             )
-            if request_device_name:
-                self._active_device_name = request_device_name
-            return {"accepted": True, "status": self._status.to_dict()}
+            now_epoch = time.time()
+
+            if request_device_id:
+                meta = self._agent_registry.get(request_device_id)
+                if meta is None:
+                    meta = {
+                        "device_id": request_device_id,
+                        "device_name": request_device_name or request_device_id,
+                        "last_seen_at": now_epoch,
+                        "last_applied_generation": 0,
+                        "last_command_id": None,
+                        "last_command_result": None,
+                        "last_command_error": None,
+                        "sender_running": None,
+                    }
+                    self._agent_registry[request_device_id] = meta
+                meta["last_seen_at"] = now_epoch
+                if request_device_name:
+                    meta["device_name"] = request_device_name
+                if isinstance(last_applied_generation, int):
+                    meta["last_applied_generation"] = max(
+                        int(meta.get("last_applied_generation") or 0),
+                        int(last_applied_generation),
+                    )
+                if isinstance(last_command_id, str) and last_command_id.strip():
+                    meta["last_command_id"] = last_command_id.strip()
+                if isinstance(last_command_result, str) and last_command_result.strip():
+                    meta["last_command_result"] = last_command_result.strip().lower()
+                if isinstance(last_command_error, str) and last_command_error.strip():
+                    meta["last_command_error"] = last_command_error.strip()
+                if isinstance(sender_running, bool):
+                    meta["sender_running"] = sender_running
+
+                if (
+                    self._active_command_id
+                    and meta.get("last_command_id") == self._active_command_id
+                    and meta.get("last_applied_generation", 0) >= self._desired_generation
+                ):
+                    cmd_result = str(meta.get("last_command_result") or "").lower()
+                    if cmd_result == "applied":
+                        self._command_status = "applied"
+                        self._command_error = None
+                    elif cmd_result == "failed":
+                        self._command_status = "failed"
+                        self._command_error = str(meta.get("last_command_error") or "agent_command_failed")
+
+            accepted = False
+            reason = "no_active_stream"
+            active_states = {"live", "paused_for_announcement", "stopped_by_policy"}
+            if self._status.state in active_states:
+                if self._active_device_id is not None and request_device_id != self._active_device_id:
+                    accepted = False
+                    reason = "not_owner"
+                else:
+                    accepted = True
+                    reason = None
+                    self._last_heartbeat_at = time.monotonic()
+                    if request_device_name:
+                        self._active_device_name = request_device_name
+
+            control = self._build_control_envelope_unlocked(
+                request_device_id=request_device_id
+            )
+            result = {
+                "accepted": accepted,
+                "reason": reason,
+                "status": self._status_payload_unlocked(),
+                "control": control,
+            }
+            if reason == "not_owner":
+                result["owner_device_id"] = self._active_device_id
+            return result
 
     def policy_sender_alive(self) -> bool:
         """Policy-level sender liveness for Faz 4 runtime rules."""
