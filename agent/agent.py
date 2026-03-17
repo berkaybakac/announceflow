@@ -1589,6 +1589,11 @@ class AgentGUI:
         self._submit_network_job(_load_now_playing, on_success=_apply_now_playing)
         self._start_volume_polling_loop()
 
+        # Always monitor stream status so all agents see remote changes
+        if not self._stream_poll_active:
+            self._stream_poll_active = True
+            self._run_status_poll()
+
         # ── Status Bar ──
         status_frame = tk.Frame(self.root, bg=_BG_HEADER, pady=6)
         status_frame.pack(fill="x", side="bottom")
