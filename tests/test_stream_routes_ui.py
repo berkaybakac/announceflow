@@ -52,21 +52,27 @@ class TestStreamStartRoute:
 
     @patch("routes.stream_routes._stream_service")
     def test_start_success_has_required_fields(self, mock_svc, client):
-        mock_svc.start.return_value = {
+        mock_svc.request_remote_state.return_value = {
             "success": True,
-            "status": StreamStatus(active=True, state="live").to_dict(),
+            "status": StreamStatus(active=False, state="idle").to_dict(),
+            "control": {"command_status": "pending"},
         }
         resp = client.post("/api/stream/start")
         data = resp.get_json()
         assert resp.status_code == 200
         assert data["success"] is True
         assert "status" in data
-        assert data["status"]["active"] is True
-        assert data["status"]["state"] == "live"
+        assert data["status"]["active"] is False
+        assert data["status"]["state"] == "idle"
+        mock_svc.request_remote_state.assert_called_once_with(
+            should_stream=True,
+            issued_by="panel",
+            target_device_id=None,
+        )
 
     @patch("routes.stream_routes._stream_service")
     def test_start_failure_returns_error(self, mock_svc, client):
-        mock_svc.start.return_value = {
+        mock_svc.request_remote_state.return_value = {
             "success": False,
             "status": StreamStatus(
                 state="error", last_error="receiver_start_failed"
@@ -84,7 +90,7 @@ class TestStreamStartRoute:
             "error": "stream_already_live",
             "status": StreamStatus(active=True, state="live").to_dict(),
         }
-        resp = client.post("/api/stream/start")
+        resp = client.post("/api/stream/start", headers={"X-Stream-Device-Id": "dev-route"})
         assert resp.status_code == 409
         data = resp.get_json()
         assert data["error"] == "stream_already_live"
@@ -95,7 +101,7 @@ class TestStreamStopRoute:
 
     @patch("routes.stream_routes._stream_service")
     def test_stop_success_has_required_fields(self, mock_svc, client):
-        mock_svc.stop.return_value = {
+        mock_svc.request_remote_state.return_value = {
             "success": True,
             "status": StreamStatus(active=False, state="idle").to_dict(),
         }
@@ -106,10 +112,15 @@ class TestStreamStopRoute:
         assert "status" in data
         assert data["status"]["active"] is False
         assert data["status"]["state"] == "idle"
+        mock_svc.request_remote_state.assert_called_once_with(
+            should_stream=False,
+            issued_by="panel",
+            target_device_id=None,
+        )
 
     @patch("routes.stream_routes._stream_service")
     def test_stop_failure_returns_500(self, mock_svc, client):
-        mock_svc.stop.return_value = {
+        mock_svc.request_remote_state.return_value = {
             "success": False,
             "status": StreamStatus(
                 state="error", last_error="receiver_stop_failed"
@@ -177,12 +188,15 @@ class TestStreamUILifecycle:
             state["current"] = StreamStatus(active=True, state="live").to_dict()
             return {"success": True, "status": state["current"]}
 
-        def fake_stop():
+        def fake_stop(**kwargs):
             state["current"] = StreamStatus(active=False, state="idle").to_dict()
             return {"success": True, "status": state["current"]}
 
-        mock_svc.start.side_effect = fake_start
-        mock_svc.stop.side_effect = fake_stop
+        mock_svc.request_remote_state.side_effect = (
+            lambda **kwargs: fake_start(**kwargs)
+            if kwargs.get("should_stream") is True
+            else fake_stop(**kwargs)
+        )
         mock_svc.status.side_effect = lambda: state["current"]
 
         # 1. Start stream

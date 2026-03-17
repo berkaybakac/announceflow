@@ -1863,7 +1863,7 @@ class AgentGUI:
             
             self._stream_active = False
             self._last_known_owner = None
-            self._stop_heartbeat_only()
+            self._ensure_heartbeat_loop(delay_ms=500)
             self._refresh_stream_buttons()
 
             if success:

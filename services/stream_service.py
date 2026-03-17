@@ -88,6 +88,8 @@ class StreamService:
         self._active_correlation_id: Optional[str] = None
         self._active_device_id: Optional[str] = None
         self._active_device_name: Optional[str] = None
+        self._preferred_device_id: Optional[str] = None
+        self._preferred_device_name: Optional[str] = None
         # Monotonic timestamp of the last accepted heartbeat.
         # Stays 0.0 until the first heartbeat() call is received so that
         # old clients that never call heartbeat are never auto-stopped.
@@ -181,9 +183,24 @@ class StreamService:
         result = self._status.to_dict()
         result["owner_device_id"] = self._active_device_id
         result["owner_device_name"] = self._active_device_name
+        result["preferred_device_id"] = self._preferred_device_id
+        result["preferred_device_name"] = self._preferred_device_name
         result["command_status"] = self._command_status
+        result["command_error"] = self._command_error
         result["desired_stream_state"] = "on" if self._desired_stream_on else "off"
         return result
+
+    def _is_agent_online_unlocked(self, device_id: Optional[str]) -> bool:
+        if not device_id:
+            return False
+        meta = self._agent_registry.get(device_id)
+        if not meta:
+            return False
+        last_seen = float(meta.get("last_seen_at") or 0.0)
+        if time.time() - last_seen <= AGENT_ONLINE_TTL_SECONDS:
+            return True
+        self._agent_registry.pop(device_id, None)
+        return False
 
     def _online_agent_ids_unlocked(self) -> list[str]:
         now = time.time()
@@ -200,17 +217,53 @@ class StreamService:
         online.sort(key=lambda item: item[1], reverse=True)
         return [device_id for device_id, _ in online]
 
-    def _select_target_device_unlocked(
-        self, requested_device_id: Optional[str] = None
-    ) -> Optional[str]:
+    def _mark_preferred_device_unlocked(
+        self,
+        *,
+        device_id: Optional[str],
+        device_name: Optional[str] = None,
+    ) -> None:
+        normalized_id = device_id.strip() if isinstance(device_id, str) else ""
+        if not normalized_id:
+            return
+        normalized_name = (
+            device_name.strip() if isinstance(device_name, str) else ""
+        )
+        if not normalized_name:
+            meta = self._agent_registry.get(normalized_id) or {}
+            normalized_name = str(meta.get("device_name") or "").strip()
+        if not normalized_name and self._preferred_device_id == normalized_id:
+            normalized_name = str(self._preferred_device_name or "").strip()
+        if not normalized_name:
+            normalized_name = normalized_id
+        self._preferred_device_id = normalized_id
+        self._preferred_device_name = normalized_name
+
+    def _select_panel_target_device_unlocked(
+        self,
+        *,
+        should_stream: bool,
+        requested_device_id: Optional[str] = None,
+    ) -> tuple[Optional[str], Optional[str]]:
+        active_states = {"live", "paused_for_announcement", "stopped_by_policy"}
         if requested_device_id:
-            return requested_device_id if requested_device_id in self._agent_registry else None
-        if self._active_device_id:
-            return self._active_device_id
-        online_ids = self._online_agent_ids_unlocked()
-        if online_ids:
-            return online_ids[0]
-        return None
+            if self._is_agent_online_unlocked(requested_device_id):
+                return requested_device_id, None
+            return None, "no_agent_available"
+
+        # Deterministic control: prefer current owner while stream is active.
+        if self._status.state in active_states and self._active_device_id:
+            return self._active_device_id, None
+
+        # Panel stop while idle/error is an idempotent no-op.
+        if not should_stream and self._status.state in {"idle", "error"}:
+            return None, "noop"
+
+        if not self._preferred_device_id:
+            return None, "preferred_device_not_set"
+        if not self._is_agent_online_unlocked(self._preferred_device_id):
+            return None, "preferred_device_offline"
+        return self._preferred_device_id, None
 
     def _new_command_id_unlocked(self) -> str:
         return f"cmd-{self._desired_generation}-{int(time.time() * 1000)}"
@@ -309,11 +362,22 @@ class StreamService:
         target_device_id: Optional[str] = None,
     ) -> dict:
         with self._lock:
-            target = self._select_target_device_unlocked(target_device_id)
-            if not target:
+            target, selection_error = self._select_panel_target_device_unlocked(
+                should_stream=should_stream,
+                requested_device_id=target_device_id,
+            )
+            if selection_error == "noop":
+                control = self._build_control_envelope_unlocked(request_device_id=None)
+                return {
+                    "success": True,
+                    "status": self._status_payload_unlocked(),
+                    "control": control,
+                    "noop": True,
+                }
+            if selection_error:
                 return {
                     "success": False,
-                    "error": "no_agent_available",
+                    "error": selection_error,
                     "status": self._status_payload_unlocked(),
                 }
 
@@ -397,6 +461,10 @@ class StreamService:
                     self._user_stopped = False
                     if request_device_name:
                         self._active_device_name = request_device_name
+                    self._mark_preferred_device_unlocked(
+                        device_id=request_device_id,
+                        device_name=request_device_name,
+                    )
                     # Treat an explicit re-start as a heartbeat so the timer resets.
                     if self._last_heartbeat_at > 0:
                         self._last_heartbeat_at = time.monotonic()
@@ -480,6 +548,10 @@ class StreamService:
                     self._policy_resume_armed = True
                     self._user_stopped = False
                     if request_device_id:
+                        self._mark_preferred_device_unlocked(
+                            device_id=request_device_id,
+                            device_name=request_device_name,
+                        )
                         self._desired_stream_on = True
                         self._desired_target_device_id = request_device_id
                     self._command_status = "idle"
@@ -573,6 +645,10 @@ class StreamService:
                 self._active_device_name = request_device_name
                 self._policy_resume_armed = True
                 if request_device_id:
+                    self._mark_preferred_device_unlocked(
+                        device_id=request_device_id,
+                        device_name=request_device_name,
+                    )
                     self._desired_stream_on = True
                     self._desired_target_device_id = request_device_id
                 self._command_status = "idle"
@@ -771,6 +847,8 @@ class StreamService:
                 meta["last_seen_at"] = now_epoch
                 if request_device_name:
                     meta["device_name"] = request_device_name
+                    if request_device_id == self._preferred_device_id:
+                        self._preferred_device_name = request_device_name
                 if isinstance(last_applied_generation, int):
                     meta["last_applied_generation"] = max(
                         int(meta.get("last_applied_generation") or 0),

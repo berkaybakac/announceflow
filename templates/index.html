@@ -724,6 +724,8 @@
         takeover_in_progress: 'Yayın devri sürüyor, birkaç saniye sonra tekrar deneyin.',
         stream_stop_failed: 'Yayın durdurulamadı. Tekrar deneyin.',
         no_agent_available: 'Agent çevrimdışı. Windows uygulamasının açık olduğundan emin olun.',
+        preferred_device_not_set: 'Henüz bir yayın cihazı atanmadı. Önce Agent üzerinden bir kez yayın başlatın.',
+        preferred_device_offline: 'Son yayın cihazı çevrimdışı. Lütfen o Agent uygulamasını açın.',
     };
     let streamPollTimer = null;
     let streamPollInFlight = false;
@@ -820,7 +822,8 @@
         } else if (state === 'stopped_by_policy') {
             ownerLabel.textContent = 'Politika bekliyor (anons / mesai dışı)';
         } else {
-            ownerLabel.textContent = '-';
+            const preferred = data.preferred_device_name || data.preferred_device_id;
+            ownerLabel.textContent = preferred ? `Son cihaz: ${escapeHtml(preferred)}` : '-';
         }
 
         startBtn.style.display = cfg.showStart ? '' : 'none';
