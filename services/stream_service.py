@@ -502,9 +502,12 @@ class StreamService:
             if (
                 self._status.active
                 and self._status.state == "live"
+                and not self._mid_takeover
                 and self._manager
                 and not self._manager.is_alive()
             ):
+                correlation_id = self._active_correlation_id
+                owner_device_id = self._active_device_id
                 self._status = StreamStatus(
                     active=False,
                     state="error",
@@ -515,6 +518,14 @@ class StreamService:
                 self._active_correlation_id = None
                 self._active_device_id = None
                 self._active_device_name = None
+                log_error(
+                    "stream_receiver_died",
+                    {
+                        "reason": "receiver_died",
+                        "correlation_id": correlation_id,
+                        "owner_device_id": owner_device_id,
+                    },
+                )
             result = self._status.to_dict()
             result["owner_device_id"] = self._active_device_id
             result["owner_device_name"] = self._active_device_name
