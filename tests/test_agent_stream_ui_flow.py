@@ -1195,7 +1195,7 @@ class TestPollLastKnownOwner:
         gui._stream_client.stop_sender.assert_called_once()
 
     def test_stop_stream_clears_last_known_owner(self):
-        """User clicks stop → _last_known_owner is cleared."""
+        """User clicks stop → owner clears and control heartbeat remains scheduled."""
         gui = _make_gui_for_polling()
         gui._stream_active = True
         gui._last_known_owner = "device-A"
@@ -1222,6 +1222,8 @@ class TestPollLastKnownOwner:
         captured_on_done({"success": True})
 
         assert gui._last_known_owner is None
+        gui.root.after.assert_called()
+        gui.root.after_cancel.assert_not_called()
 
     def test_after_remote_stop_new_stream_detected_again(self):
         """After remote stop (A stops) → idle → A starts again → detected as new."""

@@ -101,16 +101,20 @@ class TestPanelStart:
         mock_manager.start_receiver.assert_called_once()
 
     def test_panel_start_via_route_no_device_header(self, client):
-        """Route: POST /api/stream/start with no device headers → no device_id passed."""
+        """Route: panel start should enqueue desired-state command."""
         with patch("routes.stream_routes._stream_service") as mock_svc:
-            mock_svc.start.return_value = {
+            mock_svc.request_remote_state.return_value = {
                 "success": True,
-                "status": StreamStatus(active=True, state="live").to_dict(),
+                "status": StreamStatus(active=False, state="idle").to_dict(),
+                "control": {"command_status": "pending"},
             }
             resp = client.post("/api/stream/start")  # no X-Stream-Device-Id
             assert resp.status_code == 200
-            # Route must call start() with no arguments when headers are absent
-            mock_svc.start.assert_called_once_with(device_name=None)
+            mock_svc.request_remote_state.assert_called_once_with(
+                should_stream=True,
+                issued_by="panel",
+                target_device_id=None,
+            )
 
 
 # --------------- 2. Agent heartbeat after panel start ---------------
@@ -217,7 +221,7 @@ class TestPanelStop:
 
     def test_panel_stop_via_route(self, client):
         with patch("routes.stream_routes._stream_service") as mock_svc:
-            mock_svc.stop.return_value = {
+            mock_svc.request_remote_state.return_value = {
                 "success": True,
                 "status": StreamStatus(active=False, state="idle").to_dict(),
             }
@@ -226,6 +230,11 @@ class TestPanelStop:
             data = resp.get_json()
             assert data["success"] is True
             assert data["status"]["active"] is False
+            mock_svc.request_remote_state.assert_called_once_with(
+                should_stream=False,
+                issued_by="panel",
+                target_device_id=None,
+            )
 
 
 # --------------- 4. Status fields for renderStreamState() ---------------
@@ -506,4 +515,3 @@ class TestStartAfterBackgroundStop:
         svc.stop()
         svc.start()
         assert svc._mid_takeover is False
-

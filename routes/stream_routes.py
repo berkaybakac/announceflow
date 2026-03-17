@@ -53,16 +53,17 @@ def stream_start():
             issued_by="panel",
             target_device_id=target_device_id,
         )
-        if not isinstance(result, dict):
-            # Test doubles that don't implement request_remote_state yet.
-            result = _stream_service.start(device_name=device_name)
     if result["success"]:
         control = result.get("control")
         if not isinstance(control, dict):
             control = None
         return _json_success(status=result["status"], control=control)
-    if result.get("error") == "no_agent_available":
-        return _json_error("no_agent_available", status=409)
+    if result.get("error") in {
+        "no_agent_available",
+        "preferred_device_not_set",
+        "preferred_device_offline",
+    }:
+        return _json_error(result.get("error"), status=409)
     if result.get("error") == "stream_already_live":
         return _json_error("stream_already_live", status=409)
     if result.get("error") == "takeover_in_progress":
@@ -94,16 +95,17 @@ def stream_stop():
             issued_by="panel",
             target_device_id=target_device_id,
         )
-        if not isinstance(result, dict):
-            # Test doubles that don't implement request_remote_state yet.
-            result = _stream_service.stop()
     if result["success"]:
         control = result.get("control")
         if not isinstance(control, dict):
             control = None
         return _json_success(status=result["status"], control=control)
-    if result.get("error") == "no_agent_available":
-        return _json_error("no_agent_available", status=409)
+    if result.get("error") in {
+        "no_agent_available",
+        "preferred_device_not_set",
+        "preferred_device_offline",
+    }:
+        return _json_error(result.get("error"), status=409)
     return _json_error(
         result["status"].get("last_error", "stream_stop_failed"),
         status=500,

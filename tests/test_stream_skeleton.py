@@ -56,7 +56,10 @@ def test_stream_service_stub_contract_shape():
         "last_error",
         "owner_device_id",
         "owner_device_name",
+        "preferred_device_id",
+        "preferred_device_name",
         "command_status",
+        "command_error",
         "desired_stream_state",
     }
 
@@ -94,7 +97,10 @@ def test_stream_status_route_contract_when_logged_in():
         "last_error",
         "owner_device_id",
         "owner_device_name",
+        "preferred_device_id",
+        "preferred_device_name",
         "command_status",
+        "command_error",
         "desired_stream_state",
     }
     assert payload["state"] == "idle"
@@ -107,11 +113,11 @@ def test_stream_start_stop_routes_functional_when_logged_in(mock_stream_service)
     with client.session_transaction() as sess:
         sess["logged_in"] = True
 
-    mock_stream_service.start.return_value = {
+    mock_stream_service.request_remote_state.return_value = {
         "success": True,
-        "status": StreamStatus(active=True, state="live").to_dict(),
+        "status": StreamStatus(active=False, state="idle").to_dict(),
     }
-    mock_stream_service.stop.return_value = {
+    mock_stream_service.request_remote_state.return_value = {
         "success": True,
         "status": StreamStatus(active=False, state="idle").to_dict(),
     }

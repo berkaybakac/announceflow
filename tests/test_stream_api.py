@@ -4,7 +4,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from services.stream_service import HEARTBEAT_TIMEOUT, StreamService, StreamStatus
+from services.stream_service import (
+    AGENT_ONLINE_TTL_SECONDS,
+    HEARTBEAT_TIMEOUT,
+    StreamService,
+    StreamStatus,
+)
 from stream_manager import StreamManager
 from web_panel import app
 
@@ -306,7 +311,10 @@ class TestStreamServiceStatus:
             "last_error",
             "owner_device_id",
             "owner_device_name",
+            "preferred_device_id",
+            "preferred_device_name",
             "command_status",
+            "command_error",
             "desired_stream_state",
         }
 
@@ -552,22 +560,98 @@ class TestStreamServiceHeartbeat:
         assert result["accepted"] is True
 
 
+class TestStreamServicePreferredTargeting:
+    def test_panel_start_uses_preferred_device_even_when_another_agent_is_newer(
+        self, mock_manager, mock_player
+    ):
+        svc = _make_service(mock_manager, mock_player)
+        svc.start(device_id="win-1", device_name="Win 1")
+        svc.stop()
+        svc.heartbeat(device_id="win-1", device_name="Win 1")
+        time.sleep(0.01)
+        svc.heartbeat(device_id="win-2", device_name="Win 2")
+
+        result = svc.request_remote_state(should_stream=True)
+        assert result["success"] is True
+        assert result["command"]["target_device_id"] == "win-1"
+        assert result["command"]["action"] == "start_stream"
+
+    def test_panel_start_returns_preferred_device_offline_when_preferred_is_stale(
+        self, mock_manager, mock_player
+    ):
+        svc = _make_service(mock_manager, mock_player)
+        svc.start(device_id="win-1", device_name="Win 1")
+        svc.stop()
+        svc.heartbeat(device_id="win-1", device_name="Win 1")
+        svc._agent_registry["win-1"]["last_seen_at"] = (
+            time.time() - AGENT_ONLINE_TTL_SECONDS - 1
+        )
+        svc.heartbeat(device_id="win-2", device_name="Win 2")
+
+        result = svc.request_remote_state(should_stream=True)
+        assert result["success"] is False
+        assert result["error"] == "preferred_device_offline"
+
+    def test_panel_start_returns_preferred_device_not_set_when_no_preferred(
+        self, mock_manager, mock_player
+    ):
+        svc = _make_service(mock_manager, mock_player)
+        svc.heartbeat(device_id="win-1", device_name="Win 1")
+        svc.heartbeat(device_id="win-2", device_name="Win 2")
+
+        result = svc.request_remote_state(should_stream=True)
+        assert result["success"] is False
+        assert result["error"] == "preferred_device_not_set"
+
+    def test_successful_agent_start_updates_preferred_device(
+        self, mock_manager, mock_player
+    ):
+        svc = _make_service(mock_manager, mock_player)
+        result = svc.start(device_id="win-2", device_name="Win 2")
+        assert result["success"] is True
+        status = svc.status()
+        assert status["preferred_device_id"] == "win-2"
+        assert status["preferred_device_name"] == "Win 2"
+
+    def test_panel_stop_live_targets_owner(self, mock_manager, mock_player):
+        svc = _make_service(mock_manager, mock_player)
+        svc.start(device_id="win-1", device_name="Win 1")
+        svc.heartbeat(device_id="win-1", device_name="Win 1")
+
+        result = svc.request_remote_state(should_stream=False)
+        assert result["success"] is True
+        assert result["command"]["action"] == "stop_stream"
+        assert result["command"]["target_device_id"] == "win-1"
+
+    def test_panel_stop_idle_returns_noop_success(self, mock_manager, mock_player):
+        svc = _make_service(mock_manager, mock_player)
+        result = svc.request_remote_state(should_stream=False)
+        assert result["success"] is True
+        assert result.get("noop") is True
+        assert result["control"]["command"] is None
+
+
 # --------------- HTTP route tests ---------------
 
 
 class TestStreamRoutes:
     @patch("routes.stream_routes._stream_service")
     def test_start_endpoint_200(self, mock_svc, client):
-        mock_svc.start.return_value = {
+        mock_svc.request_remote_state.return_value = {
             "success": True,
-            "status": StreamStatus(active=True, state="live").to_dict(),
+            "status": StreamStatus(active=False, state="idle").to_dict(),
+            "control": {"command_status": "pending"},
         }
         resp = client.post("/api/stream/start")
         assert resp.status_code == 200
         data = resp.get_json()
         assert data["success"] is True
-        assert data["status"]["active"] is True
-        mock_svc.start.assert_called_once_with(device_name=None)
+        assert data["status"]["active"] is False
+        mock_svc.request_remote_state.assert_called_once_with(
+            should_stream=True,
+            issued_by="panel",
+            target_device_id=None,
+        )
 
     @patch("routes.stream_routes._stream_service")
     def test_start_endpoint_forwards_correlation_header(self, mock_svc, client):
@@ -625,7 +709,7 @@ class TestStreamRoutes:
 
     @patch("routes.stream_routes._stream_service")
     def test_stop_endpoint_200(self, mock_svc, client):
-        mock_svc.stop.return_value = {
+        mock_svc.request_remote_state.return_value = {
             "success": True,
             "status": StreamStatus(active=False, state="idle").to_dict(),
         }
@@ -633,13 +717,18 @@ class TestStreamRoutes:
         assert resp.status_code == 200
         data = resp.get_json()
         assert data["success"] is True
+        mock_svc.request_remote_state.assert_called_once_with(
+            should_stream=False,
+            issued_by="panel",
+            target_device_id=None,
+        )
 
     @patch("routes.stream_routes._stream_service")
     def test_stop_endpoint_returns_error_state_when_receiver_stop_fails(
         self, mock_svc, client
     ):
         """Route contract: best-effort stop may still return state=error."""
-        mock_svc.stop.return_value = {
+        mock_svc.request_remote_state.return_value = {
             "success": True,
             "status": StreamStatus(
                 active=False,
@@ -656,20 +745,48 @@ class TestStreamRoutes:
         assert data["status"]["last_error"] == "receiver_stop_failed"
 
     @patch("routes.stream_routes._stream_service")
+    @pytest.mark.parametrize(
+        "error_code",
+        ["preferred_device_not_set", "preferred_device_offline", "no_agent_available"],
+    )
+    def test_stop_preferred_errors_return_409(self, mock_svc, client, error_code):
+        mock_svc.request_remote_state.return_value = {
+            "success": False,
+            "error": error_code,
+            "status": StreamStatus().to_dict(),
+        }
+        resp = client.post("/api/stream/stop")
+        assert resp.status_code == 409
+        assert resp.get_json()["error"] == error_code
+
+    @patch("routes.stream_routes._stream_service")
     def test_status_endpoint_contract(self, mock_svc, client):
         status = StreamStatus().to_dict()
         status["owner_device_id"] = None
+        status["owner_device_name"] = None
+        status["preferred_device_id"] = None
+        status["preferred_device_name"] = None
+        status["command_status"] = "idle"
+        status["command_error"] = None
+        status["desired_stream_state"] = "off"
         mock_svc.status.return_value = status
         resp = client.get("/api/stream/status")
         assert resp.status_code == 200
         data = resp.get_json()
-        assert set(data.keys()) == {
+        for key in (
             "active",
             "state",
             "source_before_stream",
             "last_error",
             "owner_device_id",
-        }
+            "owner_device_name",
+            "preferred_device_id",
+            "preferred_device_name",
+            "command_status",
+            "command_error",
+            "desired_stream_state",
+        ):
+            assert key in data
 
     def test_start_stop_require_login(self):
         """P3 fix: unauthorized POST start/stop should redirect to login."""
@@ -682,7 +799,7 @@ class TestStreamRoutes:
 
     @patch("routes.stream_routes._stream_service")
     def test_start_failure_returns_500(self, mock_svc, client):
-        mock_svc.start.return_value = {
+        mock_svc.request_remote_state.return_value = {
             "success": False,
             "status": StreamStatus(
                 state="error", last_error="receiver_start_failed"
@@ -692,13 +809,28 @@ class TestStreamRoutes:
         assert resp.status_code == 500
 
     @patch("routes.stream_routes._stream_service")
+    @pytest.mark.parametrize(
+        "error_code",
+        ["preferred_device_not_set", "preferred_device_offline", "no_agent_available"],
+    )
+    def test_start_preferred_errors_return_409(self, mock_svc, client, error_code):
+        mock_svc.request_remote_state.return_value = {
+            "success": False,
+            "error": error_code,
+            "status": StreamStatus().to_dict(),
+        }
+        resp = client.post("/api/stream/start")
+        assert resp.status_code == 409
+        assert resp.get_json()["error"] == error_code
+
+    @patch("routes.stream_routes._stream_service")
     def test_start_already_live_returns_409(self, mock_svc, client):
         mock_svc.start.return_value = {
             "success": False,
             "error": "stream_already_live",
             "status": StreamStatus(active=True, state="live").to_dict(),
         }
-        resp = client.post("/api/stream/start")
+        resp = client.post("/api/stream/start", headers={"X-Stream-Device-Id": "dev-a"})
         assert resp.status_code == 409
 
     @patch("routes.stream_routes._stream_service")
@@ -708,7 +840,7 @@ class TestStreamRoutes:
             "error": "takeover_in_progress",
             "status": StreamStatus(active=True, state="live").to_dict(),
         }
-        resp = client.post("/api/stream/start")
+        resp = client.post("/api/stream/start", headers={"X-Stream-Device-Id": "dev-a"})
         assert resp.status_code == 409
 
 
@@ -925,14 +1057,17 @@ class TestStreamMiniGate:
             ).to_dict()
             return {"success": True, "status": status_state["current"]}
 
-        def fake_stop():
+        def fake_stop(**kwargs):
             status_state["current"] = StreamStatus(
                 active=False, state="idle"
             ).to_dict()
             return {"success": True, "status": status_state["current"]}
 
-        mock_svc.start.side_effect = fake_start
-        mock_svc.stop.side_effect = fake_stop
+        mock_svc.request_remote_state.side_effect = (
+            lambda **kwargs: fake_start(**kwargs)
+            if kwargs.get("should_stream") is True
+            else fake_stop(**kwargs)
+        )
         mock_svc.status.side_effect = lambda: status_state["current"]
 
         # Gate 1: start + status = active:true
