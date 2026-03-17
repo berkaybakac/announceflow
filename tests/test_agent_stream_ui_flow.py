@@ -698,8 +698,11 @@ class TestStatusPollResiliency:
 
         on_done("invalid-payload")
 
-        assert gui._stream_active is False
-        gui.root.after.assert_called_with(3000, gui._run_status_poll)
+        # Non-dict payload → is_active is None, not False → must NOT trigger
+        # external-stop deactivation (Bug A fix: `None is False` is False).
+        assert gui._stream_active is True
+        # Poll reschedules at 2000ms because stream is still active
+        gui.root.after.assert_called_with(2000, gui._run_status_poll)
 
 
 # --------------- 10. External stop detection (panel/panel stop) ---------------

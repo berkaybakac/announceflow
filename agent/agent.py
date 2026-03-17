@@ -2145,7 +2145,7 @@ class AgentGUI:
                 return
 
             # ── 1b. Remote stream ended: we knew someone else was streaming ──
-            if not is_active and self._last_known_owner and not self._stream_active:
+            if is_active is False and self._last_known_owner and not self._stream_active:
                 stream_logger.info("stream_remote_stop detected prev_owner=%s", self._last_known_owner)
                 self._last_known_owner = None
                 self._refresh_stream_buttons()
@@ -2153,7 +2153,7 @@ class AgentGUI:
                 # Fall through to steady-state polling below
 
             # ── 2. External stop: server idle/error, we were sending ───
-            if state in ("idle", "error") and not is_active and self._stream_active:
+            if state in ("idle", "error") and is_active is False and self._stream_active:
                 stream_logger.info(
                     "stream_external_stop detected state=%s, stopping local sender", state
                 )
