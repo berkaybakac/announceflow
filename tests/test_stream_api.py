@@ -259,6 +259,43 @@ class TestStreamServiceStatus:
         assert st["state"] == "error"
         assert st["last_error"] == "receiver_died"
 
+    @patch("services.stream_service.log_error")
+    def test_status_logs_receiver_died(
+        self, mock_log_error, mock_manager, mock_player
+    ):
+        mock_manager.is_alive.return_value = True
+        svc = _make_service(mock_manager, mock_player)
+        svc.start(correlation_id="cid-1", device_id="dev-1")
+        mock_manager.is_alive.return_value = False
+
+        st = svc.status()
+
+        assert st["state"] == "error"
+        assert st["last_error"] == "receiver_died"
+        mock_log_error.assert_called_once_with(
+            "stream_receiver_died",
+            {
+                "reason": "receiver_died",
+                "correlation_id": "cid-1",
+                "owner_device_id": "dev-1",
+            },
+        )
+
+    def test_status_skips_receiver_died_check_during_mid_takeover(
+        self, mock_manager, mock_player
+    ):
+        svc = _make_service(mock_manager, mock_player)
+        svc._status = StreamStatus(active=True, state="live")
+        svc._mid_takeover = True
+        mock_manager.is_alive.return_value = False
+
+        st = svc.status()
+
+        assert st["active"] is True
+        assert st["state"] == "live"
+        assert st["last_error"] is None
+        mock_manager.is_alive.assert_not_called()
+
     def test_status_contract_keys(self, mock_manager, mock_player):
         svc = _make_service(mock_manager, mock_player)
         st = svc.status()

@@ -716,6 +716,14 @@
 
     const STREAM_POLL_INTERVAL_MS = 3000;
     const STREAM_REQUEST_TIMEOUT_MS = 3000;
+    const STREAM_GENERIC_ERROR_MESSAGE = 'Yayın hatası oluştu. Tekrar deneyin.';
+    const STREAM_ERROR_MESSAGES = {
+        receiver_start_failed: 'Alıcı başlatılamadı. Windows uygulamasının açık olduğundan emin olun.',
+        receiver_died: 'Ses bağlantısı beklenmedik şekilde kesildi. Tekrar deneyin.',
+        stream_already_live: 'Yayın zaten aktif.',
+        takeover_in_progress: 'Yayın devri sürüyor, birkaç saniye sonra tekrar deneyin.',
+        stream_stop_failed: 'Yayın durdurulamadı. Tekrar deneyin.',
+    };
     let streamPollTimer = null;
     let streamPollInFlight = false;
     let streamPollAbortController = null;
@@ -730,6 +738,17 @@
 
     function abortStreamRequest() {
         if (streamPollAbortController) { streamPollAbortController.abort(); streamPollAbortController = null; }
+    }
+
+    function getStreamErrorMessage(errorCode, fallback = STREAM_GENERIC_ERROR_MESSAGE) {
+        if (typeof errorCode !== 'string' || !errorCode) return fallback;
+        return STREAM_ERROR_MESSAGES[errorCode] || fallback;
+    }
+
+    function logStreamInternalError(scope, errorCode) {
+        if (typeof errorCode === 'string' && errorCode) {
+            console.error(`[stream-error][${scope}]`, errorCode);
+        }
     }
 
     async function fetchStreamStatus(timeoutMs = STREAM_REQUEST_TIMEOUT_MS) {
@@ -800,15 +819,8 @@
 
         if (state === 'error' && data.last_error) {
             errorInfo.style.display = '';
-
-            const errorTranslations = {
-                'receiver_start_failed': 'Alıcı başlatılamadı (Windows Ajanı ile bağlantı kurulamadı)',
-                'receiver_died': 'Ses alıcısı aniden çöktü (Ses aygıtı hatası veya yetki eksikliği)',
-                'port_conflict': 'Yayın portu şu anda kullanımda',
-                'stream_active': 'Yayın zaten açık',
-            };
-
-            errorText.textContent = errorTranslations[data.last_error] || data.last_error;
+            errorText.textContent = getStreamErrorMessage(data.last_error);
+            logStreamInternalError('status', data.last_error);
         } else {
             errorInfo.style.display = 'none';
         }
@@ -878,7 +890,8 @@
             const resp = await fetchAction('/api/stream/start', { method: 'POST' }, 10000);
             if (!resp.ok) {
                 const data = await resp.json().catch(() => ({}));
-                showToast(data.error || 'Yayın başlatılamadı', 'error');
+                showToast(getStreamErrorMessage(data.error, 'Yayın başlatılamadı.'), 'error');
+                logStreamInternalError('start', data.error);
             }
             await updateStreamState();
         } catch (err) {
@@ -901,7 +914,8 @@
             const resp = await fetchAction('/api/stream/stop', { method: 'POST' }, 10000);
             if (!resp.ok) {
                 const data = await resp.json().catch(() => ({}));
-                showToast(data.error || 'Yayın durdurulamadı', 'error');
+                showToast(getStreamErrorMessage(data.error, 'Yayın durdurulamadı.'), 'error');
+                logStreamInternalError('stop', data.error);
             }
             await updateStreamState();
         } catch (err) {
