@@ -653,6 +653,7 @@ class AudioPlayer:
         """Stop playback safely."""
         # 1. Update state FIRST to prevent UI race conditions
         with self._lock:
+            was_playing = self.is_playing or bool(self._process)
             self._playback_session += 1
             self.is_playing = False
             self.is_paused = False
@@ -683,7 +684,8 @@ class AudioPlayer:
             pygame.mixer.music.stop()
 
         logger.info("Playback stopped")
-        log_play("stop", {})
+        if was_playing:
+            log_play("stop", {})
         return True
 
     # Pause/Resume removed for stability with mpg123
