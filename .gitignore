@@ -53,6 +53,7 @@ release_stamp.json
 logs/
 runtime/
 agent/logs/
+log.txt
 
 # Test & Coverage
 .coverage

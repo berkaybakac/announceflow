@@ -82,6 +82,7 @@ class Scheduler:
         self._stream_policy_bootstrapped: bool = False
         self._stream_resume_worker_lock = threading.Lock()
         self._stream_resume_worker_in_progress = False
+        self._announcement_done: Optional[threading.Event] = None
 
     def start(self):
         """Start the scheduler background thread."""
@@ -532,8 +533,14 @@ class Scheduler:
         """Resume stream after announcement playback completes."""
         try:
             player = get_player()
-            while player.is_playing:
-                time.sleep(0.5)
+            done = self._announcement_done
+            if done is not None:
+                done.wait(timeout=120.0)
+            else:
+                # Fallback: no event (shouldn't happen) — bounded poll
+                deadline = time.monotonic() + 120.0
+                while player.is_playing and time.monotonic() < deadline:
+                    time.sleep(0.2)
 
             stream_service = get_stream_service()
             config = self._get_cached_config()
@@ -863,6 +870,11 @@ class Scheduler:
                 while player.is_playing:
                     time.sleep(0.5)
 
+                done = self._announcement_done
+                if done is not None and not done.is_set():
+                    done.set()
+                    self._announcement_done = None
+
                 with self._restore_lock:
                     state = self._restore_target_state
                     self._restore_target_state = None
@@ -937,8 +949,21 @@ class Scheduler:
         success = self._start_scheduled_media(
             player, filepath, snapshot["playlist_was_active"]
         )
-        if success and self._queue_restore_target(snapshot):
+        if announcement_interrupted_stream:
+            self._announcement_done = threading.Event()
+        restore_queued = success and self._queue_restore_target(snapshot)
+        if restore_queued:
             self._start_restore_worker(player)
+        elif announcement_interrupted_stream:
+            # No restore worker to signal the event — start a lightweight sentinel
+            _evt = self._announcement_done
+            def _signal_on_player_stop():
+                _p = get_player()
+                deadline = time.monotonic() + 120.0
+                while _p.is_playing and time.monotonic() < deadline:
+                    time.sleep(0.2)
+                _evt.set()
+            threading.Thread(target=_signal_on_player_stop, daemon=True).start()
         if announcement_interrupted_stream:
             self._start_stream_resume_worker_after_announcement()
         self._finalize_one_time_status(success, schedule_id, is_one_time)
