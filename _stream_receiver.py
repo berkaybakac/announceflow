@@ -187,6 +187,10 @@ def _build_udp_input_url(port: int) -> str:
     udp_fifo = os.environ.get("ANNOUNCEFLOW_STREAM_UDP_FIFO", "").strip()
     if udp_fifo.isdigit() and int(udp_fifo) > 0:
         params.append(f"fifo_size={udp_fifo}")
+    else:
+        # 4 MB default (~47 s at 88.2 kB/s mono 16-bit 44.1 kHz) absorbs
+        # network jitter bursts without packet loss, reducing ALSA xruns.
+        params.append("fifo_size=4194304")
 
     return f"udp://0.0.0.0:{port}?{'&'.join(params)}"
 
@@ -371,6 +375,9 @@ def main():
         "-hide_banner",
         "-nostats",
         "-y",
+        # Larger real-time demuxer buffer reduces DTS discontinuity warnings
+        # that can cascade into ALSA underruns on network-jittery links.
+        "-rtbufsize", "10M",
         "-probesize",
         "32",
         "-analyzeduration",
@@ -383,6 +390,11 @@ def main():
         "1",
         "-i",
         udp_input_url,
+        # Smooth timing drift between UDP input clock and ALSA hardware clock.
+        # async=1000 tolerates up to ~22 ms of drift via silent sample
+        # insert/drop before a hard resync — inaudible for background music,
+        # prevents the xrun cascade observed in production (2026-03-18).
+        "-af", "aresample=async=1000",
     ]
     cmd.extend(_parse_extra_ffmpeg_args())
     cmd.extend(["-f", "alsa", alsa_device])
