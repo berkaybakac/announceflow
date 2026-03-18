@@ -970,6 +970,12 @@ class StreamService:
                 source_before_stream=self._status.source_before_stream,
                 last_error=None,
             )
+            # Reset heartbeat timer so the agent gets a fresh 15-second window
+            # after resume. Without this, if the last heartbeat arrived just
+            # before the announcement pause, the monitor fires immediately on
+            # resume and kills the stream (observed in production 2026-03-18).
+            if self._last_heartbeat_at > 0:
+                self._last_heartbeat_at = time.monotonic()
             log_system(
                 "stream_resumed",
                 {
