@@ -26,7 +26,8 @@ def _new_counters():
 def test_udp_input_url_default(monkeypatch):
     monkeypatch.delenv("ANNOUNCEFLOW_STREAM_UDP_FIFO", raising=False)
     url = receiver._build_udp_input_url(5800)
-    assert url == "udp://0.0.0.0:5800?overrun_nonfatal=1"
+    assert "overrun_nonfatal=1" in url
+    assert "fifo_size=4194304" in url  # 4 MB default — jitter buffer
 
 
 def test_udp_input_url_with_fifo(monkeypatch):
@@ -34,6 +35,7 @@ def test_udp_input_url_with_fifo(monkeypatch):
     url = receiver._build_udp_input_url(5800)
     assert "overrun_nonfatal=1" in url
     assert "fifo_size=262144" in url
+    assert "fifo_size=4194304" not in url  # env var replaces default
 
 
 def test_parse_extra_ffmpeg_args_handles_invalid_shell_fragment(monkeypatch):
@@ -264,6 +266,20 @@ def test_exit_event_emission_sigterm_no_handler_now_emits(monkeypatch):
     assert error_events[0][0] == "stream_receiver_exit_nonzero"
     assert error_events[0][1]["return_code"] == -15
     assert error_events[0][1]["exit_class"] == "unexpected"
+
+
+def test_udp_input_url_zero_env_falls_back_to_default(monkeypatch):
+    """ANNOUNCEFLOW_STREAM_UDP_FIFO=0 is treated as unset; default 4 MB used."""
+    monkeypatch.setenv("ANNOUNCEFLOW_STREAM_UDP_FIFO", "0")
+    url = receiver._build_udp_input_url(5800)
+    assert "fifo_size=4194304" in url
+
+
+def test_udp_input_url_invalid_env_falls_back_to_default(monkeypatch):
+    """Non-numeric env var falls back to 4 MB default."""
+    monkeypatch.setenv("ANNOUNCEFLOW_STREAM_UDP_FIFO", "notanumber")
+    url = receiver._build_udp_input_url(5800)
+    assert "fifo_size=4194304" in url
 
 
 import subprocess
