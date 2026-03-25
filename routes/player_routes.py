@@ -16,7 +16,7 @@ from services.volume_runtime_service import get_volume_runtime_service
 from scheduler import is_within_working_hours
 from player import get_player
 from scheduler import get_scheduler
-from logger import log_web
+from logger import log_error, log_web
 from utils.helpers import (
     login_required,
     _json_success,
@@ -166,6 +166,14 @@ def api_play():
             fail_safe_on_unknown=True,
         )
         if silence_decision.get("silence_active", False):
+            blocked_payload = {
+                "media_id": media_id,
+                "filename": media.get("filename"),
+                "policy": silence_decision.get("policy"),
+                "reason_code": silence_decision.get("reason_code"),
+            }
+            log_web("play_blocked_policy", blocked_payload)
+            log_error("play_blocked_policy", blocked_payload)
             return _json_error(
                 "Sessizlik politikası aktifken anons oynatılamaz",
                 403,
@@ -203,8 +211,26 @@ def api_play():
         else:
             _clear_preview_context()
     else:
+        log_error(
+            "play_failed",
+            {
+                "media_id": media_id,
+                "filename": media.get("filename"),
+                "is_announcement": is_announcement,
+                "override_applied": override_applied,
+            },
+        )
         if override_applied:
-            player.set_volume(canonical_volume["volume"])
+            rollback_ok = bool(player.set_volume(canonical_volume["volume"]))
+            if not rollback_ok:
+                log_error(
+                    "override_rollback_failed",
+                    {
+                        "source": "manual_announcement",
+                        "media_id": media_id,
+                        "canonical_volume": canonical_volume["volume"],
+                    },
+                )
         if is_library_preview:
             _clear_preview_context()
 
@@ -319,6 +345,7 @@ def api_volume():
 
     current_state = _canonical_volume_state(db.get_volume_state())
     target_volume = volume if volume is not None else (0 if muted else current_state["last_nonzero_volume"])
+    muted_intent = muted if muted is not None else (target_volume <= 0)
     _volume_runtime.cancel_override(reason="user_volume_intent", restore=False)
 
     player = get_player()
@@ -342,6 +369,16 @@ def api_volume():
             current_state,
             player.get_volume(),
         )
+    )
+    log_error(
+        "volume_apply_failed",
+        {
+            "target_volume": target_volume,
+            "current_volume": current_state["volume"],
+            "muted_intent": bool(muted_intent),
+            "revision": current_state["volume_revision"],
+            "override_active": bool(current_state.get("mute_override_active", False)),
+        },
     )
     return _json_success({"success": False, **current_state})
 

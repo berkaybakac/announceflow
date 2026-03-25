@@ -65,3 +65,7 @@ class TestStreamWebPolling:
         assert "effective_volume" in source
         assert "effective_muted" in source
         assert "mute_override_active" in source
+
+    def test_send_volume_intent_shows_toast_on_network_error(self):
+        snippet = _function_snippet("sendVolumeIntent")
+        assert "showToast('Ses ayarı uygulanamadı. Tekrar deneyin.', 'error');" in snippet
