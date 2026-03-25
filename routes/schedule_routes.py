@@ -13,6 +13,7 @@ from services.schedule_conflict_service import (
     has_self_overlap_for_interval,
     resolve_duration_seconds,
 )
+from services.slot_map_service import get_day_slots, get_week_slots
 from utils.helpers import login_required, _flash_redirect
 
 
@@ -334,6 +335,24 @@ def api_delete_recurring_batch():
             "requested_count": len(unique_ids),
         }
     )
+
+
+@schedule_bp.route("/api/schedules/day-slots", methods=["GET"])
+@login_required
+def api_day_slots():
+    """Return occupied time slots for a specific date."""
+    date_str = request.args.get("date", "")
+    if not date_str:
+        date_str = datetime.now().strftime("%Y-%m-%d")
+    return jsonify(get_day_slots(date_str))
+
+
+@schedule_bp.route("/api/schedules/week-slots", methods=["GET"])
+@login_required
+def api_week_slots():
+    """Return occupied time slots for a full week."""
+    date_str = request.args.get("date", "")
+    return jsonify(get_week_slots(date_str or None))
 
 
 @schedule_bp.route(

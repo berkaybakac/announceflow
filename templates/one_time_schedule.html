@@ -74,6 +74,10 @@
             <span>Seçilen saat mesai dışı. Plan oluşturulsa bile bu saatte çalıştırılmaz.</span>
         </div>
 
+        {% with container_id='dayTimelineContainer', bar_id='dayTimelineBarArea', title='Günün Zaman Çizelgesi' %}
+        {% include '_timeline.html' %}
+        {% endwith %}
+
         <button type="submit" class="btn btn-primary" style="margin-top: 16px; display: inline-flex; align-items: center; gap: 8px;">
             <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 18px; height: 18px;">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
@@ -282,6 +286,91 @@
 <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
 <script src="https://npmcdn.com/flatpickr/dist/l10n/tr.js"></script>
 <script>
+    // ===== Timeline Rendering =====
+    const TOTAL_MINUTES = 24 * 60;
+
+    function timeToMinutes(timeStr) {
+        const [h, m] = timeStr.split(':').map(Number);
+        return h * 60 + m;
+    }
+
+    function addSlot(bar, startMin, endMin, type, label) {
+        const left = (startMin / TOTAL_MINUTES) * 100;
+        const width = Math.max(((endMin - startMin) / TOTAL_MINUTES) * 100, 0.2);
+        const div = document.createElement('div');
+        div.className = 'timeline-slot type-' + type;
+        div.style.left = left + '%';
+        div.style.width = width + '%';
+        div.title = label;
+        bar.appendChild(div);
+    }
+
+    function renderTimelineBar(bar, data) {
+        bar.innerHTML = '';
+
+        // Hour markers
+        for (let h = 0; h < 24; h += 3) {
+            const pct = (h * 60 / TOTAL_MINUTES) * 100;
+            const mark = document.createElement('div');
+            mark.className = 'timeline-hour-mark';
+            mark.style.left = pct + '%';
+            bar.appendChild(mark);
+
+            const lbl = document.createElement('div');
+            lbl.className = 'timeline-hour-label';
+            lbl.style.left = pct + '%';
+            lbl.textContent = String(h).padStart(2, '0');
+            bar.appendChild(lbl);
+        }
+
+        // Working hours info
+        if (data.working_hours && data.working_hours.enabled) {
+            const wStart = timeToMinutes(data.working_hours.start);
+            const wEnd = timeToMinutes(data.working_hours.end);
+            const infoTip = 'Mesai dışı saatler (bu saatlerde plan çalıştırılmaz)';
+            if (wStart <= wEnd) {
+                if (wStart > 0) addSlot(bar, 0, wStart, 'info', infoTip);
+                if (wEnd < TOTAL_MINUTES) addSlot(bar, wEnd, TOTAL_MINUTES, 'info', infoTip);
+            } else {
+                addSlot(bar, wEnd, wStart, 'info', infoTip);
+            }
+        }
+
+        // Occupied slots
+        for (const slot of (data.slots || [])) {
+            const start = timeToMinutes(slot.start);
+            const end = timeToMinutes(slot.end);
+            addSlot(bar, start, end, slot.type, slot.label);
+        }
+    }
+
+    async function loadDayTimeline(dateStr) {
+        const container = document.getElementById('dayTimelineContainer');
+        const barArea = document.getElementById('dayTimelineBarArea');
+        if (!dateStr || !container || !barArea) return;
+
+        try {
+            const resp = await fetch('/api/schedules/day-slots?date=' + dateStr);
+            if (!resp.ok) return;
+            const data = await resp.json();
+
+            barArea.innerHTML = '';
+            const row = document.createElement('div');
+            row.className = 'timeline-row';
+            row.style.paddingTop = '18px';  // Space for hour labels
+
+            const bar = document.createElement('div');
+            bar.className = 'timeline-bar';
+            row.appendChild(bar);
+            barArea.appendChild(row);
+
+            renderTimelineBar(bar, data);
+            container.style.display = 'block';
+        } catch (e) {
+            console.error('Timeline load error:', e);
+        }
+    }
+
     document.addEventListener('DOMContentLoaded', () => {
         // Date Picker (DD.MM.YYYY)
         flatpickr("#dateInput", {
@@ -291,7 +380,10 @@
             dateFormat: "Y-m-d",
             minDate: "today",
             defaultDate: "today",
-            onChange: updateWorkingHoursWarning
+            onChange: function(selectedDates, dateStr) {
+                updateWorkingHoursWarning();
+                loadDayTimeline(dateStr);
+            }
         });
 
         // Time Picker (24h)
@@ -377,7 +469,10 @@
         const dateInput = document.getElementById('dateInput');
         const timeInput = document.getElementById('timeInput');
         if (dateInput) {
-            dateInput.addEventListener('change', updateWorkingHoursWarning);
+            dateInput.addEventListener('change', function() {
+                updateWorkingHoursWarning();
+                loadDayTimeline(dateInput.value);
+            });
         }
         if (timeInput) {
             timeInput.addEventListener('change', updateWorkingHoursWarning);
@@ -385,6 +480,11 @@
             timeInput.addEventListener('input', updateWorkingHoursWarning);
         }
         updateWorkingHoursWarning();
+
+        // Load timeline for today on page load (local time, not UTC)
+        const now = new Date();
+        const todayStr = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
+        loadDayTimeline(dateInput ? dateInput.value || todayStr : todayStr);
     });
 
     function toggleSelectAllOneTime(type) {
