@@ -11,7 +11,6 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 import database as db
-from logger import log_error
 from services.config_service import load_config
 from services.schedule_conflict_service import (
     MINUTES_PER_DAY,
