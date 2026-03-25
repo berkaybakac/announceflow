@@ -177,6 +177,36 @@ class TestStreamStatusRoute:
         assert data["state"] == "paused_for_announcement"
 
 
+class TestStreamAlertsRoute:
+    """GET /api/stream/alerts — UI reads success + alerts envelope."""
+
+    @patch("routes.stream_routes.get_audio_alerts")
+    def test_alerts_success_schema_and_clamp(self, mock_get_alerts, client):
+        mock_get_alerts.return_value = {
+            "level": "warn",
+            "reasons": ["UDP overrun tespit edildi"],
+            "last_event_ts": "2026-03-25T09:05:00Z",
+            "window_minutes": 120,
+            "counts": {
+                "stream_receiver_alsa_xrun": 0,
+                "stream_receiver_udp_overrun": 1,
+                "stream_receiver_died": 0,
+                "stream_receiver_exit_nonzero": 0,
+                "stream_receiver_stderr_drain_timeout": 0,
+            },
+        }
+
+        resp = client.get("/api/stream/alerts?window_minutes=9999")
+        data = resp.get_json()
+
+        assert resp.status_code == 200
+        assert data["success"] is True
+        assert "alerts" in data
+        assert data["alerts"]["level"] == "warn"
+        assert isinstance(data["alerts"]["reasons"], list)
+        mock_get_alerts.assert_called_once_with(window_minutes=120)
+
+
 class TestStreamUILifecycle:
     """Full start → status → stop → status cycle as UI would call it."""
 
@@ -241,5 +271,12 @@ class TestStreamRoutesAuth:
         app.config["TESTING"] = True
         c = app.test_client()
         resp = c.get("/api/stream/status", follow_redirects=False)
+        assert resp.status_code in (301, 302)
+        assert "/login" in resp.headers.get("Location", "")
+
+    def test_alerts_requires_auth(self):
+        app.config["TESTING"] = True
+        c = app.test_client()
+        resp = c.get("/api/stream/alerts", follow_redirects=False)
         assert resp.status_code in (301, 302)
         assert "/login" in resp.headers.get("Location", "")
