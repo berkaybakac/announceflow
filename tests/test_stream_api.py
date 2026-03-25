@@ -788,6 +788,30 @@ class TestStreamRoutes:
         ):
             assert key in data
 
+    @patch("routes.stream_routes.get_audio_alerts")
+    def test_alerts_endpoint_contract(self, mock_get_alerts, client):
+        mock_get_alerts.return_value = {
+            "level": "ok",
+            "reasons": [],
+            "last_event_ts": None,
+            "window_minutes": 1,
+            "counts": {
+                "stream_receiver_alsa_xrun": 0,
+                "stream_receiver_udp_overrun": 0,
+                "stream_receiver_died": 0,
+                "stream_receiver_exit_nonzero": 0,
+                "stream_receiver_stderr_drain_timeout": 0,
+            },
+        }
+        resp = client.get("/api/stream/alerts?window_minutes=0")
+        assert resp.status_code == 200
+        data = resp.get_json()
+        assert data["success"] is True
+        assert "alerts" in data
+        assert data["alerts"]["level"] == "ok"
+        assert isinstance(data["alerts"]["reasons"], list)
+        mock_get_alerts.assert_called_once_with(window_minutes=1)
+
     def test_start_stop_require_login(self):
         """P3 fix: unauthorized POST start/stop should redirect to login."""
         app.config["TESTING"] = True
@@ -796,6 +820,13 @@ class TestStreamRoutes:
             resp = c.post(path, follow_redirects=False)
             assert resp.status_code in (301, 302)
             assert "/login" in resp.headers.get("Location", "")
+
+    def test_alerts_require_login(self):
+        app.config["TESTING"] = True
+        c = app.test_client()
+        resp = c.get("/api/stream/alerts", follow_redirects=False)
+        assert resp.status_code in (301, 302)
+        assert "/login" in resp.headers.get("Location", "")
 
     @patch("routes.stream_routes._stream_service")
     def test_start_failure_returns_500(self, mock_svc, client):

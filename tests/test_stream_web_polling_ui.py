@@ -14,8 +14,16 @@ def _source() -> str:
 
 def _function_snippet(name: str) -> str:
     source = _source()
-    start = source.index(f"async function {name}(")
+    async_sig = f"async function {name}("
+    sync_sig = f"function {name}("
+    if async_sig in source:
+        start = source.index(async_sig)
+    else:
+        start = source.index(sync_sig)
+
     end = source.find("\n    async function ", start + 1)
+    if end == -1:
+        end = source.find("\n    function ", start + 1)
     if end == -1:
         end = source.find("\n    document.addEventListener", start + 1)
     if end == -1:
@@ -69,3 +77,9 @@ class TestStreamWebPolling:
     def test_send_volume_intent_shows_toast_on_network_error(self):
         snippet = _function_snippet("sendVolumeIntent")
         assert "showToast('Ses ayarı uygulanamadı. Tekrar deneyin.', 'error');" in snippet
+
+    def test_stream_alert_ui_removed(self):
+        """Alert UI was removed; backend-only logging remains."""
+        source = _source()
+        assert 'id="streamAlertsBanner"' not in source
+        assert "runStreamAlertsPoll" not in source

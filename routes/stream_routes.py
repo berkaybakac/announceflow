@@ -17,6 +17,7 @@ import logging
 
 from flask import Blueprint, jsonify, request
 
+from services.audio_alert_service import clamp_window_minutes, get_audio_alerts
 from services.stream_service import get_stream_service
 from utils.helpers import _json_error, _json_success, login_required
 
@@ -117,6 +118,15 @@ def stream_stop():
 def stream_status():
     """Get current stream status."""
     return jsonify(_stream_service.status())
+
+
+@stream_bp.route("/api/stream/alerts", methods=["GET"])
+@login_required
+def stream_alerts():
+    """Get thresholded audio alerts from recent stream events."""
+    window_minutes = clamp_window_minutes(request.args.get("window_minutes", ""))
+    alerts = get_audio_alerts(window_minutes=window_minutes)
+    return _json_success(alerts=alerts)
 
 
 @stream_bp.route("/api/stream/heartbeat", methods=["POST"])
