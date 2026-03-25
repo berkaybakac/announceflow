@@ -190,6 +190,10 @@ _SLIDER_TRACK = "#d8e0ec"
 _STREAM_STOP = "#95661a"
 _BTN_MUTED = "#9eaabb"
 _BTN_MUTED_HOVER = "#adb8c6"
+_MUTE_CHIP_BG = "#edf2f8"
+_MUTE_CHIP_BORDER = "#c8d2df"
+_MUTE_ICON_NORMAL = _FG_DIM
+_MUTE_ICON_MUTED = _RED
 
 
 def load_agent_config():
@@ -265,6 +269,34 @@ def get_icon(name, size=(24, 24)):
             return ImageTk.PhotoImage(img)
     except Exception as e:
         logger.error("Error loading icon %s: %s", name, e)
+    return None
+
+
+def _hex_to_rgb(color: str):
+    """Convert #RRGGBB hex color into RGB tuple."""
+    normalized = str(color or "").strip().lstrip("#")
+    if len(normalized) != 6:
+        raise ValueError(f"Invalid hex color: {color}")
+    return tuple(int(normalized[i:i + 2], 16) for i in (0, 2, 4))
+
+
+def get_tinted_icon(name, color, size=(24, 24)):
+    """Load monochrome icon and tint it while preserving alpha edges."""
+    if not _HAS_PIL:
+        return None
+    base = getattr(sys, '_MEIPASS', os.path.dirname(__file__))
+    icon_path = os.path.join(base, 'assets', 'icons', f'{name}.png')
+    try:
+        if os.path.exists(icon_path):
+            img = Image.open(icon_path).convert("RGBA")
+            img = img.resize(size, Image.Resampling.LANCZOS)
+            alpha = img.split()[-1]
+            rgb = _hex_to_rgb(color)
+            tinted = Image.new("RGBA", img.size, (*rgb, 255))
+            tinted.putalpha(alpha)
+            return ImageTk.PhotoImage(tinted)
+    except Exception as e:
+        logger.error("Error tinting icon %s with color %s: %s", name, color, e)
     return None
 
 class ModernButton(tk.Frame):
@@ -390,24 +422,27 @@ class ModernSlider(tk.Frame):
         self._default_restore_value = int(max(self.from_ + 1, min(self.to, 80)))
         self._last_nonzero_value = int(value) if value > self.from_ else self._default_restore_value
 
-        # Load PNG icons (requires PIL — optional)
-        self.img_mute = get_icon('vol_mute', size=(18, 18))
-        self.img_loud = get_icon('vol_high', size=(18, 18))
+        # Load state-aware icons (requires PIL — optional).
+        self.img_mute_muted = get_tinted_icon('vol_mute', _MUTE_ICON_MUTED, size=(18, 18))
+        self.img_mute_normal = get_tinted_icon('vol_mute', _MUTE_ICON_NORMAL, size=(18, 18))
+        self.img_loud_normal = get_tinted_icon('vol_high', _MUTE_ICON_NORMAL, size=(18, 18))
 
         container = tk.Frame(self, bg=bg)
         container.pack(fill="x", expand=True)
 
         self.mute_button = tk.Button(
             container,
-            bg=bg,
-            activebackground=bg,
+            bg=_MUTE_CHIP_BG,
+            activebackground=_MUTE_CHIP_BG,
             relief="flat",
             borderwidth=0,
-            highlightthickness=0,
+            highlightthickness=1,
+            highlightbackground=_MUTE_CHIP_BORDER,
+            highlightcolor=_MUTE_CHIP_BORDER,
             cursor="hand2",
             command=self.toggle_mute,
-            padx=0,
-            pady=0,
+            padx=5,
+            pady=2,
             font=("Segoe UI", 9),
         )
         self.mute_button.pack(side="left", padx=(0, 8))
@@ -428,6 +463,14 @@ class ModernSlider(tk.Frame):
             font=("Segoe UI", 10, "bold"), bg=bg, fg=_GREEN, width=4,
         )
         self.percent_label.pack(side="left")
+        self.state_label = tk.Label(
+            right_frame,
+            text="Açık" if int(round(value)) > int(from_) else "Sessiz",
+            font=("Segoe UI", 9, "bold"),
+            bg=bg,
+            fg=_MUTE_ICON_NORMAL,
+        )
+        self.state_label.pack(side="left", padx=(6, 0))
 
         self.canvas.bind("<Button-1>", self._on_click)
         self.canvas.bind("<B1-Motion>", self._on_click)
@@ -482,24 +525,31 @@ class ModernSlider(tk.Frame):
 
     def _refresh_mute_button(self):
         muted = int(round(self.value)) <= int(self.from_)
-        if self.img_mute and self.img_loud:
-            self.mute_button.config(
-                image=self.img_mute if muted else self.img_loud,
-                text="",
-            )
-        elif self.img_mute and muted:
-            self.mute_button.config(image=self.img_mute, text="")
-        elif self.img_loud and not muted:
-            self.mute_button.config(image=self.img_loud, text="")
+        icon_image = None
+        if muted:
+            icon_image = self.img_mute_muted or self.img_mute_normal
         else:
-            self.mute_button.config(
-                image="",
-                text="Sessiz" if muted else "Ses",
+            icon_image = self.img_loud_normal or self.img_mute_normal
+
+        button_cfg = {
+            "fg": _MUTE_ICON_MUTED if muted else _MUTE_ICON_NORMAL,
+            "activeforeground": _MUTE_ICON_MUTED if muted else _MUTE_ICON_NORMAL,
+            "bg": _MUTE_CHIP_BG,
+            "activebackground": _MUTE_CHIP_BG,
+            "highlightbackground": _MUTE_CHIP_BORDER,
+            "highlightcolor": _MUTE_CHIP_BORDER,
+        }
+        if icon_image:
+            button_cfg.update({"image": icon_image, "text": ""})
+        else:
+            button_cfg.update({"image": "", "text": "Sessiz" if muted else "Ses"})
+        self.mute_button.config(**button_cfg)
+
+        if getattr(self, "state_label", None):
+            self.state_label.config(
+                text="Sessiz" if muted else "Açık",
+                fg=_MUTE_ICON_MUTED if muted else _MUTE_ICON_NORMAL,
             )
-        self.mute_button.config(
-            fg=_RED if muted else _FG_DIM,
-            activeforeground=_RED if muted else _BLUE,
-        )
 
     def _emit_change(self):
         if self.command:

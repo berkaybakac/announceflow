@@ -1021,6 +1021,97 @@ class TestModernSliderCardBg:
         assert "_last_nonzero_value" in source
 
 
+class TestModernSliderVisualState:
+    """Behavior-level checks for mute button visuals and state label sync."""
+
+    def _make_slider_stub(self, *, value: int, with_icons: bool = True):
+        agent_mod = _import_agent()
+        slider = agent_mod.ModernSlider.__new__(agent_mod.ModernSlider)
+        slider.from_ = 0
+        slider.value = value
+        slider.mute_button = MagicMock()
+        slider.state_label = MagicMock()
+        if with_icons:
+            slider.img_mute_muted = object()
+            slider.img_mute_normal = object()
+            slider.img_loud_normal = object()
+        else:
+            slider.img_mute_muted = None
+            slider.img_mute_normal = None
+            slider.img_loud_normal = None
+        return agent_mod, slider
+
+    def test_muted_state_uses_muted_icon_and_red_status(self):
+        agent_mod, slider = self._make_slider_stub(value=0, with_icons=True)
+
+        slider._refresh_mute_button()
+
+        button_cfg = slider.mute_button.config.call_args.kwargs
+        assert button_cfg["image"] is slider.img_mute_muted
+        assert button_cfg["text"] == ""
+        assert button_cfg["fg"] == agent_mod._MUTE_ICON_MUTED
+        assert button_cfg["activeforeground"] == agent_mod._MUTE_ICON_MUTED
+
+        status_cfg = slider.state_label.config.call_args.kwargs
+        assert status_cfg == {"text": "Sessiz", "fg": agent_mod._MUTE_ICON_MUTED}
+
+    def test_unmuted_state_uses_loud_icon_and_open_status(self):
+        agent_mod, slider = self._make_slider_stub(value=42, with_icons=True)
+
+        slider._refresh_mute_button()
+
+        button_cfg = slider.mute_button.config.call_args.kwargs
+        assert button_cfg["image"] is slider.img_loud_normal
+        assert button_cfg["text"] == ""
+        assert button_cfg["fg"] == agent_mod._MUTE_ICON_NORMAL
+        assert button_cfg["activeforeground"] == agent_mod._MUTE_ICON_NORMAL
+
+        status_cfg = slider.state_label.config.call_args.kwargs
+        assert status_cfg == {"text": "Açık", "fg": agent_mod._MUTE_ICON_NORMAL}
+
+    @pytest.mark.parametrize(
+        "value, expected_text, expected_status",
+        [
+            (0, "Sessiz", "Sessiz"),
+            (35, "Ses", "Açık"),
+        ],
+    )
+    def test_icon_fallback_keeps_visible_text_states(
+        self,
+        value,
+        expected_text,
+        expected_status,
+    ):
+        agent_mod, slider = self._make_slider_stub(value=value, with_icons=False)
+
+        slider._refresh_mute_button()
+
+        button_cfg = slider.mute_button.config.call_args.kwargs
+        assert button_cfg["image"] == ""
+        assert button_cfg["text"] == expected_text
+        expected_color = (
+            agent_mod._MUTE_ICON_MUTED
+            if value <= slider.from_
+            else agent_mod._MUTE_ICON_NORMAL
+        )
+        assert button_cfg["fg"] == expected_color
+
+        status_cfg = slider.state_label.config.call_args.kwargs
+        assert status_cfg == {"text": expected_status, "fg": expected_color}
+
+    def test_state_label_tracks_slider_value_changes(self):
+        agent_mod, slider = self._make_slider_stub(value=0, with_icons=True)
+
+        slider._refresh_mute_button()
+        first_status = slider.state_label.config.call_args.kwargs
+        assert first_status == {"text": "Sessiz", "fg": agent_mod._MUTE_ICON_MUTED}
+
+        slider.value = 60
+        slider._refresh_mute_button()
+        second_status = slider.state_label.config.call_args.kwargs
+        assert second_status == {"text": "Açık", "fg": agent_mod._MUTE_ICON_NORMAL}
+
+
 # --------------- 13. Volume sync poll ---------------
 
 

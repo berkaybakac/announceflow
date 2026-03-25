@@ -78,27 +78,27 @@ def draw_web(d, scale):
     # Arcs for globe effect
     d.ellipse([cx - r//2, cy - r, cx + r//2, cy + r], outline="white", width=w)
 
-def draw_vol_icon(d, scale, is_high=False):
+def draw_vol_icon(d, scale, is_high=False, color="#5f6f82"):
     cx, cy = CENTER * scale, CENTER * scale
     w = 4 * scale
     # Speaker body
     bx, by = cx - 15*scale, cy
-    d.rectangle([bx - 10*scale, by - 12*scale, bx + 2*scale, by + 12*scale], fill="white")
+    d.rectangle([bx - 10*scale, by - 12*scale, bx + 2*scale, by + 12*scale], fill=color)
     d.polygon([
         (bx + 2*scale, by - 12*scale),
         (bx + 18*scale, by - 24*scale),
         (bx + 18*scale, by + 24*scale),
         (bx + 2*scale, by + 12*scale)
-    ], fill="white")
+    ], fill=color)
     
     if is_high:
         # Sound waves
-        d.arc([cx + 10*scale, cy - 15*scale, cx + 30*scale, cy + 15*scale], start=315, end=45, fill="white", width=w)
-        d.arc([cx + 15*scale, cy - 25*scale, cx + 45*scale, cy + 25*scale], start=315, end=45, fill="white", width=w)
+        d.arc([cx + 10*scale, cy - 15*scale, cx + 30*scale, cy + 15*scale], start=315, end=45, fill=color, width=w)
+        d.arc([cx + 15*scale, cy - 25*scale, cx + 45*scale, cy + 25*scale], start=315, end=45, fill=color, width=w)
     else:
         # Cross (mute) or single wave
-        d.line([cx + 25*scale, cy - 10*scale, cx + 45*scale, cy + 10*scale], fill="white", width=w)
-        d.line([cx + 25*scale, cy + 10*scale, cx + 45*scale, cy - 10*scale], fill="white", width=w)
+        d.line([cx + 25*scale, cy - 10*scale, cx + 45*scale, cy + 10*scale], fill=color, width=w)
+        d.line([cx + 25*scale, cy + 10*scale, cx + 45*scale, cy - 10*scale], fill=color, width=w)
 
 create_icon('play', draw_play)
 create_icon('stop', draw_stop)
