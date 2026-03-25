@@ -1,0 +1,19 @@
+<!-- Reusable timeline component for schedule slot visualization -->
+<div class="timeline-container" id="{{ container_id | default('timelineContainer') }}" style="display:none;">
+    <div class="timeline-header">
+        <h4 style="display:inline-flex; align-items:center; gap:8px;">
+            <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width:18px; height:18px; color:var(--primary);">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            {{ title | default('Zaman Çizelgesi') }}
+        </h4>
+        <div class="timeline-legend">
+            <span class="legend-item"><span class="legend-dot" style="background:var(--primary)"></span> Dolu (çakışma)</span>
+            <span class="legend-item"><span class="legend-dot" style="background:var(--warning)"></span> Ezan sessiz (bilgi)</span>
+            <span class="legend-item"><span class="legend-dot" style="background:var(--text-muted); opacity:0.4"></span> Mesai dışı (bilgi)</span>
+        </div>
+    </div>
+    <div id="{{ bar_id | default('timelineBarArea') }}">
+        <!-- Timeline bars will be injected by JS -->
+    </div>
+</div>

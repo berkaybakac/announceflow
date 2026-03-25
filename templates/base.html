@@ -835,6 +835,122 @@
         .toast.hiding {
             animation: slideOut 0.3s ease;
         }
+
+        /* Timeline */
+        .timeline-container {
+            margin-top: 16px;
+            margin-bottom: 8px;
+        }
+        .timeline-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .timeline-header h4 {
+            font-size: 0.95rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin: 0;
+        }
+        .timeline-legend {
+            display: flex;
+            gap: 14px;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+        .legend-item {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .legend-dot {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+        }
+        .timeline-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 4px;
+        }
+        .timeline-day-label {
+            width: 32px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--text-muted);
+            text-align: right;
+            flex-shrink: 0;
+        }
+        .timeline-bar {
+            position: relative;
+            height: 28px;
+            background: var(--bg-input);
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            overflow: hidden;
+            flex: 1;
+        }
+        .timeline-slot {
+            position: absolute;
+            top: 2px;
+            height: calc(100% - 4px);
+            border-radius: 3px;
+            opacity: 0.85;
+            cursor: pointer;
+            min-width: 2px;
+            transition: opacity 0.15s;
+        }
+        .timeline-slot:hover {
+            opacity: 1;
+            z-index: 2;
+        }
+        .timeline-slot.type-one_time,
+        .timeline-slot.type-recurring,
+        .timeline-slot.type-schedule {
+            background: var(--primary);
+        }
+        .timeline-slot.type-prayer {
+            background: var(--warning);
+        }
+        .timeline-slot.type-info {
+            background: var(--text-muted);
+            opacity: 0.15;
+        }
+        .timeline-slot.type-info:hover {
+            opacity: 0.25;
+        }
+        .timeline-slot.type-candidate {
+            background: var(--success);
+            border: 2px dashed var(--success);
+            opacity: 0.6;
+        }
+        .timeline-hour-mark {
+            position: absolute;
+            top: 0;
+            width: 1px;
+            height: 100%;
+            background: var(--border);
+            pointer-events: none;
+        }
+        .timeline-hour-label {
+            position: absolute;
+            top: -16px;
+            font-size: 0.65rem;
+            color: var(--text-muted);
+            transform: translateX(-50%);
+            pointer-events: none;
+        }
+        .timeline-empty-msg {
+            text-align: center;
+            padding: 8px;
+            color: var(--text-muted);
+            font-size: 0.85rem;
+        }
     </style>
     {% block extra_css %}{% endblock %}
 
