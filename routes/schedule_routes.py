@@ -59,6 +59,7 @@ def api_add_one_time():
 
     conflict = find_conflict_for_one_time(scheduled_dt, media_id_int)
     if conflict:
+        log_web("conflict_rejected", {"type": "one_time", "datetime": str(scheduled_dt), "conflict": conflict})
         return _flash_redirect(
             SCHEDULE_CONFLICT_MESSAGE, "error", "one_time_schedules"
         )
@@ -173,6 +174,7 @@ def api_add_recurring():
         }
         conflict = find_conflict_for_recurring(candidate)
         if conflict:
+            log_web("conflict_rejected", {"type": "recurring", "conflict": conflict})
             return _flash_redirect(
                 SCHEDULE_CONFLICT_MESSAGE, "error", "recurring_schedules"
             )
@@ -226,6 +228,7 @@ def api_add_recurring():
         }
         conflict = find_conflict_for_recurring(candidate)
         if conflict:
+            log_web("conflict_rejected", {"type": "recurring", "conflict": conflict})
             return _flash_redirect(
                 SCHEDULE_CONFLICT_MESSAGE, "error", "recurring_schedules"
             )
@@ -276,6 +279,7 @@ def api_toggle_recurring(schedule_id):
                 candidate, exclude_recurring_id=schedule_id
             )
             if conflict:
+                log_web("conflict_rejected", {"type": "recurring_edit", "conflict": conflict})
                 return _flash_redirect(
                     SCHEDULE_CONFLICT_MESSAGE, "error", "recurring_schedules"
                 )
