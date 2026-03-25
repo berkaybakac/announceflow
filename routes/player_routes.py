@@ -11,6 +11,8 @@ from typing import Optional
 from flask import Blueprint, jsonify, request
 import database as db
 from services.config_service import load_config, save_config
+from services.silence_policy import resolve_silence_policy
+from services.volume_runtime_service import get_volume_runtime_service
 from scheduler import is_within_working_hours
 from player import get_player
 from scheduler import get_scheduler
@@ -28,6 +30,8 @@ player_bp = Blueprint("player", __name__)
 logger = logging.getLogger(__name__)
 _preview_lock = threading.Lock()
 _preview_context = {"media_id": None, "playback_session": None}
+_DEFAULT_VOLUME = 80
+_volume_runtime = get_volume_runtime_service()
 
 
 def _set_preview_context(media_id: int, playback_session: Optional[int]) -> None:
@@ -69,6 +73,40 @@ def _resolve_instance_identity() -> tuple[str, str]:
         save_config(config)
 
     return instance_id, site_name
+
+
+def _canonical_volume_state(raw: Optional[dict]) -> dict:
+    """Normalize canonical volume state payload for API responses."""
+    raw = raw or {}
+    try:
+        volume = int(raw.get("volume", _DEFAULT_VOLUME))
+    except (TypeError, ValueError, AttributeError):
+        volume = _DEFAULT_VOLUME
+    volume = max(0, min(100, volume))
+
+    try:
+        last_nonzero = int(raw.get("last_nonzero_volume", volume if volume > 0 else _DEFAULT_VOLUME))
+    except (TypeError, ValueError, AttributeError):
+        last_nonzero = volume if volume > 0 else _DEFAULT_VOLUME
+    last_nonzero = max(0, min(100, last_nonzero))
+    if last_nonzero <= 0:
+        last_nonzero = _DEFAULT_VOLUME
+
+    try:
+        revision = int(raw.get("volume_revision", 0))
+    except (TypeError, ValueError, AttributeError):
+        revision = 0
+    revision = max(0, revision)
+
+    muted_raw = raw.get("muted")
+    muted = bool(muted_raw) if isinstance(muted_raw, bool) else (volume <= 0)
+
+    return {
+        "volume": volume,
+        "muted": muted,
+        "last_nonzero_volume": last_nonzero,
+        "volume_revision": revision,
+    }
 
 
 @player_bp.route("/api/health")
@@ -118,13 +156,43 @@ def api_play():
         return error
 
     player = get_player()
+    is_announcement = str(media.get("media_type", "")).strip().lower() == "announcement"
+    silence_decision = None
+    if is_announcement:
+        config = load_config()
+        silence_decision = resolve_silence_policy(
+            config,
+            allow_network=False,
+            fail_safe_on_unknown=True,
+        )
+        if silence_decision.get("silence_active", False):
+            return _json_error(
+                "Sessizlik politikası aktifken anons oynatılamaz",
+                403,
+            )
+
     playlist_was_active = player._playlist_active and len(player._playlist) > 0
+    canonical_volume = _canonical_volume_state(db.get_volume_state())
+    override_applied = False
+    override_volume = 0
+    if is_announcement and canonical_volume["muted"]:
+        override_volume = max(1, canonical_volume["last_nonzero_volume"])
+        override_applied = bool(player.set_volume(override_volume))
+        if not override_applied:
+            logger.warning("Manual announcement mute override could not set player volume")
+
     logger.info(
         f"[source] manual play -> {media['filename']} (media_id={media_id})"
     )
     success = player.play(media["filepath"], preserve_playlist=playlist_was_active)
 
     if success:
+        if override_applied:
+            _volume_runtime.activate_announcement_override(
+                playback_session=getattr(player, "_playback_session", None),
+                effective_volume=override_volume,
+                source="manual_announcement",
+            )
         db.update_playback_state(
             current_media_id=media_id, is_playing=True, position_seconds=0
         )
@@ -135,6 +203,8 @@ def api_play():
         else:
             _clear_preview_context()
     else:
+        if override_applied:
+            player.set_volume(canonical_volume["volume"])
         if is_library_preview:
             _clear_preview_context()
 
@@ -147,6 +217,7 @@ def api_stop():
     """Stop playback."""
     player = get_player()
     success = player.stop()
+    _volume_runtime.restore_override(reason="manual_stop")
     _clear_preview_context()
     db.update_playback_state(current_media_id=0, is_playing=False, position_seconds=0)
     log_web("stop", {})
@@ -220,28 +291,59 @@ def api_stop_preview():
 @player_bp.route("/api/volume", methods=["POST"])
 @login_required
 def api_volume():
-    """Set volume level."""
+    """Set canonical volume state (absolute volume or mute intent)."""
     data = request.get_json(silent=True) or {}
     if not isinstance(data, dict):
         return _json_error("Geçersiz istek gövdesi", 400)
 
-    raw_volume = data.get("volume", 80)
-    try:
-        volume = int(raw_volume)
-    except (TypeError, ValueError):
-        return _json_error("Volume 0-100 arasında sayı olmalı", 400)
+    has_volume = "volume" in data
+    has_muted = "muted" in data
+    if has_volume == has_muted:
+        return _json_error("İstek yalnızca volume veya muted içermeli", 400)
 
-    if not 0 <= volume <= 100:
-        return _json_error("Volume 0-100 arasında olmalı", 400)
+    volume: Optional[int] = None
+    muted: Optional[bool] = None
+    if has_volume:
+        raw_volume = data.get("volume")
+        try:
+            volume = int(raw_volume)
+        except (TypeError, ValueError):
+            return _json_error("Volume 0-100 arasında sayı olmalı", 400)
+        if not 0 <= volume <= 100:
+            return _json_error("Volume 0-100 arasında olmalı", 400)
+    else:
+        raw_muted = data.get("muted")
+        if not isinstance(raw_muted, bool):
+            return _json_error("muted true/false olmalı", 400)
+        muted = raw_muted
+
+    current_state = _canonical_volume_state(db.get_volume_state())
+    target_volume = volume if volume is not None else (0 if muted else current_state["last_nonzero_volume"])
+    _volume_runtime.cancel_override(reason="user_volume_intent", restore=False)
 
     player = get_player()
     prev_volume = player.get_volume()
-    success = player.set_volume(volume)
-    db.update_playback_state(volume=volume)
-    if prev_volume != volume:
-        log_web("volume", {"volume": volume})
+    success = player.set_volume(target_volume)
+    if success:
+        canonical_state = _canonical_volume_state(db.set_volume_state(target_volume))
+        canonical_state.update(
+            _volume_runtime.get_effective_state(
+                canonical_state,
+                player.get_volume(),
+            )
+        )
+        if prev_volume != target_volume:
+            log_web("volume", {"volume": target_volume})
+        return _json_success({"success": True, **canonical_state})
 
-    return _json_success({"success": success, "volume": volume})
+    # Keep DB as-is when player volume write fails.
+    current_state.update(
+        _volume_runtime.get_effective_state(
+            current_state,
+            player.get_volume(),
+        )
+    )
+    return _json_success({"success": False, **current_state})
 
 
 @player_bp.route("/api/now-playing")
@@ -250,8 +352,15 @@ def api_now_playing():
     """Get current player state."""
     player = get_player()
     state = player.get_state()
-    db_state = db.get_playback_state()
-    state["volume"] = db_state.get("volume", 80)
+    runtime_player_volume = state.get("volume")
+    canonical_volume = _canonical_volume_state(db.get_volume_state())
+    state["volume"] = canonical_volume["volume"]
+    state["muted"] = canonical_volume["muted"]
+    state["last_nonzero_volume"] = canonical_volume["last_nonzero_volume"]
+    state["volume_revision"] = canonical_volume["volume_revision"]
+    state.update(
+        _volume_runtime.get_effective_state(canonical_volume, runtime_player_volume)
+    )
 
     # Get duration from database if file is playing
     if state.get("filename"):

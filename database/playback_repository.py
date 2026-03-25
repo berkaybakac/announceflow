@@ -1,6 +1,7 @@
 """
 Playback and playlist state repository.
 """
+import sqlite3
 import json
 from typing import Optional, List, Dict, Any
 from .base_repository import BaseRepository
@@ -8,6 +9,40 @@ from .base_repository import BaseRepository
 
 class PlaybackRepository(BaseRepository):
     """Repository for playback and playlist state operations."""
+
+    _DEFAULT_VOLUME = 80
+
+    @staticmethod
+    def _to_int(value: Any, default: int) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return int(default)
+
+    @classmethod
+    def _normalize_volume(cls, value: Any) -> int:
+        parsed = cls._to_int(value, cls._DEFAULT_VOLUME)
+        return max(0, min(100, parsed))
+
+    @classmethod
+    def _normalize_last_nonzero(cls, value: Any, fallback: int) -> int:
+        parsed = cls._normalize_volume(value if value is not None else fallback)
+        if parsed <= 0:
+            parsed = max(1, cls._normalize_volume(fallback))
+        return parsed
+
+    @classmethod
+    def _normalize_revision(cls, value: Any) -> int:
+        return max(0, cls._to_int(value, 0))
+
+    @staticmethod
+    def _row_value(row: Any, key: str, default: Any = None) -> Any:
+        if row is None:
+            return default
+        try:
+            return row[key]
+        except (KeyError, TypeError, IndexError):
+            return default
 
     # ============ PLAYBACK STATE ============
 
@@ -55,8 +90,13 @@ class PlaybackRepository(BaseRepository):
             updates.append("is_playing = ?")
             values.append(1 if is_playing else 0)
         if volume is not None:
+            normalized_volume = self._normalize_volume(volume)
             updates.append("volume = ?")
-            values.append(volume)
+            values.append(normalized_volume)
+            if normalized_volume > 0:
+                updates.append("last_nonzero_volume = ?")
+                values.append(normalized_volume)
+            updates.append("volume_revision = COALESCE(volume_revision, 0) + 1")
 
         if updates:
             updates.append("updated_at = CURRENT_TIMESTAMP")
@@ -66,6 +106,147 @@ class PlaybackRepository(BaseRepository):
 
         conn.close()
         return True
+
+    def get_volume_state(self) -> Dict[str, Any]:
+        """Get canonical volume state used by all clients."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        row = None
+        try:
+            cursor.execute(
+                """
+                INSERT OR IGNORE INTO playback_state (id, volume, last_nonzero_volume, volume_revision)
+                VALUES (1, 80, 80, 0)
+            """
+            )
+            cursor.execute(
+                """
+                SELECT volume, last_nonzero_volume, volume_revision
+                FROM playback_state
+                WHERE id = 1
+            """
+            )
+            row = cursor.fetchone()
+            conn.commit()
+        except sqlite3.OperationalError:
+            # Backward-compatible fallback for pre-migration schemas.
+            cursor.execute(
+                """
+                INSERT OR IGNORE INTO playback_state (id, volume)
+                VALUES (1, 80)
+            """
+            )
+            cursor.execute(
+                """
+                SELECT volume
+                FROM playback_state
+                WHERE id = 1
+            """
+            )
+            row = cursor.fetchone()
+            conn.commit()
+        finally:
+            conn.close()
+
+        volume = self._normalize_volume(self._row_value(row, "volume"))
+        last_nonzero = self._normalize_last_nonzero(
+            self._row_value(row, "last_nonzero_volume"),
+            fallback=(volume if volume > 0 else self._DEFAULT_VOLUME),
+        )
+        revision = self._normalize_revision(self._row_value(row, "volume_revision"))
+        return {
+            "volume": volume,
+            "muted": volume <= 0,
+            "last_nonzero_volume": last_nonzero,
+            "volume_revision": revision,
+        }
+
+    def set_volume_state(self, volume: int) -> Dict[str, Any]:
+        """Persist canonical volume state atomically."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                """
+                INSERT OR IGNORE INTO playback_state (id, volume, last_nonzero_volume, volume_revision)
+                VALUES (1, 80, 80, 0)
+            """
+            )
+            cursor.execute(
+                """
+                SELECT volume, last_nonzero_volume, volume_revision
+                FROM playback_state
+                WHERE id = 1
+            """
+            )
+            row = cursor.fetchone()
+
+            current_volume = self._normalize_volume(self._row_value(row, "volume"))
+            current_last_nonzero = self._normalize_last_nonzero(
+                self._row_value(row, "last_nonzero_volume"),
+                fallback=(current_volume if current_volume > 0 else self._DEFAULT_VOLUME),
+            )
+            current_revision = self._normalize_revision(
+                self._row_value(row, "volume_revision")
+            )
+
+            next_volume = self._normalize_volume(volume)
+            next_last_nonzero = (
+                next_volume if next_volume > 0 else current_last_nonzero
+            )
+            next_revision = current_revision + 1
+
+            cursor.execute(
+                """
+                UPDATE playback_state
+                SET volume = ?,
+                    last_nonzero_volume = ?,
+                    volume_revision = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = 1
+            """,
+                (next_volume, next_last_nonzero, next_revision),
+            )
+            conn.commit()
+        except sqlite3.OperationalError:
+            # Backward-compatible fallback for pre-migration schemas.
+            cursor.execute(
+                """
+                INSERT OR IGNORE INTO playback_state (id, volume)
+                VALUES (1, 80)
+            """
+            )
+            cursor.execute("SELECT volume FROM playback_state WHERE id = 1")
+            row = cursor.fetchone()
+
+            current_volume = self._normalize_volume(self._row_value(row, "volume"))
+            next_volume = self._normalize_volume(volume)
+            next_last_nonzero = (
+                next_volume
+                if next_volume > 0
+                else (current_volume if current_volume > 0 else self._DEFAULT_VOLUME)
+            )
+            next_revision = 0
+
+            cursor.execute(
+                """
+                UPDATE playback_state
+                SET volume = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = 1
+            """,
+                (next_volume,),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        return {
+            "volume": next_volume,
+            "muted": next_volume <= 0,
+            "last_nonzero_volume": next_last_nonzero,
+            "volume_revision": next_revision,
+        }
 
     # ============ PLAYLIST STATE ============
 

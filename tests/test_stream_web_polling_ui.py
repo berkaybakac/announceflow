@@ -42,3 +42,26 @@ class TestStreamWebPolling:
         assert "await updateStreamState();" in _function_snippet("streamStart")
         assert "await updateStreamState();" in _function_snippet("streamStop")
 
+    def test_volume_mute_button_exists(self):
+        source = _source()
+        assert 'id="volumeMuteBtn"' in source
+        assert "onclick=\"toggleMute()\"" in source
+
+    def test_set_volume_updates_mute_button(self):
+        snippet = _function_snippet("setVolume")
+        assert "sendVolumeIntent({ volume: nextVolume }, optimisticState)" in snippet
+
+    def test_toggle_mute_restores_last_nonzero_volume(self):
+        snippet = _function_snippet("toggleMute")
+        assert "await setMuted(!isMuted);" in snippet
+
+    def test_apply_volume_state_has_inflight_and_revision_guards(self):
+        source = _source()
+        assert "if (volumeWriteInFlight)" in source
+        assert "volume_revision < lastAppliedVolumeRevision" in source
+
+    def test_apply_volume_state_supports_effective_output_fields(self):
+        source = _source()
+        assert "effective_volume" in source
+        assert "effective_muted" in source
+        assert "mute_override_active" in source

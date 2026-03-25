@@ -366,9 +366,19 @@ class ModernButton(tk.Frame):
 
 
 class ModernSlider(tk.Frame):
-    """Modern volume slider with Canvas - thick bar with speaker icons."""
+    """Modern volume slider with canvas track and mute toggle button."""
 
-    def __init__(self, parent, from_=0, to=100, value=80, command=None, card_bg=None, **kwargs):
+    def __init__(
+        self,
+        parent,
+        from_=0,
+        to=100,
+        value=80,
+        command=None,
+        mute_command=None,
+        card_bg=None,
+        **kwargs,
+    ):
         bg = card_bg or _BG
         super().__init__(parent, bg=bg, **kwargs)
         self._bg = bg
@@ -376,6 +386,9 @@ class ModernSlider(tk.Frame):
         self.to = to
         self.value = value
         self.command = command
+        self.mute_command = mute_command
+        self._default_restore_value = int(max(self.from_ + 1, min(self.to, 80)))
+        self._last_nonzero_value = int(value) if value > self.from_ else self._default_restore_value
 
         # Load PNG icons (requires PIL — optional)
         self.img_mute = get_icon('vol_mute', size=(18, 18))
@@ -384,13 +397,20 @@ class ModernSlider(tk.Frame):
         container = tk.Frame(self, bg=bg)
         container.pack(fill="x", expand=True)
 
-        # Left label: PNG icon when available, plain text fallback (no emoji)
-        self.left_icon = tk.Label(container, bg=bg)
-        if self.img_mute:
-            self.left_icon.config(image=self.img_mute)
-        else:
-            self.left_icon.config(text="Ses", fg=_FG_DIM, font=("Segoe UI", 9))
-        self.left_icon.pack(side="left", padx=(0, 8))
+        self.mute_button = tk.Button(
+            container,
+            bg=bg,
+            activebackground=bg,
+            relief="flat",
+            borderwidth=0,
+            highlightthickness=0,
+            cursor="hand2",
+            command=self.toggle_mute,
+            padx=0,
+            pady=0,
+            font=("Segoe UI", 9),
+        )
+        self.mute_button.pack(side="left", padx=(0, 8))
 
         # Slider canvas — thin track design, fixed 32px height
         self.canvas = tk.Canvas(
@@ -399,12 +419,9 @@ class ModernSlider(tk.Frame):
         )
         self.canvas.pack(side="left", fill="x", expand=True)
 
-        # Right side: optional loud icon + percentage
+        # Right side: percentage
         right_frame = tk.Frame(container, bg=bg)
         right_frame.pack(side="left", padx=(8, 0))
-
-        if self.img_loud:
-            tk.Label(right_frame, bg=bg, image=self.img_loud).pack(side="left", padx=(0, 4))
 
         self.percent_label = tk.Label(
             right_frame, text=f"{int(value)}%",
@@ -443,6 +460,7 @@ class ModernSlider(tk.Frame):
 
         # Green fill — simple rectangle, no end-cap tricks, no overflow
         ratio = (self.value - self.from_) / max(1, self.to - self.from_)
+        ratio = max(0.0, min(1.0, ratio))
         fill_right = track_left + ratio * track_span
         if ratio > 0:
             self.canvas.create_rectangle(
@@ -460,6 +478,32 @@ class ModernSlider(tk.Frame):
         )
 
         self.percent_label.config(text=f"{int(self.value)}%")
+        self._refresh_mute_button()
+
+    def _refresh_mute_button(self):
+        muted = int(round(self.value)) <= int(self.from_)
+        if self.img_mute and self.img_loud:
+            self.mute_button.config(
+                image=self.img_mute if muted else self.img_loud,
+                text="",
+            )
+        elif self.img_mute and muted:
+            self.mute_button.config(image=self.img_mute, text="")
+        elif self.img_loud and not muted:
+            self.mute_button.config(image=self.img_loud, text="")
+        else:
+            self.mute_button.config(
+                image="",
+                text="Sessiz" if muted else "Ses",
+            )
+        self.mute_button.config(
+            fg=_RED if muted else _FG_DIM,
+            activeforeground=_RED if muted else _BLUE,
+        )
+
+    def _emit_change(self):
+        if self.command:
+            self.command(self.value)
 
     def _on_click(self, event):
         pad = self._PAD
@@ -468,13 +512,33 @@ class ModernSlider(tk.Frame):
         ratio = (event.x - pad) / track_span
         ratio = max(0, min(1, ratio))
         self.value = self.from_ + ratio * (self.to - self.from_)
+        if self.value > self.from_:
+            self._last_nonzero_value = int(round(self.value))
         self._draw()
-        if self.command:
-            self.command(self.value)
+        self._emit_change()
+
+    def toggle_mute(self):
+        if self.mute_command:
+            self.mute_command(int(round(self.value)) > int(self.from_))
+            return
+        current = int(round(self.value))
+        if current <= int(self.from_):
+            restore_value = max(
+                self.from_ + 1,
+                min(self.to, float(self._last_nonzero_value)),
+            )
+            self.value = restore_value
+        else:
+            self._last_nonzero_value = current
+            self.value = self.from_
+        self._draw()
+        self._emit_change()
 
     def set_value(self, value):
         """Set slider value programmatically."""
         self.value = max(self.from_, min(self.to, value))
+        if self.value > self.from_:
+            self._last_nonzero_value = int(round(self.value))
         self._draw()
 
 
@@ -715,12 +779,33 @@ class AnnounceFlowAgent:
         response = self._request("POST", "/api/playlist/stop", auth_required=True)
         return bool(response and response.ok)
 
+    def _send_volume_intent(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        """Send canonical volume intent and return parsed API payload."""
+        response = self._request(
+            "POST", "/api/volume", auth_required=True, json=payload,
+        )
+        if response is None:
+            return {"success": False}
+        try:
+            data = response.json() if response.ok else {}
+        except ValueError:
+            data = {}
+        if not isinstance(data, dict):
+            data = {}
+        success = bool(response.ok and data.get("success") is True)
+        return {**data, "success": success}
+
+    def set_volume_with_state(self, volume: int) -> Dict[str, Any]:
+        """Set absolute volume and return canonical server state."""
+        return self._send_volume_intent({"volume": int(volume)})
+
+    def set_mute_with_state(self, muted: bool) -> Dict[str, Any]:
+        """Toggle mute state and return canonical server state."""
+        return self._send_volume_intent({"muted": bool(muted)})
+
     def set_volume(self, volume):
         """Set volume level."""
-        response = self._request(
-            "POST", "/api/volume", auth_required=True, json={"volume": volume},
-        )
-        return bool(response and response.ok)
+        return bool(self.set_volume_with_state(volume).get("success"))
 
     def start_stream_with_details(
         self, correlation_id: Optional[str] = None
@@ -987,6 +1072,9 @@ class AgentGUI:
         self._volume_poll_job = None
         self._volume_poll_failures = 0
         self._volume_local_change_until = 0.0
+        self._volume_write_in_flight = False
+        self._volume_last_applied_revision = -1
+        self._volume_last_nonzero = 80
         self._advanced_visible = False
 
     def run(self):
@@ -1202,6 +1290,9 @@ class AgentGUI:
                 pass
             self._volume_update_job = None
         self._pending_volume = None
+        self._volume_write_in_flight = False
+        self._volume_last_applied_revision = -1
+        self._volume_last_nonzero = 80
 
         self.clear_frame()
 
@@ -1603,7 +1694,12 @@ class AgentGUI:
         ).pack(anchor="w", pady=(0, 4))
 
         self.volume_slider = ModernSlider(
-            vol_section, from_=0, to=100, value=80, command=self.on_volume_change,
+            vol_section,
+            from_=0,
+            to=100,
+            value=80,
+            command=self.on_volume_change,
+            mute_command=self.on_mute_toggle,
             card_bg=_BG_CARD,
         )
         self.volume_slider.pack(fill="x")
@@ -1617,9 +1713,7 @@ class AgentGUI:
                 return
             if not hasattr(self, "volume_slider"):
                 return
-            current = state.get("volume") if isinstance(state, dict) else None
-            if isinstance(current, (int, float)):
-                self.volume_slider.set_value(int(current))
+            self._apply_volume_state(state, force=True)
             playlist = state.get("playlist", {}) if isinstance(state, dict) else {}
             is_playlist_active = bool(playlist.get("active")) if isinstance(playlist, dict) else False
             if self._music_active != is_playlist_active:
@@ -1888,13 +1982,131 @@ class AgentGUI:
             self.root.after_cancel(self._volume_update_job)
         self._volume_update_job = self.root.after(120, self._flush_pending_volume)
 
+    def _normalize_volume_state(self, raw_state: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        """Normalize canonical volume payload from API."""
+        raw_state = raw_state if isinstance(raw_state, dict) else {}
+
+        try:
+            volume = int(raw_state.get("volume", 80))
+        except (TypeError, ValueError):
+            volume = 80
+        volume = max(0, min(100, volume))
+
+        try:
+            last_nonzero = int(raw_state.get("last_nonzero_volume", volume if volume > 0 else 80))
+        except (TypeError, ValueError):
+            last_nonzero = volume if volume > 0 else 80
+        last_nonzero = max(0, min(100, last_nonzero))
+        if last_nonzero <= 0:
+            last_nonzero = 80
+
+        try:
+            revision = int(raw_state.get("volume_revision", 0))
+        except (TypeError, ValueError):
+            revision = 0
+        revision = max(0, revision)
+
+        muted_raw = raw_state.get("muted")
+        muted = bool(muted_raw) if isinstance(muted_raw, bool) else (volume <= 0)
+
+        try:
+            effective_volume = int(raw_state.get("effective_volume", volume))
+        except (TypeError, ValueError):
+            effective_volume = volume
+        effective_volume = max(0, min(100, effective_volume))
+
+        effective_muted_raw = raw_state.get("effective_muted")
+        effective_muted = (
+            bool(effective_muted_raw)
+            if isinstance(effective_muted_raw, bool)
+            else (effective_volume <= 0)
+        )
+
+        return {
+            "volume": volume,
+            "muted": muted,
+            "last_nonzero_volume": last_nonzero,
+            "volume_revision": revision,
+            "effective_volume": effective_volume,
+            "effective_muted": effective_muted,
+            "mute_override_active": bool(raw_state.get("mute_override_active", False)),
+        }
+
+    def _apply_volume_state(self, raw_state: Optional[Dict[str, Any]], *, force: bool = False):
+        """Apply canonical volume state to UI with race guards."""
+        normalized = self._normalize_volume_state(raw_state)
+        if not force:
+            if getattr(self, "_volume_write_in_flight", False):
+                return
+            if time.monotonic() < getattr(self, "_volume_local_change_until", 0.0):
+                return
+            if normalized["volume_revision"] < getattr(self, "_volume_last_applied_revision", -1):
+                return
+
+        self._volume_last_applied_revision = max(
+            getattr(self, "_volume_last_applied_revision", -1),
+            normalized["volume_revision"],
+        )
+        self._volume_last_nonzero = normalized["last_nonzero_volume"]
+
+        if hasattr(self, "volume_slider"):
+            self.volume_slider.set_value(normalized["effective_volume"])
+
     def _flush_pending_volume(self):
         self._volume_update_job = None
         if self._pending_volume is None:
             return
         volume = self._pending_volume
         self._pending_volume = None
-        self._submit_network_job(lambda: self.agent.set_volume(volume))
+        self._volume_write_in_flight = True
+
+        def _job():
+            return self.agent.set_volume_with_state(volume)
+
+        def _on_done(payload):
+            self._volume_write_in_flight = False
+            if not self._root_alive():
+                return
+            if isinstance(payload, dict):
+                self._apply_volume_state(payload, force=True)
+
+        def _on_error(exc):
+            self._volume_write_in_flight = False
+            self._handle_network_error(exc)
+
+        self._submit_network_job(_job, on_success=_on_done, on_error=_on_error)
+
+    def on_mute_toggle(self, should_mute: bool):
+        """Handle mute/unmute button intent from slider UI."""
+        self._volume_local_change_until = time.monotonic() + self._VOLUME_LOCAL_COOLDOWN_SEC
+        if self.root and self._volume_update_job is not None:
+            try:
+                self.root.after_cancel(self._volume_update_job)
+            except tk.TclError:
+                pass
+            self._volume_update_job = None
+        self._pending_volume = None
+
+        if should_mute and hasattr(self, "volume_slider"):
+            self.volume_slider.set_value(0)
+
+        self._volume_write_in_flight = True
+
+        def _job():
+            return self.agent.set_mute_with_state(should_mute)
+
+        def _on_done(payload):
+            self._volume_write_in_flight = False
+            if not self._root_alive():
+                return
+            if isinstance(payload, dict):
+                self._apply_volume_state(payload, force=True)
+
+        def _on_error(exc):
+            self._volume_write_in_flight = False
+            self._handle_network_error(exc)
+
+        self._submit_network_job(_job, on_success=_on_done, on_error=_on_error)
 
     def _start_volume_polling_loop(self):
         """Start periodic health polling to keep slider in sync with remote changes."""
@@ -1937,16 +2149,7 @@ class AgentGUI:
                 return
 
             self._volume_poll_failures = 0
-            remote_volume = state.get("volume") if isinstance(state, dict) else None
-            if (
-                hasattr(self, "volume_slider")
-                and isinstance(remote_volume, (int, float))
-                and time.monotonic() >= getattr(self, "_volume_local_change_until", 0.0)
-            ):
-                local_volume = int(getattr(self.volume_slider, "value", 80))
-                next_volume = int(remote_volume)
-                if local_volume != next_volume:
-                    self.volume_slider.set_value(next_volume)
+            self._apply_volume_state(state)
 
             playlist = state.get("playlist", {}) if isinstance(state, dict) else {}
             is_playlist_active = bool(playlist.get("active")) if isinstance(playlist, dict) else False

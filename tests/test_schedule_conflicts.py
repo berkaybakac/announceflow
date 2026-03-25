@@ -253,6 +253,10 @@ class SchedulerStreamRuntimeRulesTestCase(unittest.TestCase):
             "is_within_working_hours",
             return_value=True,
         ), patch.object(
+            scheduler_module,
+            "resolve_silence_policy",
+            return_value={"silence_active": False, "policy": "none", "reason_code": "test"},
+        ), patch.object(
             scheduler_module.db,
             "update_one_time_schedule_status",
         ) as mock_update_status:
@@ -283,6 +287,10 @@ class SchedulerStreamRuntimeRulesTestCase(unittest.TestCase):
             scheduler_module,
             "is_within_working_hours",
             return_value=True,
+        ), patch.object(
+            scheduler_module,
+            "resolve_silence_policy",
+            return_value={"silence_active": False, "policy": "none", "reason_code": "test"},
         ), patch.object(
             scheduler_module.db,
             "get_playlist_state",
@@ -319,6 +327,10 @@ class SchedulerStreamRuntimeRulesTestCase(unittest.TestCase):
             scheduler_module,
             "is_within_working_hours",
             return_value=True,
+        ), patch.object(
+            scheduler_module,
+            "resolve_silence_policy",
+            return_value={"silence_active": False, "policy": "none", "reason_code": "test"},
         ), patch.object(
             scheduler_module.db,
             "get_playlist_state",
