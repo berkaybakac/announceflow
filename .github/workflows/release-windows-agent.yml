@@ -45,7 +45,7 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: StatekSound-Windows-${{ github.ref_name }}
+          name: StatekSound-${{ github.ref_name }}
           path: agent/dist/StatekSound.exe
 
       - name: Create Release
