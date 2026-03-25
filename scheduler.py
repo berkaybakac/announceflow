@@ -928,6 +928,16 @@ class Scheduler:
             fail_safe_on_unknown=True,
         )
         if policy_decision.get("silence_active", False):
+            log_schedule(
+                "scheduled_media_blocked_policy",
+                {
+                    "schedule_id": schedule_id,
+                    "is_one_time": bool(is_one_time),
+                    "is_announcement": bool(is_announcement),
+                    "policy": policy_decision.get("policy"),
+                    "reason_code": policy_decision.get("reason_code"),
+                },
+            )
             logger.info(
                 "Skipping scheduled media due to silence policy "
                 f"(schedule_id={schedule_id}, policy={policy_decision.get('policy')}, "
@@ -970,6 +980,15 @@ class Scheduler:
             )
             override_applied = bool(player.set_volume(override_volume))
             if not override_applied:
+                log_error(
+                    "scheduled_override_volume_apply_failed",
+                    {
+                        "schedule_id": schedule_id,
+                        "override_volume": override_volume,
+                        "canonical_volume": int(canonical_volume.get("volume", 0)),
+                        "source_type": source_type,
+                    },
+                )
                 logger.warning(
                     "Scheduled announcement mute override could not set player volume"
                 )

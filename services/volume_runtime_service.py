@@ -12,6 +12,7 @@ import time
 from typing import Any, Optional
 
 import database as db
+from logger import log_error
 from player import get_player
 
 
@@ -82,11 +83,15 @@ class VolumeRuntimeService:
 
     def restore_override(self, *, reason: str, token: Optional[int] = None) -> bool:
         """Deactivate override and restore player output to canonical DB volume."""
+        active_token = 0
+        override_source = "announcement"
         with self._lock:
             if not self._override_active:
                 return False
             if token is not None and token != self._override_token:
                 return False
+            active_token = self._override_token
+            override_source = self._override_source or "announcement"
             self._override_active = False
             self._override_session = None
             self._override_volume = 0
@@ -98,6 +103,16 @@ class VolumeRuntimeService:
         try:
             get_player().set_volume(target_volume)
         except (OSError, RuntimeError) as exc:  # pragma: no cover - defensive
+            log_error(
+                "volume_override_restore_failed",
+                {
+                    "reason": reason,
+                    "token": token if token is not None else active_token,
+                    "source": override_source,
+                    "canonical_volume": target_volume,
+                    "error": str(exc),
+                },
+            )
             logger.warning("Volume override restore failed: %s", exc)
             return False
 
@@ -178,4 +193,3 @@ def get_volume_runtime_service() -> VolumeRuntimeService:
     if _volume_runtime_service is None:
         _volume_runtime_service = VolumeRuntimeService()
     return _volume_runtime_service
-

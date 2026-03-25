@@ -660,6 +660,7 @@
             }
         } catch (error) {
             console.error('Error setting volume:', error);
+            showToast('Ses ayarı uygulanamadı. Tekrar deneyin.', 'error');
             shouldResync = true;
         } finally {
             volumeWriteInFlight = false;

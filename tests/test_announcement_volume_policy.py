@@ -174,6 +174,7 @@ class TestScheduledAnnouncementPolicy:
         )
 
     @patch("scheduler.db.update_one_time_schedule_status")
+    @patch("scheduler.log_schedule")
     @patch("scheduler.resolve_silence_policy")
     @patch("scheduler.is_within_working_hours")
     @patch("scheduler.get_stream_service")
@@ -184,6 +185,7 @@ class TestScheduledAnnouncementPolicy:
         mock_get_stream_service,
         mock_is_working_hours,
         mock_resolve_policy,
+        mock_log_schedule,
         mock_update_one_time_status,
     ):
         scheduler = Scheduler(check_interval_seconds=1)
@@ -206,4 +208,78 @@ class TestScheduledAnnouncementPolicy:
 
         mock_start.assert_not_called()
         mock_update_one_time_status.assert_called_once_with(55, "cancelled")
+        mock_log_schedule.assert_called_once()
+        event, payload = mock_log_schedule.call_args.args
+        assert event == "scheduled_media_blocked_policy"
+        assert payload["schedule_id"] == 55
+        assert payload["is_one_time"] is True
+        assert payload["is_announcement"] is True
+        assert payload["policy"] == "prayer"
+        assert payload["reason_code"] == "prayer_window_active"
 
+    @patch("scheduler.log_error")
+    @patch("scheduler._volume_runtime")
+    @patch("scheduler.db.get_volume_state")
+    @patch("scheduler.resolve_silence_policy")
+    @patch("scheduler.is_within_working_hours")
+    @patch("scheduler.get_stream_service")
+    @patch("scheduler.get_player")
+    def test_scheduled_override_apply_failure_logs_error(
+        self,
+        mock_get_player,
+        mock_get_stream_service,
+        mock_is_working_hours,
+        mock_resolve_policy,
+        mock_get_volume_state,
+        _mock_volume_runtime,
+        mock_log_error,
+    ):
+        scheduler = Scheduler(check_interval_seconds=1)
+        player = MagicMock()
+        player.is_playing = False
+        player.set_volume.return_value = False
+        mock_get_player.return_value = player
+
+        stream_service = MagicMock()
+        stream_service.status.return_value = {"active": False}
+        mock_get_stream_service.return_value = stream_service
+        mock_is_working_hours.return_value = True
+        mock_resolve_policy.return_value = {
+            "silence_active": False,
+            "policy": "none",
+            "reason_code": "prayer_disabled",
+        }
+        mock_get_volume_state.return_value = {
+            "volume": 0,
+            "muted": True,
+            "last_nonzero_volume": 33,
+            "volume_revision": 9,
+        }
+
+        with patch.object(
+            scheduler,
+            "_capture_restore_snapshot",
+            return_value={
+                "playlist_was_active": False,
+                "playlist_files": [],
+                "playlist_index": -1,
+                "playlist_loop": True,
+            },
+        ), patch.object(scheduler, "_interrupt_for_scheduled_media"), patch.object(
+            scheduler, "_start_scheduled_media", return_value=True
+        ), patch.object(
+            scheduler, "_queue_restore_target", return_value=False
+        ):
+            scheduler._play_media(
+                filepath="/tmp/announce.mp3",
+                schedule_id=77,
+                is_one_time=False,
+                is_announcement=True,
+            )
+
+        mock_log_error.assert_called_once()
+        event, payload = mock_log_error.call_args.args
+        assert event == "scheduled_override_volume_apply_failed"
+        assert payload["schedule_id"] == 77
+        assert payload["override_volume"] == 33
+        assert payload["canonical_volume"] == 0
