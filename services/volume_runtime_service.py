@@ -174,14 +174,20 @@ class VolumeRuntimeService:
             current_session = getattr(player, "_playback_session", None)
             if target_session is None:
                 if not player.is_playing:
-                    self.restore_override(reason="announcement_stopped", token=token)
+                    if not self.restore_override(reason="announcement_stopped", token=token):
+                        time.sleep(1)
+                        self.restore_override(reason="announcement_stopped_retry", token=token)
                     return
             elif current_session != target_session:
-                self.restore_override(reason="announcement_session_changed", token=token)
+                if not self.restore_override(reason="announcement_session_changed", token=token):
+                    time.sleep(1)
+                    self.restore_override(reason="announcement_session_changed_retry", token=token)
                 return
             time.sleep(0.2)
 
-        self.restore_override(reason="announcement_override_timeout", token=token)
+        if not self.restore_override(reason="announcement_override_timeout", token=token):
+            time.sleep(1)
+            self.restore_override(reason="announcement_override_timeout_retry", token=token)
 
 
 _volume_runtime_service: Optional[VolumeRuntimeService] = None

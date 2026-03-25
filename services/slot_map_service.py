@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 import database as db
+from logger import log_error
 from services.config_service import load_config
 from services.schedule_conflict_service import (
     MINUTES_PER_DAY,
@@ -140,6 +141,7 @@ def _get_prayer_raw(config: dict, date_str: str) -> List[RawSlot]:
         return []
 
     if not times:
+        logger.debug("No prayer times cached for %s", date_str)
         return []
 
     raw: List[RawSlot] = []
@@ -156,11 +158,18 @@ def _get_one_time_raw(target_date: datetime) -> List[RawSlot]:
     """Get raw one-time schedule slots for a specific date."""
     raw: List[RawSlot] = []
     for schedule in db.get_pending_one_time_schedules():
-        sched_dt = _parse_schedule_datetime(schedule.get("scheduled_datetime", ""))
-        if not sched_dt or sched_dt.date() != target_date.date():
+        raw_dt = schedule.get("scheduled_datetime", "")
+        sched_dt = _parse_schedule_datetime(raw_dt)
+        if not sched_dt:
+            if raw_dt:
+                logger.warning("Skipping schedule id=%s: unparseable datetime=%r", schedule.get("id"), raw_dt)
+            continue
+        if sched_dt.date() != target_date.date():
             continue
 
         duration = resolve_duration_seconds(schedule.get("media_id", 0))
+        if duration <= 0:
+            logger.warning("Schedule id=%s has zero duration (media_id=%s)", schedule.get("id"), schedule.get("media_id"))
         start = sched_dt.hour * 60 + sched_dt.minute
         end = start + (duration // SECONDS_PER_MINUTE)
         if duration % SECONDS_PER_MINUTE:
@@ -201,6 +210,7 @@ def get_day_slots(date_str: str) -> Dict[str, Any]:
     try:
         target_date = datetime.strptime(date_str, "%Y-%m-%d")
     except (ValueError, TypeError):
+        logger.warning("Invalid date_str=%r, falling back to today", date_str)
         target_date = datetime.now()
         date_str = target_date.strftime("%Y-%m-%d")
 
@@ -232,6 +242,8 @@ def get_day_slots(date_str: str) -> Dict[str, Any]:
     prev_raw.extend(_get_prayer_raw(config, prev_date_str))
 
     _, overflow_into_today = _split_at_midnight(prev_raw)
+    if overflow_into_today:
+        logger.info("Overnight overflow: %d slot(s) from %s into %s", len(overflow_into_today), prev_date_str, date_str)
     today_slots.extend(overflow_into_today)
 
     # Convert to API dicts and sort

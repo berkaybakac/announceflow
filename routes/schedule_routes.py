@@ -7,6 +7,7 @@ import re
 from datetime import datetime
 from flask import Blueprint, request, redirect, url_for, jsonify
 import database as db
+from logger import log_web
 from services.schedule_conflict_service import (
     find_conflict_for_one_time,
     find_conflict_for_recurring,
@@ -344,7 +345,9 @@ def api_day_slots():
     date_str = request.args.get("date", "")
     if not date_str:
         date_str = datetime.now().strftime("%Y-%m-%d")
-    return jsonify(get_day_slots(date_str))
+    result = get_day_slots(date_str)
+    log_web("day_slots", {"date": date_str, "slot_count": len(result.get("slots", []))})
+    return jsonify(result)
 
 
 @schedule_bp.route("/api/schedules/week-slots", methods=["GET"])
@@ -352,7 +355,10 @@ def api_day_slots():
 def api_week_slots():
     """Return occupied time slots for a full week."""
     date_str = request.args.get("date", "")
-    return jsonify(get_week_slots(date_str or None))
+    result = get_week_slots(date_str or None)
+    total = sum(len(d.get("slots", [])) for d in result.get("days", []))
+    log_web("week_slots", {"date": date_str or "today", "total_slots": total})
+    return jsonify(result)
 
 
 @schedule_bp.route(
