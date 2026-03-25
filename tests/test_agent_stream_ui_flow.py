@@ -96,6 +96,9 @@ def _make_gui():
     gui._closing = False
     gui._volume_update_job = None
     gui._pending_volume = None
+    gui._volume_write_in_flight = False
+    gui._volume_last_applied_revision = -1
+    gui._volume_last_nonzero = 80
 
     from stream_client import StreamClient
     gui._stream_client = MagicMock(spec=StreamClient)
@@ -554,6 +557,9 @@ def _make_gui_for_polling():
     gui._last_command_result = None
     gui._last_command_error = None
     gui._control_command_inflight_id = None
+    gui._volume_write_in_flight = False
+    gui._volume_last_applied_revision = -1
+    gui._volume_last_nonzero = 80
     gui._btn_stream_start = None
     gui._btn_stream_stop = None
     gui._btn_music_start = None
@@ -995,11 +1001,24 @@ class TestModernSliderCardBg:
         """show_main_frame passes card_bg=_BG_CARD when creating the volume slider."""
         assert "card_bg=_BG_CARD" in self._source()
 
+    def test_vol_section_passes_mute_command(self):
+        """show_main_frame wires mute button to AgentGUI.on_mute_toggle."""
+        assert "mute_command=self.on_mute_toggle" in self._source()
+
     def test_slider_bg_uses_card_bg_or_fallback(self):
         """ModernSlider sets bg from card_bg argument (not hardcoded _BG)."""
         source = self._source()
         # The init should store bg = card_bg or _BG
         assert "bg = card_bg or _BG" in source
+
+    def test_slider_has_mute_toggle_button(self):
+        source = self._source()
+        assert "command=self.toggle_mute" in source
+        assert "def toggle_mute(self):" in source
+
+    def test_slider_tracks_last_nonzero_volume_for_unmute(self):
+        source = self._source()
+        assert "_last_nonzero_value" in source
 
 
 # --------------- 13. Volume sync poll ---------------
@@ -1065,6 +1084,37 @@ class TestVolumeSyncPoll:
         gui.volume_slider.set_value.assert_not_called()
         assert gui._music_active is True
         gui._refresh_music_buttons.assert_called_once()
+        gui._schedule_next_volume_poll.assert_called_once_with(
+            gui._VOLUME_POLL_INTERVAL_MS
+        )
+
+    def test_effective_volume_overrides_canonical_slider_value(self):
+        gui = _make_gui_for_polling()
+        gui._volume_poll_active = True
+        gui._volume_poll_job = None
+        gui._volume_poll_failures = 0
+        gui._volume_local_change_until = 0.0
+        gui._music_active = False
+        gui.volume_slider = MagicMock()
+        gui.volume_slider.value = 0
+        gui._schedule_next_volume_poll = MagicMock()
+        gui._refresh_music_buttons = MagicMock()
+
+        on_success, _ = self._capture_volume_poll_callbacks(gui)
+        assert on_success is not None
+
+        on_success(
+            {
+                "volume": 0,
+                "muted": True,
+                "effective_volume": 40,
+                "effective_muted": False,
+                "mute_override_active": True,
+                "playlist": {"active": False},
+            }
+        )
+
+        gui.volume_slider.set_value.assert_called_once_with(40)
         gui._schedule_next_volume_poll.assert_called_once_with(
             gui._VOLUME_POLL_INTERVAL_MS
         )

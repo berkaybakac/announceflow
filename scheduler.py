@@ -25,8 +25,10 @@ from services.stream_policy import (
     should_skip_scheduled_music,
 )
 from services.stream_service import get_stream_service
+from services.volume_runtime_service import get_volume_runtime_service
 
 logger = logging.getLogger(__name__)
+_volume_runtime = get_volume_runtime_service()
 
 
 def _is_time_within_window(curr_time, start_time, end_time) -> bool:
@@ -920,6 +922,21 @@ class Scheduler:
         config = self._get_cached_config()
         source_type = "one-time" if is_one_time else "recurring"
 
+        policy_decision = resolve_silence_policy(
+            config,
+            allow_network=False,
+            fail_safe_on_unknown=True,
+        )
+        if policy_decision.get("silence_active", False):
+            logger.info(
+                "Skipping scheduled media due to silence policy "
+                f"(schedule_id={schedule_id}, policy={policy_decision.get('policy')}, "
+                f"reason={policy_decision.get('reason_code')})"
+            )
+            if is_one_time:
+                db.update_one_time_schedule_status(schedule_id, "cancelled")
+            return
+
         if not is_within_working_hours(config):
             return
 
@@ -943,12 +960,34 @@ class Scheduler:
         snapshot = self._capture_restore_snapshot(player)
         self._interrupt_for_scheduled_media(player, is_announcement, snapshot)
 
+        override_applied = False
+        override_volume = 0
+        canonical_volume = db.get_volume_state()
+        if is_announcement and bool(canonical_volume.get("muted", False)):
+            override_volume = max(
+                1,
+                int(canonical_volume.get("last_nonzero_volume", 80)),
+            )
+            override_applied = bool(player.set_volume(override_volume))
+            if not override_applied:
+                logger.warning(
+                    "Scheduled announcement mute override could not set player volume"
+                )
+
         logger.info(
             f"[source] {source_type} play -> {os.path.basename(filepath)} (schedule_id={schedule_id})"
         )
         success = self._start_scheduled_media(
             player, filepath, snapshot["playlist_was_active"]
         )
+        if success and override_applied:
+            _volume_runtime.activate_announcement_override(
+                playback_session=getattr(player, "_playback_session", None),
+                effective_volume=override_volume,
+                source="scheduled_announcement",
+            )
+        elif not success and override_applied:
+            player.set_volume(int(canonical_volume.get("volume", 0)))
         if announcement_interrupted_stream:
             self._announcement_done = threading.Event()
         restore_queued = success and self._queue_restore_target(snapshot)

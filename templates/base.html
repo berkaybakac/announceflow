@@ -529,6 +529,48 @@
             box-shadow: 0 2px 8px var(--primary-glow);
         }
 
+        .volume-control-row {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .volume-mute-btn {
+            width: 40px;
+            height: 40px;
+            border-radius: 10px;
+            border: 1px solid var(--border);
+            background: var(--bg-input);
+            color: var(--text-secondary);
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s ease;
+            flex-shrink: 0;
+        }
+
+        .volume-mute-btn svg {
+            width: 20px;
+            height: 20px;
+        }
+
+        .volume-mute-btn:hover {
+            border-color: var(--primary);
+            color: var(--primary);
+            background: var(--bg-card-hover);
+        }
+
+        .volume-mute-btn[aria-pressed="true"] {
+            color: var(--danger);
+            border-color: rgba(239, 68, 68, 0.5);
+        }
+
+        .volume-mute-btn:focus-visible {
+            outline: none;
+            box-shadow: 0 0 0 3px var(--primary-glow);
+        }
+
         /* Responsive */
         @media (max-width: 768px) {
             .sidebar {

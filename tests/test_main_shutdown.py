@@ -34,7 +34,7 @@ def _bootstrap_main(monkeypatch):
     )
     monkeypatch.setattr(main_mod, "log_system", log_system_mock)
     monkeypatch.setattr(main_mod.db, "init_database", MagicMock())
-    monkeypatch.setattr(main_mod.db, "get_playback_state", MagicMock(return_value={"volume": 43}))
+    monkeypatch.setattr(main_mod.db, "get_volume_state", MagicMock(return_value={"volume": 43}))
     monkeypatch.setattr(
         main_mod.db,
         "get_playlist_state",
@@ -133,4 +133,3 @@ def test_graceful_exit_continues_when_stream_stop_raises(monkeypatch):
         call.args and "WebStream: shutdown error:" in str(call.args[0])
         for call in state["logger"].debug.call_args_list
     )
-

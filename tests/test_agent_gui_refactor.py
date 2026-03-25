@@ -74,6 +74,9 @@ def _make_gui():
     gui._closing = False
     gui._volume_update_job = None
     gui._pending_volume = None
+    gui._volume_write_in_flight = False
+    gui._volume_last_applied_revision = -1
+    gui._volume_last_nonzero = 80
     gui._status_clear_job = None
     gui._btn_music_start = None
     gui._btn_music_stop = None

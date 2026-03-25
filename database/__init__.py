@@ -186,6 +186,8 @@ def init_database():
             position_seconds REAL DEFAULT 0,
             is_playing INTEGER DEFAULT 0,
             volume INTEGER DEFAULT 80,
+            last_nonzero_volume INTEGER DEFAULT 80,
+            volume_revision INTEGER DEFAULT 0,
             updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (current_media_id) REFERENCES media_files (id) ON DELETE SET NULL
         )
@@ -195,7 +197,8 @@ def init_database():
     # Initialize playback state if not exists
     cursor.execute(
         """
-        INSERT OR IGNORE INTO playback_state (id, volume) VALUES (1, 80)
+        INSERT OR IGNORE INTO playback_state (id, volume)
+        VALUES (1, 80)
     """
     )
 
@@ -246,6 +249,45 @@ def _run_migrations():
             "ALTER TABLE playback_state ADD COLUMN playlist_active INTEGER DEFAULT 0"
         )
         conn.commit()
+
+    # Migration: Add last_nonzero_volume column to playback_state
+    try:
+        cursor.execute("SELECT last_nonzero_volume FROM playback_state LIMIT 1")
+    except sqlite3.OperationalError:
+        cursor.execute(
+            "ALTER TABLE playback_state ADD COLUMN last_nonzero_volume INTEGER DEFAULT 80"
+        )
+        conn.commit()
+
+    # Migration: Add volume_revision column to playback_state
+    try:
+        cursor.execute("SELECT volume_revision FROM playback_state LIMIT 1")
+    except sqlite3.OperationalError:
+        cursor.execute(
+            "ALTER TABLE playback_state ADD COLUMN volume_revision INTEGER DEFAULT 0"
+        )
+        conn.commit()
+
+    # Backfill canonical volume columns for existing rows.
+    cursor.execute(
+        """
+        UPDATE playback_state
+        SET last_nonzero_volume = CASE
+            WHEN COALESCE(last_nonzero_volume, 0) > 0 THEN last_nonzero_volume
+            WHEN COALESCE(volume, 0) > 0 THEN volume
+            ELSE 80
+        END
+        WHERE id = 1
+    """
+    )
+    cursor.execute(
+        """
+        UPDATE playback_state
+        SET volume_revision = COALESCE(volume_revision, 0)
+        WHERE id = 1
+    """
+    )
+    conn.commit()
 
     # Migration: Add 'reason' column to recurring_schedules if it doesn't exist
     try:
@@ -389,6 +431,16 @@ def update_playback_state(
     return _playback_repo.update_playback_state(
         current_media_id, position_seconds, is_playing, volume
     )
+
+
+def get_volume_state() -> Dict[str, Any]:
+    """Get canonical volume state."""
+    return _playback_repo.get_volume_state()
+
+
+def set_volume_state(volume: int) -> Dict[str, Any]:
+    """Set canonical volume state atomically."""
+    return _playback_repo.set_volume_state(volume)
 
 
 # Playlist State (2 functions)

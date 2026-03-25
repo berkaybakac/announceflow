@@ -484,9 +484,10 @@ if __name__ == "__main__":
     # Initialize database
     db.init_database()
 
-    # Initialize volume from config
+    # Initialize runtime player volume from canonical DB state
     config = load_config()
-    initial_volume = config.get("volume", 80)
+    canonical_volume = db.get_volume_state()
+    initial_volume = int(canonical_volume.get("volume", 80))
     try:
         web_port = int(config.get("web_port", 5001))
         if web_port < 1 or web_port > 65535:
@@ -496,7 +497,6 @@ if __name__ == "__main__":
 
     player = get_player()
     player.set_volume(initial_volume)
-    db.update_playback_state(volume=initial_volume)
 
     # Start scheduler
     scheduler = get_scheduler()

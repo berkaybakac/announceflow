@@ -126,8 +126,8 @@ def main():
     # Restore volume from database
     # Wait for ALSA to fully initialize on Pi (prevents volume not being applied on boot)
     time.sleep(2)
-    state = db.get_playback_state()
-    volume = state.get("volume", 100)
+    state = db.get_volume_state()
+    volume = state.get("volume", 80)
     player.set_volume(volume)
     logger.info(f"Ses seviyesi ayarlandı: {volume}%")
 
