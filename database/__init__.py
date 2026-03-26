@@ -117,7 +117,7 @@ def init_database():
             media_id INTEGER NOT NULL,
             scheduled_datetime TIMESTAMP NOT NULL,
             reason TEXT,
-            status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'played', 'cancelled')),
+            status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'queued', 'played', 'cancelled')),
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (media_id) REFERENCES media_files (id) ON DELETE CASCADE
         )
@@ -294,6 +294,54 @@ def _run_migrations():
         cursor.execute("SELECT reason FROM recurring_schedules LIMIT 1")
     except sqlite3.OperationalError:
         cursor.execute("ALTER TABLE recurring_schedules ADD COLUMN reason TEXT")
+        conn.commit()
+
+    # Migration: Expand one_time_schedules status CHECK to include 'queued'
+    try:
+        cursor.execute(
+            "SELECT 1 FROM one_time_schedules WHERE status = 'queued' LIMIT 0"
+        )
+    except sqlite3.OperationalError:
+        # CHECK constraint rejects 'queued' — recreate table with expanded constraint
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS one_time_schedules_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                media_id INTEGER NOT NULL,
+                scheduled_datetime TIMESTAMP NOT NULL,
+                reason TEXT,
+                status TEXT DEFAULT 'pending'
+                    CHECK(status IN ('pending', 'queued', 'played', 'cancelled')),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (media_id) REFERENCES media_files (id) ON DELETE CASCADE
+            )
+        """
+        )
+        cursor.execute(
+            """
+            INSERT INTO one_time_schedules_new
+                (id, media_id, scheduled_datetime, reason, status, created_at)
+            SELECT id, media_id, scheduled_datetime, reason, status, created_at
+            FROM one_time_schedules
+        """
+        )
+        cursor.execute("DROP TABLE one_time_schedules")
+        cursor.execute(
+            "ALTER TABLE one_time_schedules_new RENAME TO one_time_schedules"
+        )
+        # Recreate indexes lost during table swap
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_one_time_status
+            ON one_time_schedules(status)
+        """
+        )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_one_time_datetime
+            ON one_time_schedules(scheduled_datetime)
+        """
+        )
         conn.commit()
 
     conn.close()

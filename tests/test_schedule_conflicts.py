@@ -316,6 +316,27 @@ class ScheduleConflictTestCase(unittest.TestCase):
         self.assertFalse(second)
         self.assertEqual(len(scheduler._announcement_queue), 1)
 
+    def test_scheduler_queue_enqueue_sets_one_time_status_to_queued(self):
+        scheduler = Scheduler(check_interval_seconds=1)
+        media_id = self._add_media("queued_announcement.mp3", 10, media_type="announcement")
+        due_dt = datetime.now() + timedelta(minutes=5)
+        schedule_id = db.add_one_time_schedule(media_id, due_dt)
+
+        self.assertEqual(db.get_one_time_schedule(schedule_id)["status"], "pending")
+
+        queued = scheduler._queue_announcement(
+            filepath="/tmp/queued_announcement.mp3",
+            schedule_id=schedule_id,
+            is_one_time=True,
+            due_dt=due_dt,
+            source="one_time",
+            duration_seconds=10,
+        )
+
+        self.assertTrue(queued)
+        schedule = db.get_one_time_schedule(schedule_id)
+        self.assertEqual(schedule["status"], "queued")
+
     def test_scheduler_queue_lite_drops_stale_and_cancels_one_time(self):
         scheduler = Scheduler(check_interval_seconds=1)
         scheduler._announcement_max_delay_seconds = 60

@@ -404,11 +404,13 @@ class Scheduler:
             if cancel_one_time:
                 db.update_one_time_schedule_status(schedule_id, "cancelled")
 
-    def _is_one_time_schedule_pending(self, schedule_id: int) -> bool:
+    def _is_one_time_schedule_dispatchable(self, schedule_id: int) -> bool:
+        """Check if a one-time schedule is still valid for dispatch (pending or queued)."""
         schedule = db.get_one_time_schedule(schedule_id)
         if not schedule:
             return False
-        return str(schedule.get("status") or "").strip().lower() == "pending"
+        status = str(schedule.get("status") or "").strip().lower()
+        return status in ("pending", "queued")
 
     def _drop_invalid_front_queue_items(self) -> None:
         """Drop queued one-time announcements that are no longer pending."""
@@ -418,7 +420,7 @@ class Scheduler:
                 return
 
             schedule_id = int(item.get("schedule_id") or 0)
-            if schedule_id > 0 and self._is_one_time_schedule_pending(schedule_id):
+            if schedule_id > 0 and self._is_one_time_schedule_dispatchable(schedule_id):
                 return
 
             item = self._announcement_queue.popleft()
@@ -545,6 +547,7 @@ class Scheduler:
             self._announcement_enqueued_keys.add(dedupe_key)
             if is_one_time:
                 self._queued_one_time_ids.add(int(schedule_id))
+                db.update_one_time_schedule_status(int(schedule_id), "queued")
             queue_size = len(self._announcement_queue)
 
         log_schedule(
