@@ -1,6 +1,7 @@
 """Schedule conflict validation tests."""
 import json
 import os
+import sqlite3
 import tempfile
 import time
 import unittest
@@ -169,6 +170,32 @@ class ScheduleConflictTestCase(unittest.TestCase):
         self.assertIn("Plan eklendi".encode("utf-8"), response.data)
         pending = db.get_pending_one_time_schedules()
         self.assertEqual(len(pending), 2)
+
+    @patch("routes.schedule_routes.db.add_one_time_schedule", side_effect=RuntimeError("db write failed"))
+    def test_route_one_time_db_error_returns_flash_instead_of_500(self, _mock_add):
+        media_id = self._add_media("faulty_write.mp3", 60, media_type="announcement")
+        target_dt = (datetime.now() + timedelta(days=1)).replace(
+            hour=15,
+            minute=30,
+            second=0,
+            microsecond=0,
+        )
+
+        response = self.client.post(
+            "/api/schedules/one-time",
+            data={
+                "media_id": str(media_id),
+                "date": target_dt.strftime("%Y-%m-%d"),
+                "time": target_dt.strftime("%H:%M"),
+            },
+            follow_redirects=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            "Plan oluşturulamadı. Lütfen tekrar deneyin.".encode("utf-8"),
+            response.data,
+        )
 
     def test_route_recurring_conflict_returns_flash_error(self):
         long_media = self._add_media("long.mp3", 420)
@@ -740,6 +767,121 @@ class SchedulerStreamRuntimeRulesTestCase(unittest.TestCase):
 
         stream_service.force_stop_by_policy.assert_called_once()
         stream_service.resume_after_announcement.assert_not_called()
+
+
+class DatabaseMigrationTestCase(unittest.TestCase):
+    """Regression tests for legacy DB migrations."""
+
+    def test_legacy_one_time_status_check_is_upgraded_for_queued(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "legacy.db")
+
+            conn = sqlite3.connect(db_path)
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                CREATE TABLE media_files (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    filename TEXT NOT NULL,
+                    filepath TEXT NOT NULL,
+                    media_type TEXT NOT NULL CHECK(media_type IN ('music', 'announcement')),
+                    duration_seconds INTEGER DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            cursor.execute(
+                """
+                CREATE TABLE one_time_schedules (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    media_id INTEGER NOT NULL,
+                    scheduled_datetime TIMESTAMP NOT NULL,
+                    reason TEXT,
+                    status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'played', 'cancelled')),
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (media_id) REFERENCES media_files (id) ON DELETE CASCADE
+                )
+                """
+            )
+            cursor.execute(
+                """
+                CREATE TABLE recurring_schedules (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    media_id INTEGER NOT NULL,
+                    days_of_week TEXT NOT NULL,
+                    start_time TEXT NOT NULL,
+                    end_time TEXT,
+                    interval_minutes INTEGER DEFAULT 0,
+                    specific_times TEXT,
+                    reason TEXT,
+                    is_active INTEGER DEFAULT 1,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (media_id) REFERENCES media_files (id) ON DELETE CASCADE
+                )
+                """
+            )
+            cursor.execute(
+                """
+                CREATE TABLE playback_state (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    current_media_id INTEGER,
+                    position_seconds REAL DEFAULT 0,
+                    is_playing INTEGER DEFAULT 0,
+                    volume INTEGER DEFAULT 80,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (current_media_id) REFERENCES media_files (id) ON DELETE SET NULL
+                )
+                """
+            )
+            cursor.execute("INSERT INTO playback_state (id, volume) VALUES (1, 80)")
+            conn.commit()
+            conn.close()
+
+            old_db_path = db.DATABASE_PATH
+            old_media_repo = db._media_repo
+            old_schedule_repo = db._schedule_repo
+            old_playback_repo = db._playback_repo
+
+            try:
+                db.DATABASE_PATH = db_path
+                db._media_repo = MediaRepository(db_path)
+                db._schedule_repo = ScheduleRepository(db_path)
+                db._playback_repo = PlaybackRepository(db_path)
+                db.init_database()
+
+                conn = sqlite3.connect(db_path)
+                schema_sql = conn.execute(
+                    """
+                    SELECT sql
+                    FROM sqlite_master
+                    WHERE type = 'table' AND name = 'one_time_schedules'
+                    """
+                ).fetchone()[0]
+                conn.close()
+
+                self.assertIn("queued", schema_sql.lower())
+
+                media_id = db.add_media_file(
+                    filename="legacy_announcement.mp3",
+                    filepath="/tmp/legacy_announcement.mp3",
+                    media_type="announcement",
+                    duration_seconds=10,
+                )
+                schedule_id = db.add_one_time_schedule(
+                    media_id,
+                    datetime.now() + timedelta(minutes=5),
+                )
+                self.assertTrue(
+                    db.update_one_time_schedule_status(schedule_id, "queued")
+                )
+                schedule = db.get_one_time_schedule(schedule_id)
+                self.assertIsNotNone(schedule)
+                self.assertEqual(schedule["status"], "queued")
+            finally:
+                db.DATABASE_PATH = old_db_path
+                db._media_repo = old_media_repo
+                db._schedule_repo = old_schedule_repo
+                db._playback_repo = old_playback_repo
 
 
 if __name__ == "__main__":
