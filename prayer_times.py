@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 # Import event logger (lazy to avoid circular imports)
-def _log_prayer_event(event: str, data: dict = None):
+def _log_prayer_event(event: str, data: Optional[Dict] = None):
     try:
         from logger import log_prayer
 
@@ -24,7 +24,7 @@ def _log_prayer_event(event: str, data: dict = None):
         pass
 
 
-def _log_error_event(event: str, data: dict = None):
+def _log_error_event(event: str, data: Optional[Dict] = None):
     try:
         from logger import log_error
 
@@ -636,7 +636,7 @@ def is_prayer_time(city: str, district: str, buffer_minutes: int = 1) -> bool:
     current_minutes = now.hour * 60 + now.minute
 
     # Check each prayer time
-    for prayer_key in ["imsak", "gunes", "ogle", "ikindi", "aksam", "yatsi"]:
+    for prayer_key in ["imsak", "ogle", "ikindi", "aksam", "yatsi"]:
         prayer_time_str = times.get(prayer_key, "")
         if not prayer_time_str:
             continue
@@ -674,15 +674,14 @@ def get_next_prayer_time(city: str, district: str) -> Optional[Dict]:
     current_minutes = now.hour * 60 + now.minute
 
     prayer_names = {
-        "imsak": "İmsak",
-        "gunes": "Güneş",
+        "imsak": "Sabah",
         "ogle": "Öğle",
         "ikindi": "İkindi",
         "aksam": "Akşam",
         "yatsi": "Yatsı",
     }
 
-    for prayer_key in ["imsak", "gunes", "ogle", "ikindi", "aksam", "yatsi"]:
+    for prayer_key in ["imsak", "ogle", "ikindi", "aksam", "yatsi"]:
         prayer_time_str = times.get(prayer_key, "")
         if not prayer_time_str:
             continue
@@ -700,7 +699,7 @@ def get_next_prayer_time(city: str, district: str) -> Optional[Dict]:
             continue
 
     # All prayers passed for today, return tomorrow's imsak
-    return {"name": "İmsak (yarın)", "time": times.get("imsak", "--:--")}
+    return {"name": "Sabah (yarın)", "time": times.get("imsak", "--:--")}
 
 
 if __name__ == "__main__":

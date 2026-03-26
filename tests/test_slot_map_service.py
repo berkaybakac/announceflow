@@ -140,7 +140,6 @@ class SlotMapServiceTestCase(unittest.TestCase):
         fake_cache = {
             "İstanbul_Kadıköy_2026-03-25": {
                 "imsak": "05:30",
-                "gunes": "07:00",
                 "ogle": "12:15",
                 "ikindi": "15:30",
                 "aksam": "18:10",
@@ -153,13 +152,13 @@ class SlotMapServiceTestCase(unittest.TestCase):
             result = get_day_slots("2026-03-25")
 
         prayer_slots = [s for s in result["slots"] if s["type"] == "prayer"]
-        self.assertEqual(len(prayer_slots), 6)
+        self.assertEqual(len(prayer_slots), 5)
         # Check first prayer slot (imsak 05:30 → window 05:29-05:36)
         imsak_slot = prayer_slots[0]
         self.assertEqual(imsak_slot["start"], "05:29")
         self.assertEqual(imsak_slot["end"], "05:36")
         self.assertIn("Sessiz", imsak_slot["label"])
-        self.assertIn("İmsak", imsak_slot["label"])
+        self.assertIn("Sabah", imsak_slot["label"])
         self.assertIn("anons etkilenmez", imsak_slot["label"])
 
     @patch("services.slot_map_service.load_config")

@@ -41,7 +41,7 @@ def _is_prayer_window_active(
     current_dt = now or datetime.now()
     current_minutes = current_dt.hour * 60 + current_dt.minute
 
-    for prayer_key in ["imsak", "gunes", "ogle", "ikindi", "aksam", "yatsi"]:
+    for prayer_key in ["imsak", "ogle", "ikindi", "aksam", "yatsi"]:
         prayer_time_str = str(times.get(prayer_key, "")).strip()
         if not prayer_time_str:
             continue

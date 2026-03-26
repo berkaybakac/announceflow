@@ -12,7 +12,7 @@ import time
 from typing import Any, Optional
 
 import database as db
-from logger import log_error
+from logger import log_error, log_volume
 from player import get_player
 
 
@@ -44,6 +44,7 @@ class VolumeRuntimeService:
         playback_session: Optional[int],
         effective_volume: int,
         source: str,
+        start_watcher: bool = True,
     ) -> bool:
         """Mark temporary override active for the current playback session."""
         volume = max(1, _clamp_volume(effective_volume))
@@ -55,14 +56,24 @@ class VolumeRuntimeService:
             self._override_volume = volume
             self._override_source = str(source or "announcement")
 
-        self._start_session_watcher(token)
-        logger.info(
-            "Volume override activated: source=%s session=%s volume=%s",
-            source,
-            playback_session,
-            volume,
-        )
+        if start_watcher:
+            self._start_session_watcher(token)
+        log_volume("override_activated", {
+            "thread_id": threading.current_thread().name,
+            "token": token,
+            "source": str(source),
+            "session": int(playback_session) if playback_session is not None else None,
+            "volume": volume,
+            "start_watcher": start_watcher,
+        })
         return True
+
+    def get_override_token(self) -> Optional[int]:
+        """Return current override token for external restore callers."""
+        with self._lock:
+            if not self._override_active:
+                return None
+            return self._override_token
 
     def cancel_override(self, *, reason: str, restore: bool = False) -> bool:
         """Cancel override state (optionally restoring canonical output volume)."""
@@ -78,7 +89,11 @@ class VolumeRuntimeService:
             self._override_source = ""
             self._override_token += 1
 
-        logger.info("Volume override cancelled: reason=%s", reason)
+        log_volume("override_cancelled", {
+            "thread_id": threading.current_thread().name,
+            "token": self._override_token,
+            "reason": reason,
+        })
         return True
 
     def restore_override(self, *, reason: str, token: Optional[int] = None) -> bool:
@@ -106,6 +121,7 @@ class VolumeRuntimeService:
             log_error(
                 "volume_override_restore_failed",
                 {
+                    "thread_id": threading.current_thread().name,
                     "reason": reason,
                     "token": token if token is not None else active_token,
                     "source": override_source,
@@ -116,11 +132,12 @@ class VolumeRuntimeService:
             logger.warning("Volume override restore failed: %s", exc)
             return False
 
-        logger.info(
-            "Volume override restored canonical volume: reason=%s volume=%s",
-            reason,
-            target_volume,
-        )
+        log_volume("override_restored", {
+            "thread_id": threading.current_thread().name,
+            "token": active_token,
+            "reason": reason,
+            "canonical_volume": target_volume,
+        })
         return True
 
     def get_effective_state(

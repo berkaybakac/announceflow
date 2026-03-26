@@ -121,7 +121,6 @@ def _build_forced_prayer_entry(now: datetime) -> dict[str, str]:
     # Only one prayer time needs to match current window; others remain harmless.
     return {
         "imsak": "00:00",
-        "gunes": "00:00",
         "ogle": now_hhmm,
         "ikindi": "00:00",
         "aksam": "00:00",

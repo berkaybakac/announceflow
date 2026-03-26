@@ -171,6 +171,7 @@ class TestScheduledAnnouncementPolicy:
             playback_session=91,
             effective_volume=35,
             source="scheduled_announcement",
+            start_watcher=False,
         )
 
     @patch("scheduler.db.update_one_time_schedule_status")

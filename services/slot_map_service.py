@@ -27,8 +27,7 @@ PRAYER_BUFFER_BEFORE = 1
 PRAYER_DURATION_AFTER = 6  # 5 min ezan + 1 min buffer
 
 PRAYER_LABELS = {
-    "imsak": "İmsak",
-    "gunes": "Güneş",
+    "imsak": "Sabah",
     "ogle": "Öğle",
     "ikindi": "İkindi",
     "aksam": "Akşam",
