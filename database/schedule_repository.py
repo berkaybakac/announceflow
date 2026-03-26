@@ -63,6 +63,23 @@ class ScheduleRepository(BaseRepository):
         conn.close()
         return [dict(row) for row in rows]
 
+    def get_one_time_schedule(self, schedule_id: int) -> Optional[Dict[str, Any]]:
+        """Get a single one-time schedule by ID with media info."""
+        conn = self.get_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT s.*, m.filename, m.filepath, m.media_type
+            FROM one_time_schedules s
+            JOIN media_files m ON s.media_id = m.id
+            WHERE s.id = ?
+        """,
+            (schedule_id,),
+        )
+        row = cursor.fetchone()
+        conn.close()
+        return dict(row) if row else None
+
     def update_one_time_schedule_status(self, schedule_id: int, status: str) -> bool:
         """Update status of a one-time schedule."""
         conn = self.get_connection()

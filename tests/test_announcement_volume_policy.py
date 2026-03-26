@@ -179,7 +179,7 @@ class TestScheduledAnnouncementPolicy:
     @patch("scheduler.is_within_working_hours")
     @patch("scheduler.get_stream_service")
     @patch("scheduler.get_player")
-    def test_scheduled_announcement_cancelled_when_silence_active(
+    def test_scheduled_announcement_not_cancelled_when_silence_active(
         self,
         mock_get_player,
         mock_get_stream_service,
@@ -199,15 +199,16 @@ class TestScheduledAnnouncementPolicy:
         }
 
         with patch.object(scheduler, "_start_scheduled_media") as mock_start:
-            scheduler._play_media(
+            result = scheduler._play_media(
                 filepath="/tmp/announce.mp3",
                 schedule_id=55,
                 is_one_time=True,
                 is_announcement=True,
             )
 
+        assert result is False
         mock_start.assert_not_called()
-        mock_update_one_time_status.assert_called_once_with(55, "cancelled")
+        mock_update_one_time_status.assert_not_called()
         mock_log_schedule.assert_called_once()
         event, payload = mock_log_schedule.call_args.args
         assert event == "scheduled_media_blocked_policy"

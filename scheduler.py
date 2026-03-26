@@ -6,6 +6,7 @@ import logging
 import os
 import threading
 import time
+from collections import deque
 from datetime import datetime
 from typing import Optional, Any
 
@@ -13,6 +14,7 @@ import database as db
 from player import get_player
 from logger import log_trigger, log_schedule, log_prayer, log_error
 from services.config_service import load_config
+from services.schedule_conflict_service import resolve_duration_seconds
 from services.silence_policy import (
     resolve_silence_policy,
     is_within_working_hours as _policy_is_within_working_hours,
@@ -85,12 +87,34 @@ class Scheduler:
         self._stream_resume_worker_lock = threading.Lock()
         self._stream_resume_worker_in_progress = False
         self._announcement_done: Optional[threading.Event] = None
+        # Queue-Lite (announcement only): resilient, ordered dispatch under policy blocks.
+        # Lock protects all queue state reads/writes against concurrent Flask threads.
+        self._queue_lock = threading.Lock()
+        self._announcement_queue = deque()
+        self._announcement_enqueued_keys: set[str] = set()
+        self._queued_one_time_ids: set[int] = set()
+        self._announcement_current: Optional[dict[str, Any]] = None
+        self._announcement_gap_seconds: int = 10
+        self._announcement_max_delay_seconds: int = 15 * 60
+        self._announcement_next_allowed_monotonic: float = 0.0
+        self._announcement_last_block_reason: Optional[str] = None
+        self._announcement_queue_counters: dict[str, int] = {
+            "dropped_stale": 0,
+            "dropped_invalid": 0,
+            "stuck_reset": 0,
+        }
+        self._announcement_health_log_interval_seconds: int = 60
+        self._announcement_last_health_log_monotonic: float = 0.0
+        self._media_type_audited: bool = False
+        # Per-tick guard: at most one _play_media call succeeds per scheduler tick.
+        self._tick_media_dispatched: bool = False
 
     def start(self):
         """Start the scheduler background thread."""
         if self._running:
             logger.warning("Scheduler already running")
             return
+        self._audit_media_types_once()
 
         self._running = True
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
@@ -106,6 +130,84 @@ class Scheduler:
 
     def is_running(self) -> bool:
         return bool(self._running)
+
+    def get_announcement_queue_status(self) -> dict[str, int]:
+        """Return lightweight Queue-Lite stats for UI visibility.
+
+        Called from Flask request threads — lock ensures a consistent snapshot.
+        """
+        with self._queue_lock:
+            return {
+                "queued": len(self._announcement_queue),
+                "active": 1 if self._announcement_current is not None else 0,
+                "dropped_stale": int(self._announcement_queue_counters.get("dropped_stale", 0)),
+                "dropped_invalid": int(self._announcement_queue_counters.get("dropped_invalid", 0)),
+                "stuck_reset": int(self._announcement_queue_counters.get("stuck_reset", 0)),
+            }
+
+    def _normalize_media_type(self, raw_media_type: Any) -> str:
+        normalized = str(raw_media_type or "").strip().lower()
+        if normalized == "announcement":
+            return "announcement"
+        return "music"
+
+    def _is_announcement_media_type(self, raw_media_type: Any) -> bool:
+        return self._normalize_media_type(raw_media_type) == "announcement"
+
+    def _audit_media_types_once(self) -> None:
+        """Normalize legacy/invalid media_type rows at startup."""
+        if self._media_type_audited:
+            return
+
+        conn = None
+        try:
+            conn = db.get_db_connection()
+            cur = conn.cursor()
+            cur.execute(
+                """
+                UPDATE media_files
+                SET media_type = 'announcement'
+                WHERE lower(trim(COALESCE(media_type, ''))) = 'announcement'
+            """
+            )
+            normalized_announcement = max(0, int(cur.rowcount or 0))
+            cur.execute(
+                """
+                UPDATE media_files
+                SET media_type = 'music'
+                WHERE lower(trim(COALESCE(media_type, ''))) = 'music'
+            """
+            )
+            normalized_music = max(0, int(cur.rowcount or 0))
+            cur.execute(
+                """
+                UPDATE media_files
+                SET media_type = 'music'
+                WHERE media_type IS NULL
+                   OR trim(media_type) = ''
+                   OR lower(trim(media_type)) NOT IN ('music', 'announcement')
+            """
+            )
+            coerced_invalid = max(0, int(cur.rowcount or 0))
+            conn.commit()
+
+            total = normalized_announcement + normalized_music + coerced_invalid
+            if total > 0:
+                log_schedule(
+                    "media_type_audit_normalized",
+                    {
+                        "rows_total": total,
+                        "rows_announcement": normalized_announcement,
+                        "rows_music": normalized_music,
+                        "rows_invalid_to_music": coerced_invalid,
+                    },
+                )
+        except Exception as e:
+            logger.warning("Media type startup audit failed: %s", e)
+        finally:
+            if conn is not None:
+                conn.close()
+            self._media_type_audited = True
 
     def _get_cached_config(self) -> dict:
         """Get config with TTL caching to reduce disk I/O."""
@@ -264,6 +366,413 @@ class Scheduler:
 
     def has_deferred_restore(self, policy: str) -> bool:
         return self._get_pause_state(policy) is not None
+
+    def _refresh_announcement_queue_runtime(self, config: dict[str, Any]) -> None:
+        """Refresh Queue-Lite settings from config with safe defaults."""
+        try:
+            gap = int(config.get("announcement_queue_gap_seconds", 10))
+        except (TypeError, ValueError):
+            gap = 10
+        try:
+            max_delay = int(config.get("announcement_queue_max_delay_seconds", 15 * 60))
+        except (TypeError, ValueError):
+            max_delay = 15 * 60
+
+        self._announcement_gap_seconds = max(0, gap)
+        self._announcement_max_delay_seconds = max(60, max_delay)
+
+    def _increment_queue_counter(self, key: str, amount: int = 1) -> None:
+        self._announcement_queue_counters[key] = int(
+            self._announcement_queue_counters.get(key, 0)
+        ) + int(amount)
+
+    def _cleanup_queue_item_tracking(
+        self,
+        item: dict[str, Any],
+        *,
+        remove_dedupe: bool,
+        cancel_one_time: bool,
+    ) -> None:
+        dedupe_key = item.get("dedupe_key")
+        if remove_dedupe and dedupe_key:
+            self._announcement_enqueued_keys.discard(str(dedupe_key))
+
+        schedule_id = int(item.get("schedule_id") or 0)
+        is_one_time = bool(item.get("is_one_time"))
+        if is_one_time and schedule_id > 0:
+            self._queued_one_time_ids.discard(schedule_id)
+            if cancel_one_time:
+                db.update_one_time_schedule_status(schedule_id, "cancelled")
+
+    def _is_one_time_schedule_pending(self, schedule_id: int) -> bool:
+        schedule = db.get_one_time_schedule(schedule_id)
+        if not schedule:
+            return False
+        return str(schedule.get("status") or "").strip().lower() == "pending"
+
+    def _drop_invalid_front_queue_items(self) -> None:
+        """Drop queued one-time announcements that are no longer pending."""
+        while self._announcement_queue:
+            item = self._announcement_queue[0]
+            if not bool(item.get("is_one_time")):
+                return
+
+            schedule_id = int(item.get("schedule_id") or 0)
+            if schedule_id > 0 and self._is_one_time_schedule_pending(schedule_id):
+                return
+
+            item = self._announcement_queue.popleft()
+            self._cleanup_queue_item_tracking(
+                item, remove_dedupe=True, cancel_one_time=False
+            )
+            self._increment_queue_counter("dropped_invalid")
+            log_schedule(
+                "announcement_queue_dropped_invalid",
+                {
+                    "schedule_id": schedule_id,
+                    "source": item.get("source", "unknown"),
+                    "queue_size": len(self._announcement_queue),
+                },
+            )
+
+    def _get_stall_timeout_seconds(self, item: dict[str, Any]) -> int:
+        duration_seconds = int(item.get("expected_duration_seconds") or 0)
+        return max(120, duration_seconds + 30)
+
+    def _reset_stuck_current_announcement_if_needed(self) -> None:
+        current = self._announcement_current
+        if not current:
+            return
+
+        started_ts = float(current.get("started_ts") or 0.0)
+        if started_ts <= 0:
+            return
+
+        age_seconds = max(0, int(time.time() - started_ts))
+        timeout_seconds = self._get_stall_timeout_seconds(current)
+        if age_seconds <= timeout_seconds:
+            return
+
+        player = get_player()
+        was_playing = bool(player.is_playing)
+        if was_playing:
+            player.stop()
+
+        schedule_id = int(current.get("schedule_id") or 0)
+        is_one_time = bool(current.get("is_one_time"))
+        self._cleanup_queue_item_tracking(
+            current, remove_dedupe=False, cancel_one_time=is_one_time
+        )
+        self._announcement_current = None
+        self._announcement_next_allowed_monotonic = (
+            time.monotonic() + float(self._announcement_gap_seconds)
+        )
+        self._announcement_last_block_reason = None
+        self._increment_queue_counter("stuck_reset")
+        log_schedule(
+            "announcement_queue_stuck_reset",
+            {
+                "schedule_id": schedule_id,
+                "is_one_time": is_one_time,
+                "age_seconds": age_seconds,
+                "timeout_seconds": timeout_seconds,
+                "was_playing": was_playing,
+            },
+        )
+
+    def _log_announcement_queue_health(self) -> None:
+        now_mono = time.monotonic()
+        if (
+            self._announcement_last_health_log_monotonic
+            and (now_mono - self._announcement_last_health_log_monotonic)
+            < self._announcement_health_log_interval_seconds
+        ):
+            return
+        self._announcement_last_health_log_monotonic = now_mono
+        with self._queue_lock:
+            snapshot = {
+                "queue_size": len(self._announcement_queue),
+                "active": bool(self._announcement_current is not None),
+                "blocked_reason": self._announcement_last_block_reason or "none",
+                "dropped_stale": int(
+                    self._announcement_queue_counters.get("dropped_stale", 0)
+                ),
+                "dropped_invalid": int(
+                    self._announcement_queue_counters.get("dropped_invalid", 0)
+                ),
+                "stuck_reset": int(
+                    self._announcement_queue_counters.get("stuck_reset", 0)
+                ),
+            }
+        log_schedule("announcement_queue_health", snapshot)
+
+    def _queue_announcement(
+        self,
+        *,
+        filepath: str,
+        schedule_id: int,
+        is_one_time: bool,
+        due_dt: datetime,
+        source: str,
+        duration_seconds: int,
+    ) -> bool:
+        """Queue announcement trigger using dedupe key schedule_id + due minute."""
+        due_minute = due_dt.strftime("%Y-%m-%d %H:%M")
+        dedupe_key = f"{source}:{schedule_id}:{due_minute}"
+
+        with self._queue_lock:
+            if dedupe_key in self._announcement_enqueued_keys:
+                return False
+            if (
+                self._announcement_current is not None
+                and self._announcement_current.get("dedupe_key") == dedupe_key
+            ):
+                return False
+
+            now_ts = time.time()
+            item = {
+                "dedupe_key": dedupe_key,
+                "filepath": filepath,
+                "schedule_id": int(schedule_id),
+                "is_one_time": bool(is_one_time),
+                "due_dt": due_dt,
+                "due_ts": due_dt.timestamp(),
+                "enqueued_ts": now_ts,
+                "source": source,
+                "expected_duration_seconds": max(0, int(duration_seconds or 0)),
+            }
+            self._announcement_queue.append(item)
+            self._announcement_enqueued_keys.add(dedupe_key)
+            if is_one_time:
+                self._queued_one_time_ids.add(int(schedule_id))
+            queue_size = len(self._announcement_queue)
+
+        log_schedule(
+            "announcement_queue_enqueue",
+            {
+                "source": source,
+                "schedule_id": int(schedule_id),
+                "is_one_time": bool(is_one_time),
+                "due_minute": due_minute,
+                "queue_size": queue_size,
+            },
+        )
+        return True
+
+    def _drop_stale_announcement_queue_items(self) -> None:
+        """Drop too-old queue items to avoid infinite backlog growth."""
+        if not self._announcement_queue:
+            return
+
+        now_ts = time.time()
+        survivors = deque()
+        dropped = 0
+        while self._announcement_queue:
+            item = self._announcement_queue.popleft()
+            age_seconds = max(0, int(now_ts - float(item.get("due_ts", now_ts))))
+            if age_seconds <= self._announcement_max_delay_seconds:
+                survivors.append(item)
+                continue
+
+            dropped += 1
+            schedule_id = int(item.get("schedule_id") or 0)
+            is_one_time = bool(item.get("is_one_time"))
+            self._cleanup_queue_item_tracking(
+                item, remove_dedupe=True, cancel_one_time=is_one_time
+            )
+            self._increment_queue_counter("dropped_stale")
+            log_schedule(
+                "announcement_queue_dropped_stale",
+                {
+                    "schedule_id": schedule_id,
+                    "is_one_time": is_one_time,
+                    "source": item.get("source", "unknown"),
+                    "age_seconds": age_seconds,
+                },
+            )
+
+        self._announcement_queue = survivors
+        if dropped:
+            logger.warning(
+                "Dropped %s stale announcement queue item(s); queue_size=%s",
+                dropped,
+                len(self._announcement_queue),
+            )
+
+    def _mark_announcement_complete_if_done(self) -> None:
+        """Mark currently dispatched queue item as finished when session advances."""
+        current = self._announcement_current
+        if not current:
+            return
+
+        player = get_player()
+        current_session = current.get("playback_session")
+        live_session = getattr(player, "_playback_session", None)
+
+        finished = False
+        if current_session is None:
+            finished = not player.is_playing
+        else:
+            finished = (live_session != current_session) or (not player.is_playing)
+
+        if not finished:
+            return
+
+        schedule_id = int(current.get("schedule_id") or 0)
+        is_one_time = bool(current.get("is_one_time"))
+        self._cleanup_queue_item_tracking(
+            current, remove_dedupe=False, cancel_one_time=False
+        )
+
+        self._announcement_current = None
+        self._announcement_next_allowed_monotonic = (
+            time.monotonic() + float(self._announcement_gap_seconds)
+        )
+        self._announcement_last_block_reason = None
+        log_schedule(
+            "announcement_queue_finish",
+            {
+                "schedule_id": schedule_id,
+                "is_one_time": is_one_time,
+                "source": current.get("source", "unknown"),
+                "queue_size": len(self._announcement_queue),
+            },
+        )
+
+    def _is_policy_blocking_announcements(
+        self, *, outside_working_hours: bool, silence_blocked: bool
+    ) -> tuple[bool, Optional[str]]:
+        if silence_blocked:
+            return True, "silence_policy"
+        if outside_working_hours:
+            return True, "outside_working_hours"
+        return False, None
+
+    def _log_policy_block_change(self, reason: Optional[str]) -> None:
+        """Log policy block only when the reason changes (dedup)."""
+        if reason != self._announcement_last_block_reason:
+            log_schedule(
+                "announcement_queue_blocked_by_policy",
+                {
+                    "reason": reason,
+                    "queue_size": len(self._announcement_queue),
+                },
+            )
+            self._announcement_last_block_reason = reason
+
+    def _handle_failed_dispatch(
+        self, item: dict[str, Any], schedule_id: int, is_one_time: bool
+    ) -> None:
+        """Handle _play_media returning False during queue dispatch.
+
+        Race guard: if policy turned active between the pre-check and the
+        actual play call, keep the item queued for the next tick.  Otherwise
+        drop it to avoid a permanent jam.
+        """
+        latest_config = self._get_cached_config()
+        latest_decision = resolve_silence_policy(
+            latest_config,
+            allow_network=False,
+            fail_safe_on_unknown=True,
+        )
+        blocked_now, reason_now = self._is_policy_blocking_announcements(
+            outside_working_hours=not is_within_working_hours(latest_config),
+            silence_blocked=bool(latest_decision.get("silence_active", False)),
+        )
+        if blocked_now:
+            self._log_policy_block_change(reason_now)
+            return
+
+        # Dispatch failed while policy appears clear -> drop this item to avoid jam.
+        item = self._announcement_queue.popleft()
+        self._cleanup_queue_item_tracking(
+            item, remove_dedupe=True, cancel_one_time=is_one_time
+        )
+        self._announcement_next_allowed_monotonic = (
+            time.monotonic() + float(self._announcement_gap_seconds)
+        )
+        log_schedule(
+            "announcement_queue_finish",
+            {
+                "schedule_id": schedule_id,
+                "is_one_time": is_one_time,
+                "source": item.get("source", "unknown"),
+                "result": "failed_start",
+                "queue_size": len(self._announcement_queue),
+            },
+        )
+
+    def _handle_successful_dispatch(self, item: dict[str, Any]) -> None:
+        """Dequeue item, record playback session, and mark as current."""
+        item = self._announcement_queue.popleft()
+        dedupe_key = item.get("dedupe_key")
+        if dedupe_key:
+            self._announcement_enqueued_keys.discard(str(dedupe_key))
+        item["playback_session"] = getattr(get_player(), "_playback_session", None)
+        item["started_ts"] = time.time()
+        self._announcement_current = item
+
+    def _process_announcement_queue(
+        self,
+        *,
+        outside_working_hours: bool,
+        silence_blocked: bool,
+    ) -> None:
+        """Queue-Lite dispatcher: ordered, deduped and policy-aware."""
+        # Phase 1 (locked): housekeeping + gate checks + extract dispatch info.
+        with self._queue_lock:
+            self._mark_announcement_complete_if_done()
+            self._reset_stuck_current_announcement_if_needed()
+            self._drop_stale_announcement_queue_items()
+            self._drop_invalid_front_queue_items()
+
+            if self._announcement_current is not None:
+                return
+            if not self._announcement_queue:
+                self._announcement_last_block_reason = None
+                return
+            if time.monotonic() < self._announcement_next_allowed_monotonic:
+                return
+
+            blocked, reason = self._is_policy_blocking_announcements(
+                outside_working_hours=outside_working_hours,
+                silence_blocked=silence_blocked,
+            )
+            if blocked:
+                self._log_policy_block_change(reason)
+                return
+
+            self._announcement_last_block_reason = None
+            item = self._announcement_queue[0]
+            schedule_id = int(item.get("schedule_id") or 0)
+            is_one_time = bool(item.get("is_one_time"))
+            filepath = str(item.get("filepath") or "")
+            queue_size = len(self._announcement_queue)
+
+        # Phase 2 (unlocked): play media — may block briefly, must not hold lock.
+        log_schedule(
+            "announcement_queue_start",
+            {
+                "schedule_id": schedule_id,
+                "is_one_time": is_one_time,
+                "source": item.get("source", "unknown"),
+                "queue_size": queue_size,
+            },
+        )
+        success = self._play_media(
+            filepath,
+            schedule_id=schedule_id,
+            is_one_time=is_one_time,
+            is_announcement=True,
+        )
+
+        # Phase 3 (locked): update state based on dispatch result.
+        with self._queue_lock:
+            if not success:
+                self._handle_failed_dispatch(item, schedule_id, is_one_time)
+                return
+
+            self._handle_successful_dispatch(item)
 
     def _resume_playlist_state(self, player, state: dict[str, Any], source: str) -> bool:
         playlist = list(state.get("playlist") or [])
@@ -590,7 +1099,9 @@ class Scheduler:
         """Main scheduler loop."""
         while self._running:
             try:
+                self._tick_media_dispatched = False
                 config = self._get_cached_config()
+                self._refresh_announcement_queue_runtime(config)
                 player = get_player()
                 silence_decision = resolve_silence_policy(
                     config,
@@ -606,17 +1117,24 @@ class Scheduler:
                 )
 
                 # 2. Working hours check
-                outside_working_hours = False
+                outside_working_hours = not is_within_working_hours(config)
                 if not prayer_pause_active:
                     outside_working_hours = self._handle_working_hours(config, player)
 
-                # 3. One-time schedules: check always (outside hours => cancel if due)
-                if not prayer_pause_active:
-                    self._check_one_time_schedules(outside_working_hours)
-
-                # 4. Only check recurring schedules during working hours
-                if not prayer_pause_active and not outside_working_hours:
-                    self._check_recurring_schedules()
+                # 3. Trigger collection: announcements are queued even if blocked by policy.
+                self._check_one_time_schedules(
+                    outside_working_hours=outside_working_hours,
+                    silence_blocked=prayer_pause_active,
+                )
+                self._check_recurring_schedules(
+                    outside_working_hours=outside_working_hours,
+                    silence_blocked=prayer_pause_active,
+                )
+                self._process_announcement_queue(
+                    outside_working_hours=outside_working_hours,
+                    silence_blocked=prayer_pause_active,
+                )
+                self._log_announcement_queue_health()
 
                 self._run_reconcile_watchdog(config, player, silence_decision)
 
@@ -625,7 +1143,9 @@ class Scheduler:
 
             time.sleep(self.check_interval)
 
-    def _check_one_time_schedules(self, outside_working_hours: bool):
+    def _check_one_time_schedules(
+        self, outside_working_hours: bool, silence_blocked: bool
+    ):
         """Check and trigger pending one-time schedules."""
         now = datetime.now()
         pending = db.get_pending_one_time_schedules()
@@ -649,13 +1169,31 @@ class Scheduler:
 
             # Check if it's time (within 2 minute tolerance for safety)
             time_diff = (now - scheduled_dt).total_seconds()
+            schedule_id = int(schedule["id"])
+            media_type = self._normalize_media_type(schedule.get("media_type"))
+            is_announcement = media_type == "announcement"
 
             if 0 <= time_diff <= 120:
+                if is_announcement:
+                    duration_seconds = resolve_duration_seconds(schedule.get("media_id"))
+                    self._queue_announcement(
+                        filepath=schedule["filepath"],
+                        schedule_id=schedule_id,
+                        is_one_time=True,
+                        due_dt=scheduled_dt,
+                        source="one_time",
+                        duration_seconds=duration_seconds,
+                    )
+                    continue
+
                 if outside_working_hours:
                     logger.warning(
                         f"Schedule outside working hours, cancelling: {schedule['filename']} (was scheduled for {scheduled_dt})"
                     )
-                    db.update_one_time_schedule_status(schedule["id"], "cancelled")
+                    db.update_one_time_schedule_status(schedule_id, "cancelled")
+                elif silence_blocked:
+                    # Keep behavior for non-announcement content: do not queue under silence.
+                    continue
                 else:
                     # Time to play!
                     logger.info(
@@ -665,24 +1203,28 @@ class Scheduler:
                         "one_time",
                         {
                             "filename": schedule["filename"],
-                            "media_type": schedule.get("media_type", "music"),
+                            "media_type": media_type,
                             "delay_seconds": int(time_diff),
                         },
                     )
                     self._play_media(
                         schedule["filepath"],
-                        schedule["id"],
+                        schedule_id,
                         is_one_time=True,
-                        is_announcement=(schedule.get("media_type") == "announcement"),
+                        is_announcement=False,
                     )
             elif time_diff > 300:
+                if schedule_id in self._queued_one_time_ids:
+                    continue
                 # Missed by more than 5 minutes, mark as cancelled
                 logger.warning(
                     f"Schedule missed, cancelling: {schedule['filename']} (was scheduled for {scheduled_dt})"
                 )
-                db.update_one_time_schedule_status(schedule["id"], "cancelled")
+                db.update_one_time_schedule_status(schedule_id, "cancelled")
 
-    def _check_recurring_schedules(self):
+    def _check_recurring_schedules(
+        self, outside_working_hours: bool, silence_blocked: bool
+    ):
         """Check and trigger active recurring schedules."""
         now = datetime.now()
         current_day = now.weekday()  # Monday=0, Sunday=6
@@ -736,21 +1278,36 @@ class Scheduler:
                 if last_trigger and (now - last_trigger).total_seconds() < 55:
                     continue
 
-                logger.info(f"Triggering recurring schedule: {schedule['filename']}")
-                log_trigger(
-                    "recurring",
-                    {
-                        "filename": schedule["filename"],
-                        "media_type": schedule.get("media_type", "music"),
-                        "schedule_id": schedule_id,
-                    },
-                )
-                self._play_media(
-                    schedule["filepath"],
-                    schedule_id,
-                    is_one_time=False,
-                    is_announcement=(schedule.get("media_type") == "announcement"),
-                )
+                media_type = self._normalize_media_type(schedule.get("media_type"))
+                is_announcement = media_type == "announcement"
+                if is_announcement:
+                    duration_seconds = resolve_duration_seconds(schedule.get("media_id"))
+                    self._queue_announcement(
+                        filepath=schedule["filepath"],
+                        schedule_id=schedule_id,
+                        is_one_time=False,
+                        due_dt=now.replace(second=0, microsecond=0),
+                        source="recurring",
+                        duration_seconds=duration_seconds,
+                    )
+                else:
+                    if outside_working_hours or silence_blocked:
+                        continue
+                    logger.info(f"Triggering recurring schedule: {schedule['filename']}")
+                    log_trigger(
+                        "recurring",
+                        {
+                            "filename": schedule["filename"],
+                            "media_type": media_type,
+                            "schedule_id": schedule_id,
+                        },
+                    )
+                    self._play_media(
+                        schedule["filepath"],
+                        schedule_id,
+                        is_one_time=False,
+                        is_announcement=False,
+                    )
                 self._last_recurring_triggers[schedule_id] = now
 
     def _capture_restore_snapshot(self, player) -> dict[str, Any]:
@@ -915,8 +1472,24 @@ class Scheduler:
         schedule_id: int,
         is_one_time: bool,
         is_announcement: bool = False,
-    ):
-        """Trigger media playback with announcement priority."""
+    ) -> bool:
+        """Trigger media playback with announcement priority.
+
+        Only one successful dispatch is allowed per scheduler tick to prevent
+        music/announcement collisions that corrupt restore snapshots.
+        """
+        if self._tick_media_dispatched:
+            log_schedule(
+                "scheduled_media_skipped_tick_guard",
+                {
+                    "schedule_id": schedule_id,
+                    "is_one_time": bool(is_one_time),
+                    "is_announcement": bool(is_announcement),
+                    "filepath": filepath,
+                },
+            )
+            return False
+
         player = get_player()
         stream_service = get_stream_service()
         config = self._get_cached_config()
@@ -943,12 +1516,14 @@ class Scheduler:
                 f"(schedule_id={schedule_id}, policy={policy_decision.get('policy')}, "
                 f"reason={policy_decision.get('reason_code')})"
             )
-            if is_one_time:
+            if is_one_time and not is_announcement:
                 db.update_one_time_schedule_status(schedule_id, "cancelled")
-            return
+            return False
 
         if not is_within_working_hours(config):
-            return
+            if is_one_time and not is_announcement:
+                db.update_one_time_schedule_status(schedule_id, "cancelled")
+            return False
 
         stream_status = stream_service.status()
         stream_active = bool(stream_status.get("active"))
@@ -960,7 +1535,7 @@ class Scheduler:
             )
             if is_one_time:
                 db.update_one_time_schedule_status(schedule_id, "cancelled")
-            return
+            return False
 
         announcement_interrupted_stream = False
         if is_announcement and should_interrupt_for_announcement(stream_active):
@@ -1025,6 +1600,9 @@ class Scheduler:
         if announcement_interrupted_stream:
             self._start_stream_resume_worker_after_announcement()
         self._finalize_one_time_status(success, schedule_id, is_one_time)
+        if success:
+            self._tick_media_dispatched = True
+        return bool(success)
 
     def _times_match(self, current: str, scheduled: str) -> bool:
         """Check if two HH:MM times match."""

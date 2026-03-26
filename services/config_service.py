@@ -34,6 +34,8 @@ DEFAULTS = {
     "prayer_times_enabled": False,
     "prayer_times_city": "Istanbul",
     "prayer_times_district": "Istanbul",
+    "announcement_queue_gap_seconds": 10,
+    "announcement_queue_max_delay_seconds": 900,
     # Future: device_id, mode, central_server
 }
 

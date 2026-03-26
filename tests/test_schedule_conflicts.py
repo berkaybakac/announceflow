@@ -2,6 +2,7 @@
 import json
 import os
 import tempfile
+import time
 import unittest
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
@@ -143,6 +144,32 @@ class ScheduleConflictTestCase(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn(self._message_bytes(), response.data)
 
+    def test_route_one_time_announcement_conflict_is_soft_accepted(self):
+        long_media = self._add_media("long_announcement.mp3", 420, media_type="announcement")
+        candidate_media = self._add_media("candidate_announcement.mp3", 30, media_type="announcement")
+        base_dt = (datetime.now() + timedelta(days=1)).replace(
+            hour=10,
+            minute=0,
+            second=0,
+            microsecond=0,
+        )
+        db.add_one_time_schedule(long_media, base_dt)
+
+        response = self.client.post(
+            "/api/schedules/one-time",
+            data={
+                "media_id": str(candidate_media),
+                "date": base_dt.strftime("%Y-%m-%d"),
+                "time": (base_dt + timedelta(minutes=2)).strftime("%H:%M"),
+            },
+            follow_redirects=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Plan eklendi".encode("utf-8"), response.data)
+        pending = db.get_pending_one_time_schedules()
+        self.assertEqual(len(pending), 2)
+
     def test_route_recurring_conflict_returns_flash_error(self):
         long_media = self._add_media("long.mp3", 420)
         candidate_media = self._add_media("candidate.mp3", 30)
@@ -167,6 +194,55 @@ class ScheduleConflictTestCase(unittest.TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn(self._message_bytes(), response.data)
+
+    def test_route_recurring_announcement_conflict_is_soft_accepted(self):
+        long_media = self._add_media("long_announcement.mp3", 420, media_type="announcement")
+        candidate_media = self._add_media("candidate_announcement.mp3", 30, media_type="announcement")
+        base_dt = (datetime.now() + timedelta(days=2)).replace(
+            hour=10,
+            minute=0,
+            second=0,
+            microsecond=0,
+        )
+        db.add_one_time_schedule(long_media, base_dt)
+
+        response = self.client.post(
+            "/api/schedules/recurring",
+            data={
+                "media_id": str(candidate_media),
+                "days_of_week": json.dumps([base_dt.weekday()]),
+                "schedule_type": "specific",
+                "specific_times": "10:03",
+            },
+            follow_redirects=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Tekrarlı plan oluşturuldu".encode("utf-8"), response.data)
+        all_recurring = db.get_all_recurring_schedules()
+        self.assertEqual(len(all_recurring), 1)
+
+    def test_route_recurring_announcement_interval_self_overlap_allowed(self):
+        overlap_media = self._add_media("overlap_announcement.mp3", 420, media_type="announcement")
+        weekday = (datetime.now() + timedelta(days=1)).weekday()
+
+        response = self.client.post(
+            "/api/schedules/recurring",
+            data={
+                "media_id": str(overlap_media),
+                "days_of_week": json.dumps([weekday]),
+                "schedule_type": "interval",
+                "start_time": "09:00",
+                "end_time": "09:10",
+                "interval_minutes": "2",
+            },
+            follow_redirects=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Tekrarlı plan oluşturuldu".encode("utf-8"), response.data)
+        all_recurring = db.get_all_recurring_schedules()
+        self.assertEqual(len(all_recurring), 1)
 
     def test_route_toggle_recurring_conflict_blocks_activation(self):
         active_media = self._add_media("active.mp3", 420)
@@ -214,6 +290,192 @@ class ScheduleConflictTestCase(unittest.TestCase):
         conflict = find_conflict_for_recurring(candidate)
         self.assertIsNotNone(conflict)
         self.assertEqual(conflict["type"], "one_time")
+
+    def test_scheduler_queue_lite_dedupes_same_minute(self):
+        scheduler = Scheduler(check_interval_seconds=1)
+        due_dt = self._dt(2026, 2, 9, 10, 0)
+
+        first = scheduler._queue_announcement(
+            filepath="/tmp/a.mp3",
+            schedule_id=99,
+            is_one_time=False,
+            due_dt=due_dt,
+            source="recurring",
+            duration_seconds=15,
+        )
+        second = scheduler._queue_announcement(
+            filepath="/tmp/a.mp3",
+            schedule_id=99,
+            is_one_time=False,
+            due_dt=due_dt,
+            source="recurring",
+            duration_seconds=15,
+        )
+
+        self.assertTrue(first)
+        self.assertFalse(second)
+        self.assertEqual(len(scheduler._announcement_queue), 1)
+
+    def test_scheduler_queue_lite_drops_stale_and_cancels_one_time(self):
+        scheduler = Scheduler(check_interval_seconds=1)
+        scheduler._announcement_max_delay_seconds = 60
+
+        media_id = self._add_media("stale_announcement.mp3", 10, media_type="announcement")
+        stale_dt = datetime.now() - timedelta(minutes=10)
+        schedule_id = db.add_one_time_schedule(media_id, stale_dt)
+
+        queued = scheduler._queue_announcement(
+            filepath="/tmp/stale_announcement.mp3",
+            schedule_id=schedule_id,
+            is_one_time=True,
+            due_dt=stale_dt,
+            source="one_time",
+            duration_seconds=10,
+        )
+        self.assertTrue(queued)
+
+        scheduler._drop_stale_announcement_queue_items()
+        self.assertEqual(len(scheduler._announcement_queue), 0)
+
+        schedule = next(
+            (s for s in db.get_all_one_time_schedules() if s["id"] == schedule_id), None
+        )
+        self.assertIsNotNone(schedule)
+        self.assertEqual(schedule["status"], "cancelled")
+
+    def test_scheduler_queue_lite_soak_cleanup_no_tracking_leak(self):
+        scheduler = Scheduler(check_interval_seconds=1)
+        due_dt = self._dt(2026, 2, 9, 10, 0)
+
+        for idx in range(10_000):
+            queued = scheduler._queue_announcement(
+                filepath="/tmp/soak.mp3",
+                schedule_id=idx + 1,
+                is_one_time=True,
+                due_dt=due_dt,
+                source="one_time",
+                duration_seconds=5,
+            )
+            self.assertTrue(queued)
+            item = scheduler._announcement_queue.popleft()
+            scheduler._cleanup_queue_item_tracking(
+                item, remove_dedupe=True, cancel_one_time=False
+            )
+
+        self.assertEqual(len(scheduler._announcement_queue), 0)
+        self.assertEqual(len(scheduler._queued_one_time_ids), 0)
+        self.assertEqual(len(scheduler._announcement_enqueued_keys), 0)
+
+    def test_scheduler_queue_lite_drops_invalid_cancelled_one_time_before_dispatch(self):
+        scheduler = Scheduler(check_interval_seconds=1)
+        media_id = self._add_media("cancelled_before_dispatch.mp3", 10, media_type="announcement")
+        due_dt = datetime.now() - timedelta(seconds=30)
+        schedule_id = db.add_one_time_schedule(media_id, due_dt)
+
+        queued = scheduler._queue_announcement(
+            filepath="/tmp/cancelled_before_dispatch.mp3",
+            schedule_id=schedule_id,
+            is_one_time=True,
+            due_dt=due_dt,
+            source="one_time",
+            duration_seconds=10,
+        )
+        self.assertTrue(queued)
+        db.update_one_time_schedule_status(schedule_id, "cancelled")
+
+        with patch.object(scheduler, "_play_media") as mock_play_media:
+            scheduler._process_announcement_queue(
+                outside_working_hours=False, silence_blocked=False
+            )
+
+        mock_play_media.assert_not_called()
+        self.assertEqual(len(scheduler._announcement_queue), 0)
+        self.assertNotIn(schedule_id, scheduler._queued_one_time_ids)
+        self.assertEqual(scheduler._announcement_queue_counters["dropped_invalid"], 1)
+
+    def test_scheduler_media_type_normalization_is_fail_safe_to_music(self):
+        scheduler = Scheduler(check_interval_seconds=1)
+        self.assertEqual(scheduler._normalize_media_type("announcement"), "announcement")
+        self.assertEqual(scheduler._normalize_media_type(" Announcement "), "announcement")
+        self.assertEqual(scheduler._normalize_media_type(None), "music")
+        self.assertEqual(scheduler._normalize_media_type(""), "music")
+        self.assertEqual(scheduler._normalize_media_type("legacy_unknown"), "music")
+
+    def test_scheduler_queue_lite_stuck_watchdog_resets_current_item(self):
+        scheduler = Scheduler(check_interval_seconds=1)
+        media_id = self._add_media("stuck_item.mp3", 10, media_type="announcement")
+        due_dt = datetime.now() - timedelta(seconds=30)
+        schedule_id = db.add_one_time_schedule(media_id, due_dt)
+
+        queued = scheduler._queue_announcement(
+            filepath="/tmp/stuck_item.mp3",
+            schedule_id=schedule_id,
+            is_one_time=True,
+            due_dt=due_dt,
+            source="one_time",
+            duration_seconds=5,
+        )
+        self.assertTrue(queued)
+
+        item = scheduler._announcement_queue.popleft()
+        scheduler._announcement_enqueued_keys.discard(item.get("dedupe_key"))
+        item["started_ts"] = time.time() - 500
+        item["expected_duration_seconds"] = 5
+        scheduler._announcement_current = item
+
+        player = MagicMock()
+        player.is_playing = True
+        player.stop.return_value = True
+        with patch.object(scheduler_module, "get_player", return_value=player):
+            scheduler._reset_stuck_current_announcement_if_needed()
+
+        player.stop.assert_called_once()
+        self.assertIsNone(scheduler._announcement_current)
+        self.assertNotIn(schedule_id, scheduler._queued_one_time_ids)
+        self.assertEqual(scheduler._announcement_queue_counters["stuck_reset"], 1)
+        schedule = db.get_one_time_schedule(schedule_id)
+        self.assertIsNotNone(schedule)
+        self.assertEqual(schedule["status"], "cancelled")
+
+
+    def test_scheduler_tick_guard_blocks_second_play_media_in_same_tick(self):
+        scheduler = Scheduler(check_interval_seconds=1)
+
+        player = MagicMock()
+        player.is_playing = False
+        player.play.return_value = True
+        player.set_volume.return_value = True
+        player._playback_session = "session_1"
+
+        stream_service = MagicMock()
+        stream_service.status.return_value = {"active": False}
+
+        config = {"working_hours_enabled": False}
+
+        with (
+            patch.object(scheduler_module, "get_player", return_value=player),
+            patch.object(scheduler_module, "get_stream_service", return_value=stream_service),
+            patch.object(scheduler_module, "resolve_silence_policy", return_value={"silence_active": False}),
+            patch.object(scheduler_module, "is_within_working_hours", return_value=True),
+            patch.object(scheduler, "_get_cached_config", return_value=config),
+            patch.object(scheduler, "_capture_restore_snapshot", return_value={"playlist_was_active": False, "playlist_files": [], "playlist_index": 0, "playlist_loop": False}),
+            patch.object(scheduler, "_interrupt_for_scheduled_media"),
+            patch.object(scheduler, "_start_scheduled_media", return_value=True),
+            patch.object(scheduler, "_queue_restore_target", return_value=False),
+        ):
+            # First call should succeed and set the tick guard.
+            result1 = scheduler._play_media("/tmp/music.mp3", schedule_id=1, is_one_time=True, is_announcement=False)
+            self.assertTrue(result1)
+            self.assertTrue(scheduler._tick_media_dispatched)
+
+            # Second call in the same tick should be blocked.
+            result2 = scheduler._play_media("/tmp/announce.mp3", schedule_id=2, is_one_time=False, is_announcement=True)
+            self.assertFalse(result2)
+
+            # Simulating a new tick resets the guard.
+            scheduler._tick_media_dispatched = False
+            result3 = scheduler._play_media("/tmp/announce2.mp3", schedule_id=3, is_one_time=False, is_announcement=True)
+            self.assertTrue(result3)
 
 
 class SchedulerStreamRuntimeRulesTestCase(unittest.TestCase):

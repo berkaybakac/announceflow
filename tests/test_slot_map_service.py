@@ -82,6 +82,8 @@ class SlotMapServiceTestCase(unittest.TestCase):
         self.assertEqual(slot["start"], "14:30")
         self.assertEqual(slot["end"], "14:35")
         self.assertEqual(slot["type"], "one_time")
+        self.assertEqual(slot["source_type"], "one_time")
+        self.assertIn("group_key", slot)
 
     @patch("services.slot_map_service.load_config")
     def test_recurring_schedule_appears_on_correct_day(self, mock_config):
