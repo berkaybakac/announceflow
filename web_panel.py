@@ -291,6 +291,7 @@ def one_time_schedules():
             except Exception:
                 blocked = False
         s["blocked_outside_hours"] = blocked
+    queue_status = get_scheduler().get_announcement_queue_status()
     return render_template(
         "one_time_schedule.html",
         active_page="one-time",
@@ -299,6 +300,7 @@ def one_time_schedules():
         working_hours_enabled=working_hours_enabled,
         working_hours_start=work_start,
         working_hours_end=work_end,
+        queue_status=queue_status,
     )
 
 
@@ -308,11 +310,13 @@ def recurring_schedules():
     """Recurring schedules page."""
     media_files = db.get_all_media_files()
     schedules = db.get_all_recurring_schedules()
+    queue_status = get_scheduler().get_announcement_queue_status()
     return render_template(
         "recurring_schedule.html",
         active_page="recurring",
         media_files=media_files,
         schedules=schedules,
+        queue_status=queue_status,
     )
 
 

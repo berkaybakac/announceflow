@@ -13,7 +13,21 @@
             <span class="legend-item"><span class="legend-dot" style="background:var(--text-muted); opacity:0.4"></span> Mesai dışı (bilgi)</span>
         </div>
     </div>
-    <div id="{{ bar_id | default('timelineBarArea') }}">
-        <!-- Timeline bars will be injected by JS -->
+    {% set _bar_id = bar_id | default('timelineBarArea') %}
+    {% set _zoom_id = _bar_id ~ 'Zoom' %}
+    {% set _zoom_value_id = _bar_id ~ 'ZoomValue' %}
+    {% set _density_id = _bar_id ~ 'Density' %}
+    {% set _conflict_id = _bar_id ~ 'Conflict' %}
+    <div class="timeline-controls">
+        <label for="{{ _zoom_id }}" class="timeline-control-label">Zoom</label>
+        <input id="{{ _zoom_id }}" class="timeline-zoom-slider" type="range" min="100" max="280" step="20" value="140">
+        <span class="timeline-zoom-value" id="{{ _zoom_value_id }}">140%</span>
+        <span class="timeline-density-badge" id="{{ _density_id }}">Yoğunluk: -</span>
+        <span class="timeline-note-badge" id="{{ _conflict_id }}">Çakışmalar anons kuyruğunda sıralı çözülür.</span>
+    </div>
+    <div class="timeline-scroll">
+        <div id="{{ _bar_id }}">
+            <!-- Timeline bars will be injected by JS -->
+        </div>
     </div>
 </div>

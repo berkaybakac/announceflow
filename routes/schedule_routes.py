@@ -20,6 +20,9 @@ from utils.helpers import login_required, _flash_redirect
 
 schedule_bp = Blueprint("schedule", __name__)
 SCHEDULE_CONFLICT_MESSAGE = "Seçtiğiniz süreyi kapsayan başka bir plan vardır."
+QUEUE_LITE_NOTE = (
+    "Çakışma durumunda anonslar otomatik sıraya alınır ve aralarında kısa boşluklarla çalınır."
+)
 
 
 def validate_time_format(time_str: str) -> bool:
@@ -44,6 +47,9 @@ def api_add_one_time():
         media_id_int = int(media_id)
     except (ValueError, TypeError):
         return _flash_redirect("Geçersiz dosya seçimi", "error", "one_time_schedules")
+    media = db.get_media_file(media_id_int) or {}
+    media_type = str(media.get("media_type") or "").strip().lower()
+    is_announcement = media_type == "announcement"
 
     try:
         scheduled_dt = datetime.strptime(f"{date} {time}", "%Y-%m-%d %H:%M")
@@ -58,13 +64,22 @@ def api_add_one_time():
         )
 
     conflict = find_conflict_for_one_time(scheduled_dt, media_id_int)
-    if conflict:
+    if conflict and not is_announcement:
         log_web("conflict_rejected", {"type": "one_time", "datetime": str(scheduled_dt), "conflict": conflict})
         return _flash_redirect(
             SCHEDULE_CONFLICT_MESSAGE, "error", "one_time_schedules"
         )
+    if conflict and is_announcement:
+        log_web(
+            "conflict_soft_accepted",
+            {"type": "one_time", "datetime": str(scheduled_dt), "conflict": conflict},
+        )
 
     db.add_one_time_schedule(media_id_int, scheduled_dt, reason)
+    if conflict and is_announcement:
+        return _flash_redirect(
+            f"Plan eklendi. {QUEUE_LITE_NOTE}", "success", "one_time_schedules"
+        )
     return _flash_redirect("Plan başarıyla eklendi!", "success", "one_time_schedules")
 
 
@@ -147,6 +162,9 @@ def api_add_recurring():
         media_id_int = int(media_id)
     except (ValueError, TypeError):
         return _flash_redirect("Geçersiz dosya seçimi", "error", "recurring_schedules")
+    media = db.get_media_file(media_id_int) or {}
+    media_type = str(media.get("media_type") or "").strip().lower()
+    is_announcement = media_type == "announcement"
 
     if schedule_type == "specific":
         times_str = request.form.get("specific_times", "")
@@ -173,11 +191,13 @@ def api_add_recurring():
             "schedule_type": "specific",
         }
         conflict = find_conflict_for_recurring(candidate)
-        if conflict:
+        if conflict and not is_announcement:
             log_web("conflict_rejected", {"type": "recurring", "conflict": conflict})
             return _flash_redirect(
                 SCHEDULE_CONFLICT_MESSAGE, "error", "recurring_schedules"
             )
+        if conflict and is_announcement:
+            log_web("conflict_soft_accepted", {"type": "recurring", "conflict": conflict})
 
         db.add_recurring_schedule(
             media_id_int,
@@ -213,7 +233,7 @@ def api_add_recurring():
             )
 
         duration_seconds = resolve_duration_seconds(media_id_int)
-        if has_self_overlap_for_interval(duration_seconds, interval):
+        if not is_announcement and has_self_overlap_for_interval(duration_seconds, interval):
             return _flash_redirect(
                 SCHEDULE_CONFLICT_MESSAGE, "error", "recurring_schedules"
             )
@@ -227,16 +247,24 @@ def api_add_recurring():
             "schedule_type": "interval",
         }
         conflict = find_conflict_for_recurring(candidate)
-        if conflict:
+        if conflict and not is_announcement:
             log_web("conflict_rejected", {"type": "recurring", "conflict": conflict})
             return _flash_redirect(
                 SCHEDULE_CONFLICT_MESSAGE, "error", "recurring_schedules"
             )
+        if conflict and is_announcement:
+            log_web("conflict_soft_accepted", {"type": "recurring", "conflict": conflict})
 
         db.add_recurring_schedule(
             media_id_int, days, start_time, end_time, interval, reason=reason
         )
 
+    if is_announcement:
+        return _flash_redirect(
+            f"Tekrarlı plan oluşturuldu. {QUEUE_LITE_NOTE}",
+            "success",
+            "recurring_schedules",
+        )
     return _flash_redirect(
         "Tekrarlı plan oluşturuldu!", "success", "recurring_schedules"
     )
@@ -255,11 +283,12 @@ def api_toggle_recurring(schedule_id):
         new_state = not current["is_active"]
         if new_state:
             media_id = int(current["media_id"])
+            is_announcement = str(current.get("media_type") or "").strip().lower() == "announcement"
             is_interval = not bool(current.get("specific_times"))
             if is_interval:
                 duration_seconds = resolve_duration_seconds(media_id)
                 interval_minutes = int(current.get("interval_minutes") or 0)
-                if has_self_overlap_for_interval(duration_seconds, interval_minutes):
+                if (not is_announcement) and has_self_overlap_for_interval(duration_seconds, interval_minutes):
                     return _flash_redirect(
                         SCHEDULE_CONFLICT_MESSAGE, "error", "recurring_schedules"
                     )
@@ -278,11 +307,13 @@ def api_toggle_recurring(schedule_id):
             conflict = find_conflict_for_recurring(
                 candidate, exclude_recurring_id=schedule_id
             )
-            if conflict:
+            if conflict and not is_announcement:
                 log_web("conflict_rejected", {"type": "recurring_edit", "conflict": conflict})
                 return _flash_redirect(
                     SCHEDULE_CONFLICT_MESSAGE, "error", "recurring_schedules"
                 )
+            if conflict and is_announcement:
+                log_web("conflict_soft_accepted", {"type": "recurring_edit", "conflict": conflict})
 
         db.toggle_recurring_schedule(schedule_id, new_state)
         return _flash_redirect(

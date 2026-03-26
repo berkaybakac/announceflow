@@ -330,7 +330,7 @@ def delete_media_file(media_id: int) -> bool:
     return _media_repo.delete_media_file(media_id)
 
 
-# One-Time Schedules (5 functions)
+# One-Time Schedules (6 functions)
 def add_one_time_schedule(
     media_id: int, scheduled_datetime: datetime, reason: Optional[str] = None
 ) -> int:
@@ -346,6 +346,11 @@ def get_pending_one_time_schedules() -> List[Dict[str, Any]]:
 def get_all_one_time_schedules() -> List[Dict[str, Any]]:
     """Get all one-time schedules."""
     return _schedule_repo.get_all_one_time_schedules()
+
+
+def get_one_time_schedule(schedule_id: int) -> Optional[Dict[str, Any]]:
+    """Get one one-time schedule by ID."""
+    return _schedule_repo.get_one_time_schedule(schedule_id)
 
 
 def update_one_time_schedule_status(schedule_id: int, status: str) -> bool:

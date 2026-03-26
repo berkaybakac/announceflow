@@ -38,9 +38,13 @@ PRAYER_LABELS = {
 PRAYER_SLOT_PREFIX = "Sessiz"                    # System silences during prayer windows
 PRAYER_SLOT_SUFFIX = "anons etkilenmez"  # One-time announcements still fire
 
-# Raw slot: (start_minute, end_minute, type, label)
+# Raw slot:
+# (
+#   start_minute, end_minute, type, label,
+#   media_id, source_type, source_id, group_key
+# )
 # end_minute MAY exceed MINUTES_PER_DAY for overnight slots
-RawSlot = Tuple[int, int, str, str]
+RawSlot = Tuple[int, int, str, str, Optional[int], Optional[str], Optional[int], Optional[str]]
 
 
 def _minutes_to_hhmm(minutes: int) -> str:
@@ -62,28 +66,59 @@ def _split_at_midnight(raw_slots: List[RawSlot]) -> Tuple[List[RawSlot], List[Ra
     today: List[RawSlot] = []
     overflow: List[RawSlot] = []
 
-    for start, end, slot_type, label in raw_slots:
+    for start, end, slot_type, label, media_id, source_type, source_id, group_key in raw_slots:
         if end <= MINUTES_PER_DAY:
-            today.append((start, end, slot_type, label))
+            today.append((start, end, slot_type, label, media_id, source_type, source_id, group_key))
         else:
             # Part on today: start → end of day
-            today.append((start, MINUTES_PER_DAY - 1, slot_type, label))
+            today.append(
+                (
+                    start,
+                    MINUTES_PER_DAY - 1,
+                    slot_type,
+                    label,
+                    media_id,
+                    source_type,
+                    source_id,
+                    group_key,
+                )
+            )
             # Part on tomorrow: 0 → overflow minutes
             overflow_end = end - MINUTES_PER_DAY
-            overflow.append((0, overflow_end, slot_type, label))
+            overflow.append(
+                (
+                    0,
+                    overflow_end,
+                    slot_type,
+                    label,
+                    media_id,
+                    source_type,
+                    source_id,
+                    group_key,
+                )
+            )
 
     return today, overflow
 
 
 def _raw_to_dict(raw: RawSlot) -> Dict[str, Any]:
     """Convert a raw slot tuple to API dict."""
-    start, end, slot_type, label = raw
-    return {
+    start, end, slot_type, label, media_id, source_type, source_id, group_key = raw
+    item = {
         "start": _minutes_to_hhmm(start),
         "end": _minutes_to_hhmm(end),
         "type": slot_type,
         "label": label,
     }
+    if media_id is not None:
+        item["media_id"] = media_id
+    if source_type:
+        item["source_type"] = source_type
+    if source_id is not None:
+        item["source_id"] = source_id
+    if group_key:
+        item["group_key"] = group_key
+    return item
 
 
 # ── Prayer helpers ──
@@ -125,7 +160,7 @@ def _prayer_time_to_raw(label: str, time_str: str) -> Optional[RawSlot]:
     start = max(0, prayer_minute - PRAYER_BUFFER_BEFORE)
     end = prayer_minute + PRAYER_DURATION_AFTER
     full_label = f"{PRAYER_SLOT_PREFIX} - {label} ({time_str}) — {PRAYER_SLOT_SUFFIX}"
-    return (start, end, "prayer", full_label)
+    return (start, end, "prayer", full_label, None, "prayer", None, None)
 
 
 def _get_prayer_raw(config: dict, date_str: str) -> List[RawSlot]:
@@ -174,7 +209,19 @@ def _get_one_time_raw(target_date: datetime) -> List[RawSlot]:
         if duration % SECONDS_PER_MINUTE:
             end += 1
 
-        raw.append((start, end, "one_time", schedule.get("filename", "")))
+        schedule_id = schedule.get("id")
+        raw.append(
+            (
+                start,
+                end,
+                "one_time",
+                schedule.get("filename", ""),
+                int(schedule.get("media_id", 0) or 0),
+                "one_time",
+                int(schedule_id) if schedule_id is not None else None,
+                f"one_time:{int(schedule_id)}" if schedule_id is not None else None,
+            )
+        )
     return raw
 
 
@@ -189,11 +236,24 @@ def _get_recurring_raw(target_weekday: int) -> List[RawSlot]:
             dur_min += 1
 
         filename = schedule.get("filename", "")
+        schedule_id = schedule.get("id")
+        media_id = int(schedule.get("media_id", 0) or 0)
         for trigger in expand_recurring_triggers_for_week(schedule):
             if trigger // MINUTES_PER_DAY != target_weekday:
                 continue
             start = trigger % MINUTES_PER_DAY
-            raw.append((start, start + dur_min, "recurring", filename))
+            raw.append(
+                (
+                    start,
+                    start + dur_min,
+                    "recurring",
+                    filename,
+                    media_id,
+                    "recurring",
+                    int(schedule_id) if schedule_id is not None else None,
+                    f"recurring:{int(schedule_id)}" if schedule_id is not None else None,
+                )
+            )
 
     return raw
 
