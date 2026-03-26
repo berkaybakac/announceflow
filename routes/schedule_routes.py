@@ -3,11 +3,12 @@ AnnounceFlow - Schedule Routes
 API endpoints for schedule management (one-time and recurring).
 """
 import json
+import logging
 import re
 from datetime import datetime
 from flask import Blueprint, request, redirect, url_for, jsonify
 import database as db
-from logger import log_web
+from logger import log_web, log_error
 from services.schedule_conflict_service import (
     find_conflict_for_one_time,
     find_conflict_for_recurring,
@@ -19,6 +20,7 @@ from utils.helpers import login_required, _flash_redirect
 
 
 schedule_bp = Blueprint("schedule", __name__)
+logger = logging.getLogger(__name__)
 SCHEDULE_CONFLICT_MESSAGE = "Seçtiğiniz süreyi kapsayan başka bir plan vardır."
 QUEUE_LITE_NOTE = (
     "Çakışma durumunda anonslar otomatik sıraya alınır ve aralarında kısa boşluklarla çalınır."
@@ -58,24 +60,50 @@ def api_add_one_time():
             "Geçersiz tarih/saat formatı", "error", "one_time_schedules"
         )
 
-    if scheduled_dt <= datetime.now():
+    now = datetime.now()
+    if scheduled_dt <= now:
+        log_web(
+            "one_time_rejected_past",
+            {
+                "scheduled_dt": scheduled_dt.isoformat(),
+                "server_now": now.isoformat(),
+                "delta_seconds": int((scheduled_dt - now).total_seconds()),
+            },
+        )
         return _flash_redirect(
             "Geçmiş bir tarih seçemezsiniz", "error", "one_time_schedules"
         )
 
-    conflict = find_conflict_for_one_time(scheduled_dt, media_id_int)
-    if conflict and not is_announcement:
-        log_web("conflict_rejected", {"type": "one_time", "datetime": str(scheduled_dt), "conflict": conflict})
-        return _flash_redirect(
-            SCHEDULE_CONFLICT_MESSAGE, "error", "one_time_schedules"
+    try:
+        conflict = find_conflict_for_one_time(scheduled_dt, media_id_int)
+        if conflict and not is_announcement:
+            log_web("conflict_rejected", {"type": "one_time", "datetime": str(scheduled_dt), "conflict": conflict})
+            return _flash_redirect(
+                SCHEDULE_CONFLICT_MESSAGE, "error", "one_time_schedules"
+            )
+        if conflict and is_announcement:
+            log_web(
+                "conflict_soft_accepted",
+                {"type": "one_time", "datetime": str(scheduled_dt), "conflict": conflict},
+            )
+
+        db.add_one_time_schedule(media_id_int, scheduled_dt, reason)
+    except Exception as exc:
+        logger.exception("Failed to create one-time schedule")
+        log_error(
+            "one_time_create_failed",
+            {
+                "media_id": media_id_int,
+                "scheduled_dt": scheduled_dt.isoformat(),
+                "error": str(exc),
+            },
         )
-    if conflict and is_announcement:
-        log_web(
-            "conflict_soft_accepted",
-            {"type": "one_time", "datetime": str(scheduled_dt), "conflict": conflict},
+        return _flash_redirect(
+            "Plan oluşturulamadı. Lütfen tekrar deneyin.",
+            "error",
+            "one_time_schedules",
         )
 
-    db.add_one_time_schedule(media_id_int, scheduled_dt, reason)
     if conflict and is_announcement:
         return _flash_redirect(
             f"Plan eklendi. {QUEUE_LITE_NOTE}", "success", "one_time_schedules"
@@ -87,7 +115,18 @@ def api_add_one_time():
 @login_required
 def api_cancel_one_time(schedule_id):
     """Cancel a one-time schedule."""
-    db.update_one_time_schedule_status(schedule_id, "cancelled")
+    try:
+        updated = db.update_one_time_schedule_status(schedule_id, "cancelled")
+    except Exception as exc:
+        logger.exception("Failed to cancel one-time schedule id=%s", schedule_id)
+        log_error(
+            "one_time_cancel_failed",
+            {"schedule_id": schedule_id, "error": str(exc)},
+        )
+        return jsonify({"success": False, "message": "Plan iptal edilemedi"}), 500
+
+    if not updated:
+        return jsonify({"success": False, "message": "Plan bulunamadı"}), 404
     return jsonify({"success": True, "message": "Plan iptal edildi"})
 
 
@@ -95,7 +134,16 @@ def api_cancel_one_time(schedule_id):
 @login_required
 def api_delete_one_time(schedule_id):
     """Delete a one-time schedule."""
-    deleted = db.delete_one_time_schedule(schedule_id)
+    try:
+        deleted = db.delete_one_time_schedule(schedule_id)
+    except Exception as exc:
+        logger.exception("Failed to delete one-time schedule id=%s", schedule_id)
+        log_error(
+            "one_time_delete_failed",
+            {"schedule_id": schedule_id, "error": str(exc)},
+        )
+        return jsonify({"success": False, "message": "Plan silinemedi"}), 500
+
     if not deleted:
         return jsonify({"success": False, "message": "Plan bulunamadı"}), 404
     return jsonify({"success": True, "message": "Plan silindi"})
@@ -124,7 +172,15 @@ def api_delete_one_time_batch():
         return jsonify({"success": False, "message": "Silinecek plan seçilmedi"}), 400
 
     unique_ids = sorted(set(schedule_ids))
-    deleted_count = db.delete_one_time_schedules(unique_ids)
+    try:
+        deleted_count = db.delete_one_time_schedules(unique_ids)
+    except Exception as exc:
+        logger.exception("Failed to batch delete one-time schedules ids=%s", unique_ids)
+        log_error(
+            "one_time_batch_delete_failed",
+            {"count": len(unique_ids), "error": str(exc)},
+        )
+        return jsonify({"success": False, "message": "Planlar silinemedi"}), 500
 
     if deleted_count == 0:
         return jsonify({"success": False, "message": "Silinecek plan bulunamadı"}), 404

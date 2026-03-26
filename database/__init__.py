@@ -81,8 +81,17 @@ def _backfill_durations():
 
 def get_db_connection():
     """Get database connection with row factory."""
-    conn = sqlite3.connect(DATABASE_PATH)
+    timeout_seconds = float(
+        os.environ.get("ANNOUNCEFLOW_SQLITE_TIMEOUT_SECONDS", "15")
+    )
+    busy_timeout_ms = int(
+        os.environ.get("ANNOUNCEFLOW_SQLITE_BUSY_TIMEOUT_MS", "15000")
+    )
+
+    conn = sqlite3.connect(DATABASE_PATH, timeout=timeout_seconds)
     conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute(f"PRAGMA busy_timeout = {busy_timeout_ms}")
+    conn.execute("PRAGMA journal_mode = WAL")
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -296,16 +305,23 @@ def _run_migrations():
         cursor.execute("ALTER TABLE recurring_schedules ADD COLUMN reason TEXT")
         conn.commit()
 
-    # Migration: Expand one_time_schedules status CHECK to include 'queued'
-    try:
-        cursor.execute(
-            "SELECT 1 FROM one_time_schedules WHERE status = 'queued' LIMIT 0"
-        )
-    except sqlite3.OperationalError:
-        # CHECK constraint rejects 'queued' — recreate table with expanded constraint
+    # Migration: Ensure one_time_schedules CHECK includes 'queued'
+    cursor.execute(
+        """
+        SELECT sql
+        FROM sqlite_master
+        WHERE type = 'table' AND name = 'one_time_schedules'
+    """
+    )
+    row = cursor.fetchone()
+    table_sql = str(row["sql"] or "").lower() if row else ""
+    needs_queued_status_migration = "queued" not in table_sql
+
+    if needs_queued_status_migration:
+        cursor.execute("DROP TABLE IF EXISTS one_time_schedules_new")
         cursor.execute(
             """
-            CREATE TABLE IF NOT EXISTS one_time_schedules_new (
+            CREATE TABLE one_time_schedules_new (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 media_id INTEGER NOT NULL,
                 scheduled_datetime TIMESTAMP NOT NULL,
@@ -326,19 +342,23 @@ def _run_migrations():
         """
         )
         cursor.execute("DROP TABLE one_time_schedules")
-        cursor.execute(
-            "ALTER TABLE one_time_schedules_new RENAME TO one_time_schedules"
-        )
+        cursor.execute("ALTER TABLE one_time_schedules_new RENAME TO one_time_schedules")
         # Recreate indexes lost during table swap
         cursor.execute(
             """
-            CREATE INDEX IF NOT EXISTS idx_one_time_status
+            CREATE INDEX IF NOT EXISTS idx_one_time_schedules_media_id
+            ON one_time_schedules(media_id)
+        """
+        )
+        cursor.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_one_time_schedules_status
             ON one_time_schedules(status)
         """
         )
         cursor.execute(
             """
-            CREATE INDEX IF NOT EXISTS idx_one_time_datetime
+            CREATE INDEX IF NOT EXISTS idx_one_time_schedules_datetime
             ON one_time_schedules(scheduled_datetime)
         """
         )
