@@ -54,7 +54,6 @@ def test_atomic_cache_roundtrip(tmp_path, monkeypatch):
             "ikindi": "16:31",
             "aksam": "18:55",
             "yatsi": "20:14",
-            "gunes": "07:02",
             "date": "2026-02-27",
         }
     }

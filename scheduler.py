@@ -1357,7 +1357,7 @@ class Scheduler:
     def _start_scheduled_media(self, player, filepath: str, preserve_playlist: bool) -> bool:
         return bool(player.play(filepath, preserve_playlist=preserve_playlist))
 
-    def _queue_restore_target(self, snapshot: dict[str, Any]) -> bool:
+    def _queue_restore_target(self, snapshot: dict[str, Any], volume_override_active: bool = False) -> bool:
         if not snapshot["playlist_was_active"] or not snapshot["playlist_files"]:
             return False
 
@@ -1366,6 +1366,7 @@ class Scheduler:
             "index": snapshot["playlist_index"],
             "loop": snapshot["playlist_loop"],
             "active": True,
+            "volume_override_active": volume_override_active,
         }
 
         should_start_restore = False
@@ -1412,9 +1413,6 @@ class Scheduler:
             )
             return False
 
-        logger.info(
-            f"Scheduled media finished - resuming playlist from index {index + 1}"
-        )
         next_idx = (index + 1) % len(playlist)
         player.apply_playlist_state(
             playlist=playlist,
@@ -1424,6 +1422,13 @@ class Scheduler:
             db_active=True,
             play_next=True,
         )
+        log_schedule("restore_worker_playlist_resumed", {
+            "thread_id": threading.current_thread().name,
+            "index": next_idx,
+            "total_tracks": len(playlist),
+            "loop": loop,
+            "volume_override_active": bool(state.get("volume_override_active", False)),
+        })
         return True
 
     def _run_restore_worker(self, player) -> None:
@@ -1432,11 +1437,38 @@ class Scheduler:
                 while player.is_playing:
                     time.sleep(0.5)
 
+                # STEP 1: Restore volume BEFORE playlist resume
+                with self._restore_lock:
+                    state = self._restore_target_state  # peek, don't consume
+
+                if state and state.get("volume_override_active", False):
+                    token = _volume_runtime.get_override_token()
+                    restored = _volume_runtime.restore_override(
+                        reason="announcement_ended_sequential",
+                        token=token,
+                    )
+                    if not restored and token is not None:
+                        time.sleep(0.1)
+                        token = _volume_runtime.get_override_token()
+                        if token is not None:
+                            _volume_runtime.restore_override(
+                                reason="announcement_ended_sequential_retry",
+                                token=token,
+                            )
+                    log_schedule("restore_worker_volume_restored", {
+                        "thread_id": threading.current_thread().name,
+                        "token": token,
+                        "restored": restored,
+                        "volume_override_active": True,
+                    })
+
+                # STEP 2: Signal announcement done event
                 done = self._announcement_done
                 if done is not None and not done.is_set():
                     done.set()
                     self._announcement_done = None
 
+                # STEP 3: Resume playlist (volume is already canonical)
                 with self._restore_lock:
                     state = self._restore_target_state
                     self._restore_target_state = None
@@ -1582,14 +1614,20 @@ class Scheduler:
                 playback_session=getattr(player, "_playback_session", None),
                 effective_volume=override_volume,
                 source="scheduled_announcement",
+                start_watcher=False,
             )
         elif not success and override_applied:
             player.set_volume(int(canonical_volume.get("volume", 0)))
         if announcement_interrupted_stream:
             self._announcement_done = threading.Event()
-        restore_queued = success and self._queue_restore_target(snapshot)
+        restore_queued = success and self._queue_restore_target(
+            snapshot, volume_override_active=override_applied
+        )
         if restore_queued:
             self._start_restore_worker(player)
+        elif success and override_applied:
+            # No playlist to restore but volume override is active — fallback to session watcher
+            _volume_runtime._start_session_watcher(_volume_runtime._override_token)
         elif announcement_interrupted_stream:
             # No restore worker to signal the event — start a lightweight sentinel
             _evt = self._announcement_done
