@@ -246,7 +246,12 @@
             if (!resp.ok) { console.error('Timeline API error: status=%d date=%s', resp.status, todayStr); return; }
             const data = await resp.json();
             const days = data.days || [];
-            const totalSlots = days.reduce((sum, day) => sum + ((day.slots || []).length), 0);
+            let _totalAnons = 0, _totalConflicts = 0;
+            for (const _d of days) {
+                const _di = _getTimelineBadgeInfo(_d.slots || []);
+                _totalAnons += _di.anonsCount;
+                _totalConflicts += _di.conflictCount;
+            }
 
             barArea.innerHTML = '';
 
@@ -262,7 +267,7 @@
             labelBar.style.height = '16px';
             labelBar.style.background = 'transparent';
             labelBar.style.border = 'none';
-            for (let h = 0; h < 24; h += 3) {
+            for (let h = 0; h < 24; h++) {
                 const pct = (h * 60 / TOTAL_MINUTES) * 100;
                 const lbl = document.createElement('div');
                 lbl.className = 'timeline-hour-label';
@@ -287,14 +292,14 @@
                 const bar = document.createElement('div');
                 bar.className = 'timeline-bar';
                 bar.dataset.dayIndex = i;
-                renderTimelineBar(bar, days[i]);
                 row.appendChild(bar);
-
                 barArea.appendChild(row);
+                renderTimelineBar(bar, days[i]);
             }
 
             container.style.display = 'block';
-            bindTimelineControls('weekTimelineContainer', 'weekTimelineBarArea', totalSlots);
+            bindTimelineControls('weekTimelineContainer', 'weekTimelineBarArea');
+            updateTimelineBadges('weekTimelineBarArea', _totalAnons, _totalConflicts);
         } catch (e) {
             console.error('Week timeline load error:', e);
         }
