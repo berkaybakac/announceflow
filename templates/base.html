@@ -896,9 +896,9 @@
             border-radius: 6px;
             border: 1px solid var(--border);
             overflow: hidden;
-            min-width: calc(var(--timeline-zoom) * 100%);
-            width: calc(var(--timeline-zoom) * 100%);
-            flex: 0 0 calc(var(--timeline-zoom) * 100%);
+            min-width: var(--timeline-bar-width, 100%);
+            width: var(--timeline-bar-width, 100%);
+            flex: 0 0 var(--timeline-bar-width, 100%);
         }
         .timeline-scroll {
             overflow-x: auto;
@@ -967,8 +967,9 @@
         .timeline-slot.timeline-highlight {
             opacity: 1 !important;
             z-index: 3 !important;
-            box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.9), 0 0 14px rgba(59, 130, 246, 0.55);
-            transform: translateY(-1px);
+            filter: brightness(1.35);
+            box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.85);
+            transform: translateY(-1.5px);
         }
         .timeline-slot.timeline-highlight-locked {
             box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.95), 0 0 18px rgba(59, 130, 246, 0.7);
@@ -1343,7 +1344,11 @@
             });
         }
 
+        const _playerActionInFlight = {};
+
         async function globalPlayerAction(url, fallbackError) {
+            if (_playerActionInFlight[url]) return;
+            _playerActionInFlight[url] = true;
             try {
                 const response = await fetchUserAction(
                     url,
@@ -1357,6 +1362,8 @@
             } catch (error) {
                 console.error('Player control error:', error);
                 showToast(fallbackError, 'error');
+            } finally {
+                _playerActionInFlight[url] = false;
             }
         }
 
@@ -1372,7 +1379,10 @@
             globalPlayerAction('/api/playlist/next', 'Sonraki parça başlatılamadı');
         }
 
+        let _shuffleInFlight = false;
         async function globalShuffle() {
+            if (_shuffleInFlight) return;
+            _shuffleInFlight = true;
             try {
                 const response = await fetchUserAction(
                     '/api/playlist/start-all',
@@ -1385,6 +1395,8 @@
                 }
             } catch (error) {
                 showToast('Karışık oynatma başlatılamadı', 'error');
+            } finally {
+                _shuffleInFlight = false;
             }
         }
 
