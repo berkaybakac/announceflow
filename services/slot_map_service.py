@@ -19,6 +19,7 @@ from services.schedule_conflict_service import (
     resolve_duration_seconds,
     _parse_schedule_datetime,
 )
+from utils.time_utils import now_local
 
 logger = logging.getLogger(__name__)
 
@@ -249,7 +250,7 @@ def get_day_slots(date_str: str) -> Dict[str, Any]:
         target_date = datetime.strptime(date_str, "%Y-%m-%d")
     except (ValueError, TypeError):
         logger.warning("Invalid date_str=%r, falling back to today", date_str)
-        target_date = datetime.now()
+        target_date = now_local()
         date_str = target_date.strftime("%Y-%m-%d")
 
     config = load_config()
@@ -299,9 +300,9 @@ def get_day_slots(date_str: str) -> Dict[str, Any]:
 def get_week_slots(date_str: Optional[str] = None) -> Dict[str, Any]:
     """Build slot maps for a full week (Monday–Sunday)."""
     try:
-        ref_date = datetime.strptime(date_str, "%Y-%m-%d") if date_str else datetime.now()
+        ref_date = datetime.strptime(date_str, "%Y-%m-%d") if date_str else now_local()
     except (ValueError, TypeError):
-        ref_date = datetime.now()
+        ref_date = now_local()
 
     monday = ref_date - timedelta(days=ref_date.weekday())
 

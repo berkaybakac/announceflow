@@ -22,6 +22,96 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 
+DEFAULT_FFMPEG_LOG_MAX_BYTES = 2_000_000
+DEFAULT_FFMPEG_LOG_BACKUP_COUNT = 5
+
+
+def _parse_positive_int_env(var_name: str, default: int) -> int:
+    raw = os.environ.get(var_name, "").strip()
+    if not raw:
+        return int(default)
+    try:
+        parsed = int(raw)
+    except (TypeError, ValueError):
+        return int(default)
+    return max(1, parsed)
+
+
+class _RotatingLineFile:
+    """Thread-safe append writer with bounded on-disk size."""
+
+    def __init__(self, path: str, *, max_bytes: int, backup_count: int):
+        self.path = path
+        self.max_bytes = max(1, int(max_bytes))
+        self.backup_count = max(1, int(backup_count))
+        self._lock = threading.Lock()
+        self._stream = None
+        self._open_stream()
+
+    def _open_stream(self) -> None:
+        self._stream = open(
+            self.path,
+            "a",
+            encoding="utf-8",
+            errors="replace",
+            buffering=1,
+        )
+
+    def _rotate_locked(self) -> None:
+        if self._stream and not self._stream.closed:
+            self._stream.close()
+
+        oldest = f"{self.path}.{self.backup_count}"
+        if os.path.exists(oldest):
+            try:
+                os.remove(oldest)
+            except OSError:
+                pass
+
+        for idx in range(self.backup_count - 1, 0, -1):
+            src = f"{self.path}.{idx}"
+            dst = f"{self.path}.{idx + 1}"
+            if os.path.exists(src):
+                try:
+                    os.replace(src, dst)
+                except OSError:
+                    continue
+
+        if os.path.exists(self.path):
+            try:
+                os.replace(self.path, f"{self.path}.1")
+            except OSError:
+                pass
+
+        self._open_stream()
+
+    def write(self, text: str) -> None:
+        payload = text or ""
+        payload_size = len(payload.encode("utf-8", errors="replace"))
+        with self._lock:
+            try:
+                current_size = (
+                    os.path.getsize(self.path) if os.path.exists(self.path) else 0
+                )
+            except OSError:
+                current_size = 0
+
+            if (current_size + payload_size) > self.max_bytes:
+                self._rotate_locked()
+
+            self._stream.write(payload)
+
+    def flush(self) -> None:
+        with self._lock:
+            if self._stream and not self._stream.closed:
+                self._stream.flush()
+
+    def close(self) -> None:
+        with self._lock:
+            if self._stream and not self._stream.closed:
+                self._stream.close()
+
+
 def _utc_iso_ms() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace(
         "+00:00", "Z"
@@ -203,6 +293,18 @@ def _parse_extra_ffmpeg_args() -> list[str]:
         return shlex.split(raw)
     except ValueError:
         return []
+
+
+def _resolve_ffmpeg_log_rotation() -> tuple[int, int]:
+    max_bytes = _parse_positive_int_env(
+        "ANNOUNCEFLOW_STREAM_FFMPEG_LOG_MAX_BYTES",
+        DEFAULT_FFMPEG_LOG_MAX_BYTES,
+    )
+    backup_count = _parse_positive_int_env(
+        "ANNOUNCEFLOW_STREAM_FFMPEG_LOG_BACKUP_COUNT",
+        DEFAULT_FFMPEG_LOG_BACKUP_COUNT,
+    )
+    return max_bytes, backup_count
 
 
 def _process_ffmpeg_line(
@@ -406,7 +508,12 @@ def main():
     os.makedirs(log_dir, exist_ok=True)
 
     log_path = os.path.join(log_dir, "stream_receiver_ffmpeg.log")
-    stderr_log = open(log_path, "a", encoding="utf-8", errors="replace", buffering=1)
+    log_max_bytes, log_backup_count = _resolve_ffmpeg_log_rotation()
+    stderr_log = _RotatingLineFile(
+        log_path,
+        max_bytes=log_max_bytes,
+        backup_count=log_backup_count,
+    )
     started_mono = time.monotonic()
 
     counters: Dict[str, Any] = {
@@ -427,7 +534,8 @@ def main():
 
     stderr_log.write(
         f"{_local_log_ts()} [receiver] correlation_id={correlation_id} "
-        f"resolved_alsa_device={alsa_device} port={port} udp_input={udp_input_url}\n"
+        f"resolved_alsa_device={alsa_device} port={port} udp_input={udp_input_url} "
+        f"log_max_bytes={log_max_bytes} log_backups={log_backup_count}\n"
     )
     stderr_log.flush()
 

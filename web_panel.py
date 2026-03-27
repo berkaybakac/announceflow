@@ -10,7 +10,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 import json
 import shutil
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from flask import (
     Flask,
     render_template,
@@ -29,6 +29,7 @@ from scheduler import get_scheduler
 from logger import log_web
 from services.config_service import load_config, save_config, load_dotenv_if_present
 from services.release_service import load_release_stamp
+from utils.time_utils import parse_storage_datetime_to_local
 
 app = Flask(__name__)
 load_dotenv_if_present()
@@ -168,43 +169,31 @@ def _format_schedules(schedules):
     formatted = []
     for s in schedules:
         s_dict = dict(s)
-        try:
-            dt_str = s_dict["scheduled_datetime"]
-            # Handle T separator if present
-            dt_str = dt_str.replace("T", " ")
-            # Parse (try with constraints)
-            try:
-                dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S")
-            except ValueError:
-                dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M")
-
-            s_dict["display_datetime"] = dt.strftime("%d.%m.%Y %H:%M")
-        except Exception:
-            s_dict["display_datetime"] = s_dict["scheduled_datetime"]
+        parsed_local = parse_storage_datetime_to_local(
+            s_dict.get("scheduled_datetime"),
+            naive_as_local=True,
+        )
+        if parsed_local is None:
+            s_dict["display_datetime"] = s_dict.get("scheduled_datetime")
+        else:
+            s_dict["display_datetime"] = parsed_local.strftime("%d.%m.%Y %H:%M")
         formatted.append(s_dict)
     return formatted
 
 
 def _format_media_files(files):
-    """Format media file dates (UTC -> UTC+3) and (DD.MM.YYYY HH:MM)."""
+    """Format media file dates from UTC to local app timezone."""
     formatted = []
     for f in files:
         f_dict = dict(f)
-        try:
-            dt_str = f_dict["created_at"]
-            # Parse UTC time
-            try:
-                dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S")
-            except ValueError:
-                dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M")
-
-            # Add 3 hours for Turkey Time (UTC+3) manual adjustment
-            # since we know the server stores UTC
-            dt_tr = dt + timedelta(hours=3)
-
-            f_dict["created_at_formatted"] = dt_tr.strftime("%d.%m.%Y %H:%M")
-        except Exception:
-            f_dict["created_at_formatted"] = f_dict["created_at"]
+        parsed_local = parse_storage_datetime_to_local(
+            f_dict.get("created_at"),
+            naive_as_local=False,
+        )
+        if parsed_local is None:
+            f_dict["created_at_formatted"] = f_dict.get("created_at")
+        else:
+            f_dict["created_at_formatted"] = parsed_local.strftime("%d.%m.%Y %H:%M")
         formatted.append(f_dict)
     return formatted
 
@@ -244,17 +233,14 @@ def index():
     for s in upcoming_formatted:
         blocked = False
         if working_hours_enabled:
-            try:
-                dt_str = s.get("scheduled_datetime", "").replace("T", " ")
-                try:
-                    scheduled_dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S")
-                except ValueError:
-                    scheduled_dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M")
+            scheduled_dt = parse_storage_datetime_to_local(
+                s.get("scheduled_datetime"),
+                naive_as_local=True,
+            )
+            if scheduled_dt is not None:
                 blocked = not _is_time_within_configured_hours(
                     scheduled_dt.time(), working_hours_enabled, work_start, work_end
                 )
-            except Exception:
-                blocked = False
         s["blocked_outside_hours"] = blocked
     return render_template(
         "index.html",
@@ -279,17 +265,14 @@ def one_time_schedules():
     for s in schedules_formatted:
         blocked = False
         if working_hours_enabled:
-            try:
-                dt_str = s.get("scheduled_datetime", "").replace("T", " ")
-                try:
-                    scheduled_dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S")
-                except ValueError:
-                    scheduled_dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M")
+            scheduled_dt = parse_storage_datetime_to_local(
+                s.get("scheduled_datetime"),
+                naive_as_local=True,
+            )
+            if scheduled_dt is not None:
                 blocked = not _is_time_within_configured_hours(
                     scheduled_dt.time(), working_hours_enabled, work_start, work_end
                 )
-            except Exception:
-                blocked = False
         s["blocked_outside_hours"] = blocked
     queue_status = get_scheduler().get_announcement_queue_status()
     return render_template(

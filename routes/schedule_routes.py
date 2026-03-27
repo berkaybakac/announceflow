@@ -5,7 +5,6 @@ API endpoints for schedule management (one-time and recurring).
 import json
 import logging
 import re
-from datetime import datetime
 from flask import Blueprint, request, redirect, url_for, jsonify
 import database as db
 from logger import log_web, log_error
@@ -17,6 +16,12 @@ from services.schedule_conflict_service import (
 )
 from services.slot_map_service import get_day_slots, get_week_slots
 from utils.helpers import login_required, _flash_redirect
+from utils.time_utils import (
+    get_app_timezone_name,
+    now_local,
+    to_storage_utc_z,
+    parse_local_date_time,
+)
 
 
 schedule_bp = Blueprint("schedule", __name__)
@@ -54,20 +59,23 @@ def api_add_one_time():
     is_announcement = media_type == "announcement"
 
     try:
-        scheduled_dt = datetime.strptime(f"{date} {time}", "%Y-%m-%d %H:%M")
+        scheduled_local = parse_local_date_time(date, time)
     except ValueError:
         return _flash_redirect(
             "Geçersiz tarih/saat formatı", "error", "one_time_schedules"
         )
 
-    now = datetime.now()
-    if scheduled_dt <= now:
+    now_local_dt = now_local()
+    if scheduled_local <= now_local_dt:
         log_web(
             "one_time_rejected_past",
             {
-                "scheduled_dt": scheduled_dt.isoformat(),
-                "server_now": now.isoformat(),
-                "delta_seconds": int((scheduled_dt - now).total_seconds()),
+                "scheduled_local": scheduled_local.isoformat(),
+                "scheduled_utc": to_storage_utc_z(scheduled_local),
+                "server_now_local": now_local_dt.isoformat(),
+                "server_now_utc": to_storage_utc_z(now_local_dt),
+                "timezone": get_app_timezone_name(),
+                "delta_seconds": int((scheduled_local - now_local_dt).total_seconds()),
             },
         )
         return _flash_redirect(
@@ -75,26 +83,27 @@ def api_add_one_time():
         )
 
     try:
-        conflict = find_conflict_for_one_time(scheduled_dt, media_id_int)
+        conflict = find_conflict_for_one_time(scheduled_local, media_id_int)
         if conflict and not is_announcement:
-            log_web("conflict_rejected", {"type": "one_time", "datetime": str(scheduled_dt), "conflict": conflict})
+            log_web("conflict_rejected", {"type": "one_time", "datetime": scheduled_local.isoformat(), "conflict": conflict})
             return _flash_redirect(
                 SCHEDULE_CONFLICT_MESSAGE, "error", "one_time_schedules"
             )
         if conflict and is_announcement:
             log_web(
                 "conflict_soft_accepted",
-                {"type": "one_time", "datetime": str(scheduled_dt), "conflict": conflict},
+                {"type": "one_time", "datetime": scheduled_local.isoformat(), "conflict": conflict},
             )
 
-        db.add_one_time_schedule(media_id_int, scheduled_dt, reason)
+        db.add_one_time_schedule(media_id_int, scheduled_local, reason)
     except Exception as exc:
         logger.exception("Failed to create one-time schedule")
         log_error(
             "one_time_create_failed",
             {
                 "media_id": media_id_int,
-                "scheduled_dt": scheduled_dt.isoformat(),
+                "scheduled_local": scheduled_local.isoformat(),
+                "scheduled_utc": to_storage_utc_z(scheduled_local),
                 "error": str(exc),
             },
         )
@@ -435,7 +444,7 @@ def api_day_slots():
     """Return occupied time slots for a specific date."""
     date_str = request.args.get("date", "")
     if not date_str:
-        date_str = datetime.now().strftime("%Y-%m-%d")
+        date_str = now_local().strftime("%Y-%m-%d")
     result = get_day_slots(date_str)
     log_web("day_slots", {"date": date_str, "slot_count": len(result.get("slots", []))})
     return jsonify(result)

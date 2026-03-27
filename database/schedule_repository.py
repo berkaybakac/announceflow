@@ -5,6 +5,7 @@ import json
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 from .base_repository import BaseRepository
+from utils.time_utils import to_storage_utc_z
 
 
 class ScheduleRepository(BaseRepository):
@@ -16,6 +17,7 @@ class ScheduleRepository(BaseRepository):
         self, media_id: int, scheduled_datetime: datetime, reason: Optional[str] = None
     ) -> int:
         """Add a one-time schedule."""
+        normalized_dt = to_storage_utc_z(scheduled_datetime)
         conn = self.get_connection()
         cursor = conn.cursor()
         cursor.execute(
@@ -23,7 +25,7 @@ class ScheduleRepository(BaseRepository):
             INSERT INTO one_time_schedules (media_id, scheduled_datetime, reason)
             VALUES (?, ?, ?)
         """,
-            (media_id, scheduled_datetime.isoformat(), reason),
+            (media_id, normalized_dt, reason),
         )
         schedule_id = cursor.lastrowid or 0
         conn.commit()
@@ -40,7 +42,7 @@ class ScheduleRepository(BaseRepository):
             FROM one_time_schedules s
             JOIN media_files m ON s.media_id = m.id
             WHERE s.status = 'pending'
-            ORDER BY s.scheduled_datetime ASC
+            ORDER BY s.scheduled_datetime ASC, s.id ASC
         """
         )
         rows = cursor.fetchall()

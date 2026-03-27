@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 from typing import Dict, Iterable, List, Optional, Tuple
 
 import database as db
+from utils.time_utils import ensure_local, parse_storage_datetime_to_local
 
 
 DEFAULT_DURATION_SECONDS = 120
@@ -107,16 +108,7 @@ def _parse_specific_times(raw) -> List[str]:
 
 
 def _parse_schedule_datetime(raw_value: str) -> Optional[datetime]:
-    if not isinstance(raw_value, str) or not raw_value.strip():
-        return None
-
-    text = raw_value.strip().replace("T", " ")
-    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M"):
-        try:
-            return datetime.strptime(text, fmt)
-        except ValueError:
-            continue
-    return None
+    return parse_storage_datetime_to_local(raw_value, naive_as_local=True)
 
 
 def _generate_interval_triggers_for_day(
@@ -248,8 +240,9 @@ def find_conflict_for_one_time(
     candidate_dt: datetime, media_id: int, exclude_one_time_id: Optional[int] = None
 ) -> Optional[Dict]:
     """Find first conflict for a candidate one-time schedule."""
+    candidate_local = ensure_local(candidate_dt)
     candidate_duration = resolve_duration_seconds(media_id)
-    candidate_end = candidate_dt + timedelta(seconds=candidate_duration)
+    candidate_end = candidate_local + timedelta(seconds=candidate_duration)
 
     # 1) Pending one-time schedules (absolute datetime overlap).
     for existing in db.get_pending_one_time_schedules():
@@ -263,7 +256,7 @@ def find_conflict_for_one_time(
 
         existing_duration = resolve_duration_seconds(existing.get("media_id"))
         existing_end = existing_dt + timedelta(seconds=existing_duration)
-        if candidate_dt < existing_end and existing_dt < candidate_end:
+        if candidate_local < existing_end and existing_dt < candidate_end:
             return {
                 "type": "one_time",
                 "schedule_id": existing_id,
@@ -271,7 +264,9 @@ def find_conflict_for_one_time(
             }
 
     # 2) Active recurring schedules (weekly slot overlap).
-    candidate_weekly = _build_one_time_weekly_intervals(candidate_dt, candidate_duration)
+    candidate_weekly = _build_one_time_weekly_intervals(
+        candidate_local, candidate_duration
+    )
     for recurring in db.get_active_recurring_schedules():
         recurring_duration = resolve_duration_seconds(recurring.get("media_id"))
         recurring_weekly = build_weekly_intervals(recurring, recurring_duration)
