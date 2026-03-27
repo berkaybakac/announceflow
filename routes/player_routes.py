@@ -24,6 +24,7 @@ from utils.helpers import (
     _get_media_or_404,
     _reject_if_outside_working_hours,
 )
+from utils.time_utils import parse_storage_datetime_to_local
 
 
 player_bp = Blueprint("player", __name__)
@@ -406,6 +407,28 @@ def api_now_playing():
             state["duration_seconds"] = media.get("duration_seconds", 0)
 
     return jsonify(state)
+
+
+@player_bp.route("/api/upcoming-schedules")
+@login_required
+def api_upcoming_schedules():
+    """Return pending one-time schedules formatted for the now-playing page poll."""
+    upcoming = db.get_pending_one_time_schedules()
+    result = []
+    for s in upcoming:
+        raw_dt = s.get("scheduled_datetime")
+        parsed_local = parse_storage_datetime_to_local(raw_dt, naive_as_local=True)
+        display_dt = (
+            parsed_local.strftime("%d.%m.%Y %H:%M")
+            if parsed_local is not None
+            else (raw_dt or "")
+        )
+        result.append({
+            "filename": s.get("filename", ""),
+            "display_datetime": display_dt,
+            "blocked_outside_hours": bool(s.get("blocked_outside_hours", False)),
+        })
+    return jsonify({"schedules": result})
 
 
 @player_bp.route("/api/media/music")

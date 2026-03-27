@@ -669,6 +669,17 @@
             transform: scale(1.05);
         }
 
+        .control-btn:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .control-btn:disabled:hover {
+            background: var(--bg-input);
+            transform: none;
+        }
+
         .control-btn-play {
             width: 72px;
             height: 72px;
@@ -1173,26 +1184,26 @@
         </main>
 
         <div class="floating-controls" aria-label="Oynatıcı Kontrolleri">
-            <button class="control-btn" onclick="globalStop()" title="Durdur" aria-label="Durdur">
+            <button class="control-btn" onclick="globalStop(this)" title="Durdur" aria-label="Durdur">
                 <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round"
                         d="M5.25 7.5A2.25 2.25 0 017.5 5.25h9a2.25 2.25 0 012.25 2.25v9a2.25 2.25 0 01-2.25 2.25h-9a2.25 2.25 0 01-2.25-2.25v-9z" />
                 </svg>
             </button>
-            <button class="control-btn" onclick="globalShuffle()" title="Karışık Oynat" aria-label="Karışık Oynat">
+            <button class="control-btn" onclick="globalShuffle(this)" title="Karışık Oynat" aria-label="Karışık Oynat">
                 <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round"
                         d="M7.5 21L3 16.5m0 0L7.5 12M3 16.5h13.5m0-13.5L21 7.5m0 0L16.5 12M21 7.5H7.5" />
                 </svg>
             </button>
-            <button class="control-btn control-btn-loop" onclick="globalLoop()" title="Loop Oynat"
+            <button class="control-btn control-btn-loop" onclick="globalLoop(this)" title="Loop Oynat"
                 aria-label="Loop Oynat">
                 <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round"
                         d="M4.5 9.75a7.5 7.5 0 0113.5-3.75L19.5 7.5m0 0V3.75m0 3.75h-3.75M19.5 14.25a7.5 7.5 0 01-13.5 3.75L4.5 16.5m0 0v3.75m0-3.75h3.75" />
                 </svg>
             </button>
-            <button class="control-btn" onclick="globalNext()" title="Sonraki" aria-label="Sonraki">
+            <button class="control-btn" onclick="globalNext(this)" title="Sonraki" aria-label="Sonraki">
                 <svg fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round"
                         d="M3 8.688c0-.864.933-1.405 1.683-.977l7.108 4.062a1.125 1.125 0 010 1.953l-7.108 4.062A1.125 1.125 0 013 16.81V8.688zM12.75 8.688c0-.864.933-1.405 1.683-.977l7.108 4.062a1.125 1.125 0 010 1.953l-7.108 4.062a1.125 1.125 0 01-1.683-.977V8.688z" />
@@ -1346,9 +1357,10 @@
 
         const _playerActionInFlight = {};
 
-        async function globalPlayerAction(url, fallbackError) {
+        async function globalPlayerAction(url, fallbackError, triggerBtn = null) {
             if (_playerActionInFlight[url]) return;
             _playerActionInFlight[url] = true;
+            if (triggerBtn) triggerBtn.disabled = true;
             try {
                 const response = await fetchUserAction(
                     url,
@@ -1364,25 +1376,27 @@
                 showToast(fallbackError, 'error');
             } finally {
                 _playerActionInFlight[url] = false;
+                if (triggerBtn) triggerBtn.disabled = false;
             }
         }
 
-        function globalStop() {
-            globalPlayerAction('/api/stop', 'Durdurma işlemi başarısız');
+        function globalStop(btn) {
+            globalPlayerAction('/api/stop', 'Durdurma işlemi başarısız', btn);
         }
 
-        function globalLoop() {
-            globalPlayerAction('/api/playlist/start-all', 'Loop oynatma başlatılamadı');
+        function globalLoop(btn) {
+            globalPlayerAction('/api/playlist/start-all', 'Loop oynatma başlatılamadı', btn);
         }
 
-        function globalNext() {
-            globalPlayerAction('/api/playlist/next', 'Sonraki parça başlatılamadı');
+        function globalNext(btn) {
+            globalPlayerAction('/api/playlist/next', 'Sonraki parça başlatılamadı', btn);
         }
 
         let _shuffleInFlight = false;
-        async function globalShuffle() {
+        async function globalShuffle(btn) {
             if (_shuffleInFlight) return;
             _shuffleInFlight = true;
+            if (btn) btn.disabled = true;
             try {
                 const response = await fetchUserAction(
                     '/api/playlist/start-all',
@@ -1397,6 +1411,7 @@
                 showToast('Karışık oynatma başlatılamadı', 'error');
             } finally {
                 _shuffleInFlight = false;
+                if (btn) btn.disabled = false;
             }
         }
 
