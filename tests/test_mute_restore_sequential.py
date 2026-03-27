@@ -241,3 +241,63 @@ class TestMuteRestoreStress:
 
         # After restore, override should be inactive
         assert svc.get_override_token() is None
+
+
+class TestRestoreWorkerIndexLogic:
+    """_restore_worker_once must resume the SAME track that was interrupted.
+
+    Bug regression: previously always played track 0 (next_idx wrapping bug).
+    """
+
+    def _run_once(self, index, playlist=None):
+        """Run _restore_worker_once with given index and return apply_playlist_state kwargs."""
+        playlist = playlist or ["/a.mp3", "/b.mp3", "/c.mp3"]
+        sched = _make_scheduler()
+        player = MagicMock()
+        player.apply_playlist_state.return_value = True
+
+        state = {
+            "playlist": playlist,
+            "index": index,
+            "loop": True,
+            "active": True,
+            "volume_override_active": False,
+        }
+
+        with patch("scheduler.db.get_playlist_state", return_value={"active": True}), \
+             patch("scheduler.resolve_silence_policy", return_value={
+                 "silence_active": False,
+                 "policy": "none",
+                 "reason_code": "prayer_disabled",
+             }):
+            result = sched._restore_worker_once(player, state)
+
+        assert result is True
+        assert player.apply_playlist_state.call_count == 1
+        return player.apply_playlist_state.call_args.kwargs
+
+    def test_resumes_first_track(self):
+        """index=0 → cursor must be -1 so play_next() lands on track 0."""
+        kwargs = self._run_once(index=0)
+        assert kwargs["index"] == -1
+        assert kwargs["play_next"] is True
+
+    def test_resumes_middle_track(self):
+        """index=1 → cursor must be 0 so play_next() lands on track 1."""
+        kwargs = self._run_once(index=1)
+        assert kwargs["index"] == 0
+        assert kwargs["play_next"] is True
+
+    def test_resumes_last_track(self):
+        """index=2 (last in 3-track list) → cursor must be 1 so play_next() lands on track 2.
+        Regression: old modulo bug gave cursor=-1 → always played track 0."""
+        kwargs = self._run_once(index=2)
+        assert kwargs["index"] == 1
+        assert kwargs["play_next"] is True
+
+    def test_index_minus_one_guard(self):
+        """index=-1 (no track playing yet) → cursor clamped to -1, not -2.
+        Without guard, cursor=-2 → next_index=-1 → Python list[-1] = last track."""
+        kwargs = self._run_once(index=-1)
+        assert kwargs["index"] == -1
+        assert kwargs["play_next"] is True
