@@ -10,11 +10,13 @@ import subprocess
 import os
 from datetime import datetime
 from typing import Optional, List, Dict, Any
+import logging
 
 from .base_repository import BaseRepository
 from .media_repository import MediaRepository
 from .schedule_repository import ScheduleRepository
 from .playback_repository import PlaybackRepository
+from utils.time_utils import parse_storage_datetime_to_utc, to_storage_utc_z
 
 
 # Database path
@@ -26,6 +28,7 @@ DATABASE_PATH = "announceflow.db"
 _media_repo = MediaRepository(DATABASE_PATH)
 _schedule_repo = ScheduleRepository(DATABASE_PATH)
 _playback_repo = PlaybackRepository(DATABASE_PATH)
+logger = logging.getLogger(__name__)
 
 
 # ============ UTILITY FUNCTIONS ============
@@ -363,6 +366,44 @@ def _run_migrations():
         """
         )
         conn.commit()
+
+    # Migration: Canonicalize one_time_schedules.scheduled_datetime to UTC "Z".
+    cursor.execute(
+        """
+        SELECT id, scheduled_datetime
+        FROM one_time_schedules
+        """
+    )
+    rows = cursor.fetchall()
+    updates: list[tuple[str, int]] = []
+    skipped = 0
+    for row in rows:
+        schedule_id = int(row["id"])
+        raw_dt = row["scheduled_datetime"]
+        parsed_utc = parse_storage_datetime_to_utc(raw_dt, naive_as_local=True)
+        if parsed_utc is None:
+            skipped += 1
+            continue
+        normalized = to_storage_utc_z(parsed_utc)
+        if str(raw_dt or "").strip() != normalized:
+            updates.append((normalized, schedule_id))
+
+    if updates:
+        cursor.executemany(
+            """
+            UPDATE one_time_schedules
+            SET scheduled_datetime = ?
+            WHERE id = ?
+            """,
+            updates,
+        )
+        conn.commit()
+
+    if skipped:
+        logger.warning(
+            "Skipped %s one_time_schedules rows during UTC datetime migration",
+            skipped,
+        )
 
     conn.close()
 

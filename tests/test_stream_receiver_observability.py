@@ -38,6 +38,28 @@ def test_udp_input_url_with_fifo(monkeypatch):
     assert "fifo_size=4194304" not in url  # env var replaces default
 
 
+def test_resolve_ffmpeg_log_rotation_reads_env(monkeypatch):
+    monkeypatch.setenv("ANNOUNCEFLOW_STREAM_FFMPEG_LOG_MAX_BYTES", "4096")
+    monkeypatch.setenv("ANNOUNCEFLOW_STREAM_FFMPEG_LOG_BACKUP_COUNT", "7")
+    assert receiver._resolve_ffmpeg_log_rotation() == (4096, 7)
+
+
+def test_rotating_line_file_rotates_when_max_bytes_exceeded(tmp_path):
+    log_path = tmp_path / "stream_receiver_ffmpeg.log"
+    writer = receiver._RotatingLineFile(
+        str(log_path),
+        max_bytes=40,
+        backup_count=2,
+    )
+    writer.write("a" * 30 + "\n")
+    writer.write("b" * 30 + "\n")
+    writer.flush()
+    writer.close()
+
+    assert log_path.exists()
+    assert (tmp_path / "stream_receiver_ffmpeg.log.1").exists()
+
+
 def test_parse_extra_ffmpeg_args_handles_invalid_shell_fragment(monkeypatch):
     monkeypatch.setenv("ANNOUNCEFLOW_STREAM_FFMPEG_ARGS", "\"unterminated")
     assert receiver._parse_extra_ffmpeg_args() == []

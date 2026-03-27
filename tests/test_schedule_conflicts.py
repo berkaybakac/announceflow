@@ -5,7 +5,8 @@ import sqlite3
 import tempfile
 import time
 import unittest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from unittest.mock import MagicMock, patch
 
 import database as db
@@ -20,6 +21,7 @@ from services.schedule_conflict_service import (
     has_self_overlap_for_interval,
     resolve_duration_seconds,
 )
+from utils.time_utils import to_storage_utc_z
 from web_panel import app
 
 
@@ -197,6 +199,64 @@ class ScheduleConflictTestCase(unittest.TestCase):
             response.data,
         )
 
+    @patch("routes.schedule_routes.now_local")
+    def test_route_one_time_future_local_time_is_accepted(self, mock_now_local):
+        mock_now_local.return_value = datetime(
+            2026, 3, 26, 15, 10, tzinfo=ZoneInfo("Europe/Istanbul")
+        )
+        media_id = self._add_media(
+            "future_local_announcement.mp3",
+            60,
+            media_type="announcement",
+        )
+
+        response = self.client.post(
+            "/api/schedules/one-time",
+            data={
+                "media_id": str(media_id),
+                "date": "2026-03-26",
+                "time": "15:30",
+            },
+            follow_redirects=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Plan başarıyla eklendi".encode("utf-8"), response.data)
+
+        pending = db.get_pending_one_time_schedules()
+        self.assertEqual(len(pending), 1)
+        self.assertEqual(
+            pending[0]["scheduled_datetime"],
+            "2026-03-26T12:30:00Z",
+        )
+
+    @patch("routes.schedule_routes.now_local")
+    def test_route_one_time_past_local_time_is_rejected(self, mock_now_local):
+        mock_now_local.return_value = datetime(
+            2026, 3, 26, 15, 10, tzinfo=ZoneInfo("Europe/Istanbul")
+        )
+        media_id = self._add_media(
+            "past_local_announcement.mp3",
+            60,
+            media_type="announcement",
+        )
+
+        response = self.client.post(
+            "/api/schedules/one-time",
+            data={
+                "media_id": str(media_id),
+                "date": "2026-03-26",
+                "time": "15:00",
+            },
+            follow_redirects=True,
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            "Geçmiş bir tarih seçemezsiniz".encode("utf-8"),
+            response.data,
+        )
+
     def test_route_recurring_conflict_returns_flash_error(self):
         long_media = self._add_media("long.mp3", 420)
         candidate_media = self._add_media("candidate.mp3", 30)
@@ -343,6 +403,113 @@ class ScheduleConflictTestCase(unittest.TestCase):
         self.assertFalse(second)
         self.assertEqual(len(scheduler._announcement_queue), 1)
 
+    def test_scheduler_queue_lite_same_due_time_is_stable_fifo(self):
+        scheduler = Scheduler(check_interval_seconds=1)
+        due_dt = self._dt(2026, 2, 9, 10, 0)
+
+        self.assertTrue(
+            scheduler._queue_announcement(
+                filepath="/tmp/a.mp3",
+                schedule_id=101,
+                is_one_time=False,
+                due_dt=due_dt,
+                source="recurring",
+                duration_seconds=15,
+            )
+        )
+        self.assertTrue(
+            scheduler._queue_announcement(
+                filepath="/tmp/b.mp3",
+                schedule_id=102,
+                is_one_time=False,
+                due_dt=due_dt,
+                source="recurring",
+                duration_seconds=15,
+            )
+        )
+        self.assertTrue(
+            scheduler._queue_announcement(
+                filepath="/tmp/c.mp3",
+                schedule_id=103,
+                is_one_time=False,
+                due_dt=due_dt,
+                source="recurring",
+                duration_seconds=15,
+            )
+        )
+
+        order = [item["schedule_id"] for item in scheduler._announcement_queue]
+        seqs = [item["enqueue_seq"] for item in scheduler._announcement_queue]
+        self.assertEqual(order, [101, 102, 103])
+        self.assertEqual(seqs, [1, 2, 3])
+
+    def test_scheduler_queue_lite_policy_block_keeps_fifo_then_dispatches_first(self):
+        scheduler = Scheduler(check_interval_seconds=1)
+        due_dt = datetime.now() + timedelta(minutes=1)
+        scheduler._announcement_next_allowed_monotonic = 0
+
+        scheduler._queue_announcement(
+            filepath="/tmp/first.mp3",
+            schedule_id=201,
+            is_one_time=False,
+            due_dt=due_dt,
+            source="recurring",
+            duration_seconds=15,
+        )
+        scheduler._queue_announcement(
+            filepath="/tmp/second.mp3",
+            schedule_id=202,
+            is_one_time=False,
+            due_dt=due_dt,
+            source="recurring",
+            duration_seconds=15,
+        )
+
+        with patch.object(scheduler, "_play_media", return_value=True) as mock_play_media:
+            scheduler._process_announcement_queue(
+                outside_working_hours=False,
+                silence_blocked=True,
+            )
+            mock_play_media.assert_not_called()
+            self.assertEqual(len(scheduler._announcement_queue), 2)
+
+            scheduler._process_announcement_queue(
+                outside_working_hours=False,
+                silence_blocked=False,
+            )
+            mock_play_media.assert_called_once()
+            self.assertIn("/tmp/first.mp3", mock_play_media.call_args.args)
+            self.assertIsNotNone(scheduler._announcement_current)
+            self.assertEqual(scheduler._announcement_current["schedule_id"], 201)
+
+    def test_scheduler_queue_status_write_error_does_not_crash_enqueue(self):
+        scheduler = Scheduler(check_interval_seconds=1)
+        due_dt = datetime.now() + timedelta(minutes=5)
+        media_id = self._add_media(
+            "write_error_announcement.mp3",
+            10,
+            media_type="announcement",
+        )
+        schedule_id = db.add_one_time_schedule(media_id, due_dt)
+
+        with patch.object(
+            scheduler_module.db,
+            "update_one_time_schedule_status",
+            side_effect=RuntimeError("status write failed"),
+        ), patch.object(scheduler_module, "log_error") as mock_log_error:
+            queued = scheduler._queue_announcement(
+                filepath="/tmp/write_error_announcement.mp3",
+                schedule_id=schedule_id,
+                is_one_time=True,
+                due_dt=due_dt,
+                source="one_time",
+                duration_seconds=10,
+            )
+
+        self.assertTrue(queued)
+        self.assertEqual(len(scheduler._announcement_queue), 1)
+        self.assertTrue(mock_log_error.called)
+
     def test_scheduler_queue_enqueue_sets_one_time_status_to_queued(self):
         scheduler = Scheduler(check_interval_seconds=1)
         media_id = self._add_media("queued_announcement.mp3", 10, media_type="announcement")
@@ -363,6 +530,42 @@ class ScheduleConflictTestCase(unittest.TestCase):
         self.assertTrue(queued)
         schedule = db.get_one_time_schedule(schedule_id)
         self.assertEqual(schedule["status"], "queued")
+
+    def test_scheduler_one_time_utc_schedule_triggers_in_window(self):
+        scheduler = Scheduler(check_interval_seconds=1)
+        media_id = self._add_media(
+            "utc_window_announcement.mp3",
+            10,
+            media_type="announcement",
+        )
+
+        conn = db.get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO one_time_schedules (media_id, scheduled_datetime, status)
+            VALUES (?, ?, 'pending')
+            """,
+            (media_id, "2026-03-26T12:30:00Z"),
+        )
+        schedule_id = int(cursor.lastrowid)
+        conn.commit()
+        conn.close()
+
+        with patch.object(
+            scheduler_module,
+            "now_utc",
+            return_value=datetime(2026, 3, 26, 12, 30, 30, tzinfo=timezone.utc),
+        ), patch.object(scheduler, "_queue_announcement") as mock_queue:
+            scheduler._check_one_time_schedules(
+                outside_working_hours=False,
+                silence_blocked=False,
+            )
+
+        mock_queue.assert_called_once()
+        called_kwargs = mock_queue.call_args.kwargs
+        self.assertEqual(called_kwargs["schedule_id"], schedule_id)
+        self.assertEqual(to_storage_utc_z(called_kwargs["due_dt"]), "2026-03-26T12:30:00Z")
 
     def test_scheduler_queue_lite_drops_stale_and_cancels_one_time(self):
         scheduler = Scheduler(check_interval_seconds=1)
@@ -877,6 +1080,120 @@ class DatabaseMigrationTestCase(unittest.TestCase):
                 schedule = db.get_one_time_schedule(schedule_id)
                 self.assertIsNotNone(schedule)
                 self.assertEqual(schedule["status"], "queued")
+            finally:
+                db.DATABASE_PATH = old_db_path
+                db._media_repo = old_media_repo
+                db._schedule_repo = old_schedule_repo
+                db._playback_repo = old_playback_repo
+
+    def test_legacy_one_time_datetime_is_migrated_to_utc_and_idempotent(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = os.path.join(tmpdir, "legacy_datetime.db")
+
+            conn = sqlite3.connect(db_path)
+            cursor = conn.cursor()
+            cursor.execute(
+                """
+                CREATE TABLE media_files (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    filename TEXT NOT NULL,
+                    filepath TEXT NOT NULL,
+                    media_type TEXT NOT NULL CHECK(media_type IN ('music', 'announcement')),
+                    duration_seconds INTEGER DEFAULT 0,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            cursor.execute(
+                """
+                CREATE TABLE one_time_schedules (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    media_id INTEGER NOT NULL,
+                    scheduled_datetime TIMESTAMP NOT NULL,
+                    reason TEXT,
+                    status TEXT DEFAULT 'pending' CHECK(status IN ('pending', 'queued', 'played', 'cancelled')),
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (media_id) REFERENCES media_files (id) ON DELETE CASCADE
+                )
+                """
+            )
+            cursor.execute(
+                """
+                CREATE TABLE recurring_schedules (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    media_id INTEGER NOT NULL,
+                    days_of_week TEXT NOT NULL,
+                    start_time TEXT NOT NULL,
+                    end_time TEXT,
+                    interval_minutes INTEGER DEFAULT 0,
+                    specific_times TEXT,
+                    reason TEXT,
+                    is_active INTEGER DEFAULT 1,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (media_id) REFERENCES media_files (id) ON DELETE CASCADE
+                )
+                """
+            )
+            cursor.execute(
+                """
+                CREATE TABLE playback_state (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    current_media_id INTEGER,
+                    position_seconds REAL DEFAULT 0,
+                    is_playing INTEGER DEFAULT 0,
+                    volume INTEGER DEFAULT 80,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (current_media_id) REFERENCES media_files (id) ON DELETE SET NULL
+                )
+                """
+            )
+            cursor.execute("INSERT INTO playback_state (id, volume) VALUES (1, 80)")
+            cursor.execute(
+                """
+                INSERT INTO media_files (id, filename, filepath, media_type, duration_seconds)
+                VALUES (1, 'legacy.mp3', '/tmp/legacy.mp3', 'announcement', 10)
+                """
+            )
+            cursor.execute(
+                """
+                INSERT INTO one_time_schedules (media_id, scheduled_datetime, status)
+                VALUES (1, '2026-03-26 15:30:00', 'pending')
+                """
+            )
+            cursor.execute(
+                """
+                INSERT INTO one_time_schedules (media_id, scheduled_datetime, status)
+                VALUES (1, '2026-03-26T12:30:00Z', 'pending')
+                """
+            )
+            conn.commit()
+            conn.close()
+
+            old_db_path = db.DATABASE_PATH
+            old_media_repo = db._media_repo
+            old_schedule_repo = db._schedule_repo
+            old_playback_repo = db._playback_repo
+
+            try:
+                db.DATABASE_PATH = db_path
+                db._media_repo = MediaRepository(db_path)
+                db._schedule_repo = ScheduleRepository(db_path)
+                db._playback_repo = PlaybackRepository(db_path)
+
+                db.init_database()
+                first_pass = db.get_all_one_time_schedules()
+                normalized_values = sorted(s["scheduled_datetime"] for s in first_pass)
+                self.assertEqual(
+                    normalized_values,
+                    ["2026-03-26T12:30:00Z", "2026-03-26T12:30:00Z"],
+                )
+
+                db.init_database()
+                second_pass = db.get_all_one_time_schedules()
+                self.assertEqual(
+                    sorted(s["scheduled_datetime"] for s in second_pass),
+                    normalized_values,
+                )
             finally:
                 db.DATABASE_PATH = old_db_path
                 db._media_repo = old_media_repo

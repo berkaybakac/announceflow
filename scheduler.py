@@ -28,6 +28,12 @@ from services.stream_policy import (
 )
 from services.stream_service import get_stream_service
 from services.volume_runtime_service import get_volume_runtime_service
+from utils.time_utils import (
+    now_local,
+    now_utc,
+    parse_storage_datetime_to_utc,
+    to_storage_utc_z,
+)
 
 logger = logging.getLogger(__name__)
 _volume_runtime = get_volume_runtime_service()
@@ -105,6 +111,7 @@ class Scheduler:
         }
         self._announcement_health_log_interval_seconds: int = 60
         self._announcement_last_health_log_monotonic: float = 0.0
+        self._announcement_enqueue_seq: int = 0
         self._media_type_audited: bool = False
         # Per-tick guard: at most one _play_media call succeeds per scheduler tick.
         self._tick_media_dispatched: bool = False
@@ -402,11 +409,37 @@ class Scheduler:
         if is_one_time and schedule_id > 0:
             self._queued_one_time_ids.discard(schedule_id)
             if cancel_one_time:
-                db.update_one_time_schedule_status(schedule_id, "cancelled")
+                try:
+                    db.update_one_time_schedule_status(schedule_id, "cancelled")
+                except Exception as exc:
+                    logger.exception(
+                        "Failed to cancel one-time schedule in queue cleanup id=%s",
+                        schedule_id,
+                    )
+                    log_error(
+                        "announcement_queue_status_write_failed",
+                        {
+                            "action": "cancelled",
+                            "schedule_id": schedule_id,
+                            "error": str(exc),
+                        },
+                    )
 
     def _is_one_time_schedule_dispatchable(self, schedule_id: int) -> bool:
         """Check if a one-time schedule is still valid for dispatch (pending or queued)."""
-        schedule = db.get_one_time_schedule(schedule_id)
+        try:
+            schedule = db.get_one_time_schedule(schedule_id)
+        except Exception as exc:
+            logger.exception(
+                "Failed to read one-time schedule during queue dispatch check id=%s",
+                schedule_id,
+            )
+            log_error(
+                "announcement_queue_status_read_failed",
+                {"schedule_id": schedule_id, "error": str(exc)},
+            )
+            # Keep item in queue if DB read is temporarily unavailable.
+            return True
         if not schedule:
             return False
         status = str(schedule.get("status") or "").strip().lower()
@@ -519,7 +552,8 @@ class Scheduler:
         duration_seconds: int,
     ) -> bool:
         """Queue announcement trigger using dedupe key schedule_id + due minute."""
-        due_minute = due_dt.strftime("%Y-%m-%d %H:%M")
+        due_utc = parse_storage_datetime_to_utc(due_dt, naive_as_local=True) or now_utc()
+        due_minute = due_utc.strftime("%Y-%m-%d %H:%M")
         dedupe_key = f"{source}:{schedule_id}:{due_minute}"
 
         with self._queue_lock:
@@ -532,22 +566,50 @@ class Scheduler:
                 return False
 
             now_ts = time.time()
+            self._announcement_enqueue_seq += 1
+            enqueue_seq = self._announcement_enqueue_seq
             item = {
                 "dedupe_key": dedupe_key,
                 "filepath": filepath,
                 "schedule_id": int(schedule_id),
                 "is_one_time": bool(is_one_time),
-                "due_dt": due_dt,
-                "due_ts": due_dt.timestamp(),
+                "due_dt": due_utc,
+                "due_utc": to_storage_utc_z(due_utc),
+                "due_ts": due_utc.timestamp(),
                 "enqueued_ts": now_ts,
+                "enqueue_seq": enqueue_seq,
                 "source": source,
                 "expected_duration_seconds": max(0, int(duration_seconds or 0)),
             }
             self._announcement_queue.append(item)
+            # Deterministic FIFO: due time first, then enqueue sequence.
+            self._announcement_queue = deque(
+                sorted(
+                    self._announcement_queue,
+                    key=lambda queued_item: (
+                        float(queued_item.get("due_ts") or 0.0),
+                        int(queued_item.get("enqueue_seq") or 0),
+                    ),
+                )
+            )
             self._announcement_enqueued_keys.add(dedupe_key)
             if is_one_time:
                 self._queued_one_time_ids.add(int(schedule_id))
-                db.update_one_time_schedule_status(int(schedule_id), "queued")
+                try:
+                    db.update_one_time_schedule_status(int(schedule_id), "queued")
+                except Exception as exc:
+                    logger.exception(
+                        "Failed to set one-time schedule queued id=%s",
+                        schedule_id,
+                    )
+                    log_error(
+                        "announcement_queue_status_write_failed",
+                        {
+                            "action": "queued",
+                            "schedule_id": int(schedule_id),
+                            "error": str(exc),
+                        },
+                    )
             queue_size = len(self._announcement_queue)
 
         log_schedule(
@@ -557,6 +619,8 @@ class Scheduler:
                 "schedule_id": int(schedule_id),
                 "is_one_time": bool(is_one_time),
                 "due_minute": due_minute,
+                "due_utc": to_storage_utc_z(due_utc),
+                "enqueue_seq": int(enqueue_seq),
                 "queue_size": queue_size,
             },
         )
@@ -759,6 +823,8 @@ class Scheduler:
                 "schedule_id": schedule_id,
                 "is_one_time": is_one_time,
                 "source": item.get("source", "unknown"),
+                "due_utc": item.get("due_utc"),
+                "enqueue_seq": int(item.get("enqueue_seq") or 0),
                 "queue_size": queue_size,
             },
         )
@@ -1150,24 +1216,33 @@ class Scheduler:
         self, outside_working_hours: bool, silence_blocked: bool
     ):
         """Check and trigger pending one-time schedules."""
-        now = datetime.now()
+        now = now_utc()
         pending = db.get_pending_one_time_schedules()
 
         for schedule in pending:
-            try:
-                dt_str = schedule["scheduled_datetime"]
-                # Handle multiple datetime formats
-                dt_str = dt_str.replace("T", " ")
-                try:
-                    scheduled_dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S")
-                except ValueError:
-                    scheduled_dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M")
-            except Exception as e:
+            scheduled_dt = parse_storage_datetime_to_utc(
+                schedule.get("scheduled_datetime"), naive_as_local=True
+            )
+            if scheduled_dt is None:
                 # Invalid datetime format - mark as cancelled to prevent infinite retry
                 logger.error(
                     f"Invalid datetime for schedule #{schedule['id']}: '{schedule['scheduled_datetime']}' - marking as cancelled"
                 )
-                db.update_one_time_schedule_status(schedule["id"], "cancelled")
+                try:
+                    db.update_one_time_schedule_status(schedule["id"], "cancelled")
+                except Exception as exc:
+                    logger.exception(
+                        "Failed to cancel invalid one-time schedule id=%s",
+                        schedule.get("id"),
+                    )
+                    log_error(
+                        "one_time_status_write_failed",
+                        {
+                            "action": "cancelled_invalid_datetime",
+                            "schedule_id": schedule.get("id"),
+                            "error": str(exc),
+                        },
+                    )
                 continue
 
             # Check if it's time (within 2 minute tolerance for safety)
@@ -1193,7 +1268,21 @@ class Scheduler:
                     logger.warning(
                         f"Schedule outside working hours, cancelling: {schedule['filename']} (was scheduled for {scheduled_dt})"
                     )
-                    db.update_one_time_schedule_status(schedule_id, "cancelled")
+                    try:
+                        db.update_one_time_schedule_status(schedule_id, "cancelled")
+                    except Exception as exc:
+                        logger.exception(
+                            "Failed to cancel one-time schedule outside working hours id=%s",
+                            schedule_id,
+                        )
+                        log_error(
+                            "one_time_status_write_failed",
+                            {
+                                "action": "cancelled_outside_working_hours",
+                                "schedule_id": schedule_id,
+                                "error": str(exc),
+                            },
+                        )
                 elif silence_blocked:
                     # Keep behavior for non-announcement content: do not queue under silence.
                     continue
@@ -1223,13 +1312,27 @@ class Scheduler:
                 logger.warning(
                     f"Schedule missed, cancelling: {schedule['filename']} (was scheduled for {scheduled_dt})"
                 )
-                db.update_one_time_schedule_status(schedule_id, "cancelled")
+                try:
+                    db.update_one_time_schedule_status(schedule_id, "cancelled")
+                except Exception as exc:
+                    logger.exception(
+                        "Failed to cancel missed one-time schedule id=%s",
+                        schedule_id,
+                    )
+                    log_error(
+                        "one_time_status_write_failed",
+                        {
+                            "action": "cancelled_missed",
+                            "schedule_id": schedule_id,
+                            "error": str(exc),
+                        },
+                    )
 
     def _check_recurring_schedules(
         self, outside_working_hours: bool, silence_blocked: bool
     ):
         """Check and trigger active recurring schedules."""
-        now = datetime.now()
+        now = now_local()
         current_day = now.weekday()  # Monday=0, Sunday=6
         current_time = now.strftime("%H:%M")
 
