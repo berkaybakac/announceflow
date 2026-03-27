@@ -940,7 +940,7 @@
             color: var(--text-muted);
             min-width: 40px;
         }
-        .timeline-density-badge,
+        .timeline-slot-count,
         .timeline-note-badge {
             font-size: 0.72rem;
             border: 1px solid var(--border);
@@ -948,14 +948,6 @@
             padding: 3px 8px;
             color: var(--text-muted);
             background: var(--bg-input);
-        }
-        .timeline-density-badge.is-busy {
-            color: var(--warning);
-            border-color: color-mix(in srgb, var(--warning) 40%, var(--border));
-        }
-        .timeline-density-badge.is-calm {
-            color: var(--success);
-            border-color: color-mix(in srgb, var(--success) 40%, var(--border));
         }
         .timeline-slot {
             position: absolute;
@@ -992,6 +984,9 @@
         }
         .timeline-slot.type-prayer {
             background: var(--warning);
+        }
+        .timeline-slot.type-prayer.timeline-highlight {
+            box-shadow: 0 0 0 1.5px rgba(255, 200, 80, 0.9), 0 0 8px rgba(255, 180, 50, 0.4);
         }
         .timeline-slot.type-info {
             background: var(--text-muted);

@@ -233,8 +233,6 @@
 <script src="/static/js/timeline.js"></script>
 <script>
     const DAY_LABELS = ['Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt', 'Paz'];
-    const WEEK_DENSITY_CALM = 28;
-    const WEEK_DENSITY_MEDIUM = 70;
 
     async function loadWeekTimeline() {
         const container = document.getElementById('weekTimelineContainer');
@@ -296,8 +294,7 @@
             }
 
             container.style.display = 'block';
-            updateDensityBadge('weekTimelineBarArea', totalSlots, WEEK_DENSITY_CALM, WEEK_DENSITY_MEDIUM);
-            bindTimelineControls('weekTimelineContainer', 'weekTimelineBarArea', totalSlots, WEEK_DENSITY_CALM, WEEK_DENSITY_MEDIUM);
+            bindTimelineControls('weekTimelineContainer', 'weekTimelineBarArea', totalSlots);
         } catch (e) {
             console.error('Week timeline load error:', e);
         }

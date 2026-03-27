@@ -1516,10 +1516,9 @@ class Scheduler:
             )
             return False
 
-        next_idx = (index + 1) % len(playlist)
         player.apply_playlist_state(
             playlist=playlist,
-            index=next_idx - 1,
+            index=max(index - 1, -1),
             loop=loop,
             runtime_active=True,
             db_active=True,
@@ -1527,7 +1526,7 @@ class Scheduler:
         )
         log_schedule("restore_worker_playlist_resumed", {
             "thread_id": threading.current_thread().name,
-            "index": next_idx,
+            "index": index,
             "total_tracks": len(playlist),
             "loop": loop,
             "volume_override_active": bool(state.get("volume_override_active", False)),

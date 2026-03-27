@@ -142,7 +142,8 @@ def _prayer_time_to_raw(label: str, time_str: str) -> Optional[RawSlot]:
     start = max(0, prayer_minute - PRAYER_BUFFER_BEFORE)
     end = prayer_minute + PRAYER_DURATION_AFTER
     full_label = f"{PRAYER_SLOT_PREFIX} - {label} ({time_str}) — {PRAYER_SLOT_SUFFIX}"
-    return RawSlot(start, end, "prayer", full_label, source_type="prayer")
+    return RawSlot(start, end, "prayer", full_label, source_type="prayer",
+                   group_key=f"prayer:{h}:{m}")
 
 
 def _get_prayer_raw(config: dict, date_str: str) -> List[RawSlot]:

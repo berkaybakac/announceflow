@@ -294,9 +294,6 @@
 <script src="https://npmcdn.com/flatpickr/dist/l10n/tr.js"></script>
 <script src="/static/js/timeline.js"></script>
 <script>
-    const DAY_DENSITY_CALM = 8;
-    const DAY_DENSITY_MEDIUM = 18;
-
     async function loadDayTimeline(dateStr) {
         const container = document.getElementById('dayTimelineContainer');
         const barArea = document.getElementById('dayTimelineBarArea');
@@ -319,8 +316,7 @@
 
             renderTimelineBar(bar, data);
             container.style.display = 'block';
-            updateDensityBadge('dayTimelineBarArea', (data.slots || []).length, DAY_DENSITY_CALM, DAY_DENSITY_MEDIUM);
-            bindTimelineControls('dayTimelineContainer', 'dayTimelineBarArea', (data.slots || []).length, DAY_DENSITY_CALM, DAY_DENSITY_MEDIUM);
+            bindTimelineControls('dayTimelineContainer', 'dayTimelineBarArea', (data.slots || []).length);
         } catch (e) {
             console.error('Timeline load error:', e);
         }

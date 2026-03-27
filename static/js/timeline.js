@@ -2,7 +2,7 @@
 const TOTAL_MINUTES = 24 * 60;
 const TIMELINE_MIN_ZOOM = 100;
 const TIMELINE_MAX_ZOOM = 280;
-const TIMELINE_DEFAULT_ZOOM = 140;
+const TIMELINE_DEFAULT_ZOOM = 100;
 
 function timeToMinutes(timeStr) {
     const [h, m] = timeStr.split(':').map(Number);
@@ -17,25 +17,16 @@ function applyTimelineZoom(container, zoomPercent) {
         const barWidth = Math.round(availableWidth * safeZoom / 100);
         container.style.setProperty('--timeline-bar-width', barWidth + 'px');
         console.debug('[timeline] zoom=%d barWidth=%dpx scrollWidth=%d', safeZoom, barWidth, scroll.clientWidth);
+    } else if (scroll) {
+        requestAnimationFrame(() => applyTimelineZoom(container, safeZoom));
     }
     return safeZoom;
 }
 
-function updateDensityBadge(barId, slotCount, calmMax, mediumMax) {
-    const density = document.getElementById(barId + 'Density');
-    if (!density) return;
-    density.classList.remove('is-busy', 'is-calm');
-    if (slotCount <= calmMax) {
-        density.textContent = 'Yoğunluk: Sakin';
-        density.classList.add('is-calm');
-        return;
-    }
-    if (slotCount <= mediumMax) {
-        density.textContent = 'Yoğunluk: Orta';
-        return;
-    }
-    density.textContent = 'Yoğunluk: Yoğun';
-    density.classList.add('is-busy');
+function updateSlotCount(barId, slotCount) {
+    const el = document.getElementById(barId + 'Density');
+    if (!el) return;
+    el.textContent = slotCount ? slotCount + ' slot' : '';
 }
 
 function highlightSlotGroup(container, groupKey, locked) {
@@ -55,7 +46,7 @@ function clearSlotGroupHighlight(container) {
     });
 }
 
-function bindTimelineControls(containerId, barId, slotCount, calmMax, mediumMax) {
+function bindTimelineControls(containerId, barId, slotCount) {
     const container = document.getElementById(containerId);
     const slider = document.getElementById(barId + 'Zoom');
     const zoomValue = document.getElementById(barId + 'ZoomValue');
@@ -82,7 +73,7 @@ function bindTimelineControls(containerId, barId, slotCount, calmMax, mediumMax)
 
     const safeZoom = applyTimelineZoom(container, slider.value || TIMELINE_DEFAULT_ZOOM);
     zoomValue.textContent = safeZoom + '%';
-    updateDensityBadge(barId, slotCount, calmMax, mediumMax);
+    updateSlotCount(barId, slotCount);
 }
 
 function addSlot(bar, startMin, endMin, type, label, meta) {
