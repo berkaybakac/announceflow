@@ -3,6 +3,7 @@ AnnounceFlow - Playlist Routes
 API endpoints for playlist management.
 """
 import logging
+import threading
 from flask import Blueprint, request
 import database as db
 from player import get_player
@@ -17,6 +18,10 @@ from utils.helpers import (
 
 playlist_bp = Blueprint("playlist", __name__)
 logger = logging.getLogger(__name__)
+
+# Prevents concurrent start-all requests from spawning multiple orphaned processes.
+# Non-blocking: duplicate requests return immediately with busy=True.
+_start_all_lock = threading.Lock()
 
 
 def _reject_if_stream_active():
@@ -124,24 +129,30 @@ def api_playlist_start_all():
     if blocked:
         return blocked
 
-    # Get all music files from library
-    music_files = db.get_all_media_files("music")
+    if not _start_all_lock.acquire(blocking=False):
+        logger.info("[source] start-all ignored -> already in progress")
+        return _json_success({"success": False, "reason": "busy"})
+    try:
+        # Get all music files from library
+        music_files = db.get_all_media_files("music")
 
-    if not music_files:
-        return _json_error("Kütüphanede müzik yok", 404)
+        if not music_files:
+            return _json_error("Kütüphanede müzik yok", 404)
 
-    # Get file paths
-    file_paths = [f["filepath"] for f in music_files]
+        # Get file paths
+        file_paths = [f["filepath"] for f in music_files]
 
-    # Set playlist and start playing (loop=True)
-    data = request.get_json(force=True, silent=True) or {}
-    shuffle = data.get("shuffle", False)
-    player = get_player()
-    player.set_playlist(file_paths, loop=True, shuffle=shuffle)
-    logger.info(f"[source] manual play -> playlist start-all (tracks={len(file_paths)}, shuffle={shuffle})")
-    success = player.play_playlist()
+        # Set playlist and start playing (loop=True)
+        data = request.get_json(force=True, silent=True) or {}
+        shuffle = data.get("shuffle", False)
+        player = get_player()
+        player.set_playlist(file_paths, loop=True, shuffle=shuffle)
+        logger.info(f"[source] manual play -> playlist start-all (tracks={len(file_paths)}, shuffle={shuffle})")
+        success = player.play_playlist()
 
-    if success:
-        db.update_playback_state(is_playing=True)
+        if success:
+            db.update_playback_state(is_playing=True)
 
-    return _json_success({"success": success, "tracks": len(file_paths)})
+        return _json_success({"success": success, "tracks": len(file_paths)})
+    finally:
+        _start_all_lock.release()

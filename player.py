@@ -481,7 +481,18 @@ class AudioPlayer:
                 attempts.extend(self._alsa_device_candidates)
             attempts.append(None)  # Final fallback: let mpg123 pick default output
 
-            self._process = None
+            # Kill any process a concurrent thread may have started and stored
+            # before we got the lock.  Without this, that process becomes an
+            # orphan: its monitor thread exits on session-mismatch but the
+            # subprocess keeps playing until it naturally ends.
+            if self._process is not None:
+                try:
+                    self._process.kill()
+                    self._process.wait(timeout=0.5)
+                except Exception as e:
+                    logger.debug(f"Orphan process kill ignored: {e}")
+                finally:
+                    self._process = None
             tried_keys = set()
 
             for device in attempts:
