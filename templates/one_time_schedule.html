@@ -316,7 +316,9 @@
 
             renderTimelineBar(bar, data);
             container.style.display = 'block';
-            bindTimelineControls('dayTimelineContainer', 'dayTimelineBarArea', (data.slots || []).length);
+            const _dayInfo = _getTimelineBadgeInfo(data.slots || []);
+            bindTimelineControls('dayTimelineContainer', 'dayTimelineBarArea');
+            updateTimelineBadges('dayTimelineBarArea', _dayInfo.anonsCount, _dayInfo.conflictCount);
         } catch (e) {
             console.error('Timeline load error:', e);
         }

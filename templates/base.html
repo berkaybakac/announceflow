@@ -250,6 +250,7 @@
             padding: 32px;
             max-width: 1200px;
             padding-bottom: 140px;
+            overflow-x: hidden;
         }
 
         .page-header {
@@ -852,6 +853,7 @@
             margin-top: 16px;
             margin-bottom: 8px;
             --timeline-zoom: 1.4;
+            min-width: 0;
         }
         .timeline-header {
             display: flex;
@@ -900,21 +902,12 @@
             text-align: right;
             flex-shrink: 0;
         }
-        .timeline-bar {
-            position: relative;
-            height: 28px;
-            background: var(--bg-input);
-            border-radius: 6px;
-            border: 1px solid var(--border);
-            overflow: hidden;
-            min-width: var(--timeline-bar-width, 100%);
-            width: var(--timeline-bar-width, 100%);
-            flex: 0 0 var(--timeline-bar-width, 100%);
-        }
         .timeline-scroll {
             overflow-x: auto;
             overflow-y: hidden;
             padding-bottom: 6px;
+            width: 100%;
+            min-width: 0;
         }
         .timeline-scroll > div {
             width: max-content;
@@ -940,7 +933,7 @@
             color: var(--text-muted);
             min-width: 40px;
         }
-        .timeline-slot-count,
+        .timeline-anons-badge,
         .timeline-note-badge {
             font-size: 0.72rem;
             border: 1px solid var(--border);
@@ -949,30 +942,64 @@
             color: var(--text-muted);
             background: var(--bg-input);
         }
+        .timeline-conflict-badge {
+            font-size: 0.72rem;
+            border: 1px solid color-mix(in srgb, var(--primary) 40%, var(--border));
+            border-radius: 999px;
+            padding: 3px 8px;
+            color: var(--primary);
+            background: var(--bg-input);
+        }
+        .tl-tooltip {
+            position: fixed;
+            z-index: 9999;
+            background: var(--bg-card, #1a1a1a);
+            color: var(--text-primary, #ffffff);
+            border: 1px solid var(--border, #2a2a2a);
+            border-radius: 8px;
+            padding: 8px 12px;
+            font-size: 0.78rem;
+            line-height: 1.6;
+            max-width: 300px;
+            pointer-events: none;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+            transform: translate(-50%, calc(-100% - 10px));
+        }
+        .timeline-bar {
+            position: relative;
+            height: 36px;
+            background: var(--bg-input);
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            overflow: hidden;
+            min-width: var(--timeline-bar-width, 100%);
+            width: var(--timeline-bar-width, 100%);
+            flex: 0 0 var(--timeline-bar-width, 100%);
+        }
         .timeline-slot {
             position: absolute;
-            top: 2px;
-            height: calc(100% - 4px);
-            border-radius: 3px;
-            opacity: 0.85;
+            top: 3px;
+            height: calc(100% - 6px);
+            border-radius: 4px;
+            opacity: 0.88;
             cursor: pointer;
-            min-width: 2px;
-            transition: opacity 0.15s, box-shadow 0.15s, transform 0.15s;
+            min-width: 4px;
+            transition: opacity 0.15s, box-shadow 0.15s, transform 0.15s, filter 0.15s;
         }
         .timeline-slot:hover {
             opacity: 1;
             z-index: 2;
         }
         .timeline-slot.timeline-dim {
-            opacity: 0.16 !important;
-            filter: saturate(0.35);
+            opacity: 0.1 !important;
+            filter: saturate(0.2);
         }
         .timeline-slot.timeline-highlight {
             opacity: 1 !important;
             z-index: 3 !important;
-            filter: brightness(1.35);
-            box-shadow: 0 0 0 1.5px rgba(255, 255, 255, 0.85);
-            transform: translateY(-1.5px);
+            filter: brightness(1.5);
+            box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.9), 0 0 10px rgba(255, 255, 255, 0.3);
+            transform: translateY(-2px);
         }
         .timeline-slot.timeline-highlight-locked {
             box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.95), 0 0 18px rgba(59, 130, 246, 0.7);
@@ -982,11 +1009,20 @@
         .timeline-slot.type-schedule {
             background: var(--primary);
         }
+        .timeline-slot.is-conflict {
+            background: var(--danger, #ef4444);
+        }
+        .timeline-slot.is-conflict.timeline-highlight {
+            box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.9), 0 0 10px rgba(239, 68, 68, 0.5);
+        }
+        .timeline-slot.is-conflict.timeline-highlight-locked {
+            box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.95), 0 0 18px rgba(239, 68, 68, 0.7);
+        }
         .timeline-slot.type-prayer {
             background: var(--warning);
         }
         .timeline-slot.type-prayer.timeline-highlight {
-            box-shadow: 0 0 0 1.5px rgba(255, 200, 80, 0.9), 0 0 8px rgba(255, 180, 50, 0.4);
+            box-shadow: 0 0 0 2px rgba(255, 200, 80, 0.9), 0 0 10px rgba(255, 180, 50, 0.4);
         }
         .timeline-slot.type-info {
             background: var(--text-muted);
@@ -1006,12 +1042,29 @@
             width: 1px;
             height: 100%;
             background: var(--border);
+            opacity: 0.5;
             pointer-events: none;
         }
+        .timeline-hour-mark.timeline-hour-mark-major {
+            opacity: 1;
+        }
+        .timeline-submark {
+            position: absolute;
+            top: 0;
+            height: 100%;
+            width: 1px;
+            pointer-events: none;
+            display: none;
+        }
+        .timeline-submark-30 { background: var(--border); opacity: 0.5; }
+        .timeline-submark-15 { background: var(--border); opacity: 0.3; }
+        [data-zoom-level="medium"] .timeline-submark-30 { display: block; }
+        [data-zoom-level="high"] .timeline-submark-30,
+        [data-zoom-level="high"] .timeline-submark-15 { display: block; }
         .timeline-hour-label {
             position: absolute;
             top: -16px;
-            font-size: 0.65rem;
+            font-size: 0.6rem;
             color: var(--text-muted);
             transform: translateX(-50%);
             pointer-events: none;
@@ -1502,6 +1555,7 @@
         }
     </script>
     {% block extra_js %}{% endblock %}
+    <div id="tlTooltip" class="tl-tooltip" style="display:none;"></div>
 </body>
 
 </html>

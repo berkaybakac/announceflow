@@ -8,9 +8,10 @@
             {{ title | default('Zaman Çizelgesi') }}
         </h4>
         <div class="timeline-legend">
-            <span class="legend-item"><span class="legend-dot" style="background:var(--primary)"></span> Dolu (çakışma)</span>
-            <span class="legend-item"><span class="legend-dot" style="background:var(--warning)"></span> Ezan sessiz (bilgi)</span>
-            <span class="legend-item"><span class="legend-dot" style="background:var(--text-muted); opacity:0.4"></span> Mesai dışı (bilgi)</span>
+            <span class="legend-item"><span class="legend-dot" style="background:var(--primary)"></span> Anons</span>
+            <span class="legend-item"><span class="legend-dot" style="background:var(--danger,#ef4444)"></span> Sıralı anons</span>
+            <span class="legend-item"><span class="legend-dot" style="background:var(--warning)"></span> Ezan sessiz</span>
+            <span class="legend-item"><span class="legend-dot" style="background:var(--text-muted); opacity:0.4"></span> Mesai dışı</span>
         </div>
     </div>
     {% set _bar_id = bar_id | default('timelineBarArea') %}
@@ -20,9 +21,10 @@
     {% set _conflict_id = _bar_id ~ 'Conflict' %}
     <div class="timeline-controls">
         <label for="{{ _zoom_id }}" class="timeline-control-label">Zoom</label>
-        <input id="{{ _zoom_id }}" class="timeline-zoom-slider" type="range" min="100" max="280" step="20" value="100">
+        <input id="{{ _zoom_id }}" class="timeline-zoom-slider" type="range" min="100" max="500" step="40" value="100">
         <span class="timeline-zoom-value" id="{{ _zoom_value_id }}">100%</span>
-        <span class="timeline-slot-count" id="{{ _density_id }}"></span>
+        <span class="timeline-anons-badge" id="{{ _density_id }}"></span>
+        <span class="timeline-conflict-badge" id="{{ _conflict_id }}" style="display:none;"></span>
     </div>
     <div class="timeline-scroll">
         <div id="{{ _bar_id }}">
