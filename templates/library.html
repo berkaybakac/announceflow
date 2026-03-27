@@ -408,7 +408,7 @@
                     <td style="color: var(--text-muted);">{{ file.created_at_formatted }}</td>
                     <td>
                         <div class="library-action-group">
-                            <button class="btn btn-outline btn-sm" onclick="playFile('{{ file.id }}')">
+                            <button class="btn btn-outline btn-sm" onclick="playFile('{{ file.id }}', this)">
                                 <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 14px; height: 14px;">
                                     <path stroke-linecap="round" stroke-linejoin="round" d="M15.91 11.672a.375.375 0 010 .656l-5.603 3.113a.375.375 0 01-.557-.328V8.887c0-.286.307-.466.557-.327l5.603 3.112z" />
                                 </svg>
@@ -489,7 +489,7 @@
                     <td style="color: var(--text-muted);">{{ file.created_at_formatted }}</td>
                     <td>
                         <div class="library-action-group">
-                            <button class="btn btn-outline btn-sm" onclick="playFile('{{ file.id }}')">
+                            <button class="btn btn-outline btn-sm" onclick="playFile('{{ file.id }}', this)">
                                 <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 14px; height: 14px;">
                                     <path stroke-linecap="round" stroke-linejoin="round" d="M15.91 11.672a.375.375 0 010 .656l-5.603 3.113a.375.375 0 01-.557-.328V8.887c0-.286.307-.466.557-.327l5.603 3.112z" />
                                 </svg>
@@ -898,7 +898,11 @@
         }
     }
 
-    async function playFile(mediaId) {
+    let _playFileInFlight = false;
+    async function playFile(mediaId, triggerBtn = null) {
+        if (_playFileInFlight) return;
+        _playFileInFlight = true;
+        if (triggerBtn) triggerBtn.disabled = true;
         try {
             const response = await fetchUserAction(
                 '/api/play',
@@ -916,6 +920,9 @@
         } catch (error) {
             console.error('Error playing file:', error);
             showToast('Çalma başarısız', 'error');
+        } finally {
+            _playFileInFlight = false;
+            if (triggerBtn) triggerBtn.disabled = false;
         }
     }
 

@@ -720,8 +720,8 @@ class AudioPlayer:
             if not pygame.mixer.get_init():
                 try:
                     pygame.mixer.init()
-                except:
-                    pass
+                except Exception as e:
+                    logger.debug("pygame mixer init failed: %s", e)
             if pygame.mixer.get_init():
                 pygame.mixer.music.set_volume(volume / 100.0)
 
