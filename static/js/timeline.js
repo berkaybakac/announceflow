@@ -11,7 +11,13 @@ function timeToMinutes(timeStr) {
 
 function applyTimelineZoom(container, zoomPercent) {
     const safeZoom = Math.max(TIMELINE_MIN_ZOOM, Math.min(TIMELINE_MAX_ZOOM, Number(zoomPercent) || TIMELINE_DEFAULT_ZOOM));
-    container.style.setProperty('--timeline-zoom', String(safeZoom / 100));
+    const scroll = container.querySelector('.timeline-scroll');
+    if (scroll && scroll.clientWidth > 0) {
+        const availableWidth = Math.max(scroll.clientWidth - 40, 1);
+        const barWidth = Math.round(availableWidth * safeZoom / 100);
+        container.style.setProperty('--timeline-bar-width', barWidth + 'px');
+        console.debug('[timeline] zoom=%d barWidth=%dpx scrollWidth=%d', safeZoom, barWidth, scroll.clientWidth);
+    }
     return safeZoom;
 }
 
@@ -67,6 +73,11 @@ function bindTimelineControls(containerId, barId, slotCount, calmMax, mediumMax)
                 clearSlotGroupHighlight(container);
             }
         });
+        const ro = new ResizeObserver(() => {
+            const safeZoom = applyTimelineZoom(container, slider.value || TIMELINE_DEFAULT_ZOOM);
+            zoomValue.textContent = safeZoom + '%';
+        });
+        ro.observe(container);
     }
 
     const safeZoom = applyTimelineZoom(container, slider.value || TIMELINE_DEFAULT_ZOOM);
