@@ -394,8 +394,8 @@
                 <tr>
                     <th style="width: 40px;"></th>
                     <th>Dosya Adı</th>
-                    <th>Eklenme Tarihi</th>
-                    <th>İşlem</th>
+                    <th style="width: 120px;">Eklenme Tarihi</th>
+                    <th style="width: 195px;">İşlem</th>
                 </tr>
             </thead>
             <tbody>
@@ -404,7 +404,7 @@
                     <td>
                         <input type="checkbox" class="file-checkbox music-checkbox" value="{{ file.id }}" onchange="updateDeleteButton('music')">
                     </td>
-                    <td><strong>{{ file.filename }}</strong></td>
+                    <td class="col-truncate" title="{{ file.filename }}"><strong>{{ file.filename }}</strong></td>
                     <td style="color: var(--text-muted);">{{ file.created_at_formatted }}</td>
                     <td>
                         <div class="library-action-group">
@@ -475,8 +475,8 @@
                 <tr>
                     <th style="width: 40px;"></th>
                     <th>Dosya Adı</th>
-                    <th>Eklenme Tarihi</th>
-                    <th>İşlem</th>
+                    <th style="width: 120px;">Eklenme Tarihi</th>
+                    <th style="width: 195px;">İşlem</th>
                 </tr>
             </thead>
             <tbody>
@@ -485,7 +485,7 @@
                     <td>
                         <input type="checkbox" class="file-checkbox announcement-checkbox" value="{{ file.id }}" onchange="updateDeleteButton('announcement')">
                     </td>
-                    <td><strong>{{ file.filename }}</strong></td>
+                    <td class="col-truncate" title="{{ file.filename }}"><strong>{{ file.filename }}</strong></td>
                     <td style="color: var(--text-muted);">{{ file.created_at_formatted }}</td>
                     <td>
                         <div class="library-action-group">

@@ -102,7 +102,7 @@
 {% endfor %}
 
 <!-- Scheduled Music -->
-<div class="card animate-in">
+<div class="card animate-in" style="overflow-x: auto;">
     <div class="card-header">
         <h3 class="card-title" style="display: inline-flex; align-items: center; gap: 8px;">
             <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 20px; height: 20px; color: var(--primary);">
@@ -130,10 +130,10 @@
             <tr>
                 <th style="width: 40px;"></th>
                 <th>Dosya</th>
-                <th>Planlanan Zaman</th>
-                <th>Neden</th>
-                <th>Durum</th>
-                <th>İşlem</th>
+                <th style="width: 115px;">Planlanan Zaman</th>
+                <th style="width: 70px;">Neden</th>
+                <th style="width: 130px;">Durum</th>
+                <th style="width: 100px;">İşlem</th>
             </tr>
         </thead>
         <tbody>
@@ -142,8 +142,8 @@
                 <td>
                     <input type="checkbox" class="one-time-schedule-checkbox music-one-time-schedule-checkbox" value="{{ schedule.id }}" onchange="updateOneTimeDeleteButton('music')">
                 </td>
-                <td>
-                    <span title="Müzik" style="display: inline-flex; vertical-align: middle; margin-right: 6px;">
+                <td class="col-truncate" title="{{ schedule.filename }}">
+                    <span style="display: inline-flex; vertical-align: middle; margin-right: 6px;">
                         <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 16px; height: 16px; color: var(--primary);">
                             <path stroke-linecap="round" stroke-linejoin="round" d="M9 9l10.5-3m0 6.553v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 11-.99-3.467l2.31-.66a2.25 2.25 0 001.632-2.163zm0 0V2.25L9 5.25v10.303m0 0v3.75a2.25 2.25 0 01-1.632 2.163l-1.32.377a1.803 1.803 0 01-.99-3.467l2.31-.66A2.25 2.25 0 009 15.553z" />
                         </svg>
@@ -199,7 +199,7 @@
 {% endfor %}
 
 <!-- Scheduled Announcements -->
-<div class="card animate-in" style="margin-top: 24px;">
+<div class="card animate-in" style="margin-top: 24px; overflow-x: auto;">
     <div class="card-header">
         <h3 class="card-title" style="display: inline-flex; align-items: center; gap: 8px;">
             <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 20px; height: 20px; color: var(--warning);">
@@ -227,10 +227,10 @@
             <tr>
                 <th style="width: 40px;"></th>
                 <th>Dosya</th>
-                <th>Planlanan Zaman</th>
-                <th>Neden</th>
-                <th>Durum</th>
-                <th>İşlem</th>
+                <th style="width: 115px;">Planlanan Zaman</th>
+                <th style="width: 70px;">Neden</th>
+                <th style="width: 130px;">Durum</th>
+                <th style="width: 100px;">İşlem</th>
             </tr>
         </thead>
         <tbody>
@@ -239,8 +239,8 @@
                 <td>
                     <input type="checkbox" class="one-time-schedule-checkbox announcement-one-time-schedule-checkbox" value="{{ schedule.id }}" onchange="updateOneTimeDeleteButton('announcement')">
                 </td>
-                <td>
-                    <span title="Anons" style="display: inline-flex; vertical-align: middle; margin-right: 6px;">
+                <td class="col-truncate" title="{{ schedule.filename }}">
+                    <span style="display: inline-flex; vertical-align: middle; margin-right: 6px;">
                         <svg fill="none" viewBox="0 0 24 24" stroke="currentColor" style="width: 16px; height: 16px; color: var(--warning);">
                             <path stroke-linecap="round" stroke-linejoin="round" d="M10.34 15.84c-.688-.06-1.386-.09-2.09-.09H7.5a4.5 4.5 0 110-9h.75c.704 0 1.402-.03 2.09-.09m0 9.18c.253.962.584 1.892.985 2.783.247.55.06 1.21-.463 1.511l-.657.38c-.551.318-1.26.117-1.527-.461a20.845 20.845 0 01-1.44-4.282m3.102.069a18.03 18.03 0 01-.59-4.59c0-1.586.205-3.124.59-4.59m0 9.18a23.848 23.848 0 018.835 2.535M10.34 6.66a23.847 23.847 0 008.835-2.535m0 0A23.74 23.74 0 0018.795 3m.38 1.125a23.91 23.91 0 011.014 5.395m-1.014 8.855c-.118.38-.245.754-.38 1.125m.38-1.125a23.91 23.91 0 001.014-5.395m0-3.46c.495.413.811 1.035.811 1.73 0 .695-.316 1.317-.811 1.73m0-3.46a24.347 24.347 0 010 3.46" />
                         </svg>
