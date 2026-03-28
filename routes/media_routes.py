@@ -231,6 +231,11 @@ def api_media_upload():
                     counter += 1
 
                 if not convert_to_mp3(temp_path, mp3_filepath):
+                    try:
+                        if os.path.exists(mp3_filepath):
+                            os.remove(mp3_filepath)
+                    except OSError:
+                        pass
                     return _err(f"{original_filename} dönüştürülemedi. ffmpeg hatası.")
 
                 converted_codec = get_primary_audio_codec(mp3_filepath)
