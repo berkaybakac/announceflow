@@ -524,6 +524,34 @@ class TestUploadTempCleanup(_UploadTestBase):
         wav_leftovers = [f for f in new_files if f.endswith((".wav", ".tmp"))]
         self.assertEqual(wav_leftovers, [], f"Orphaned temp files: {wav_leftovers}")
 
+    @patch("routes.media_routes.has_audio_stream", return_value=True)
+    @patch("routes.media_routes.get_primary_audio_codec", return_value="wav")
+    def test_no_orphaned_mp3_in_media_folder_on_conversion_failure(self, _codec, _has):
+        """Partial mp3_filepath in media folder must be deleted when convert_to_mp3 fails.
+
+        Regression: old code returned _err() immediately without cleaning up mp3_filepath.
+        ffmpeg may write a partial file before failing — that file must not remain on disk.
+        """
+        def _fake_convert_fail(_src: str, dst: str) -> bool:
+            # Simulate ffmpeg writing a partial file then failing
+            with open(dst, "wb") as f:
+                f.write(b"\x00" * 512)
+            return False
+
+        with patch("routes.media_routes.convert_to_mp3", side_effect=_fake_convert_fail):
+            resp = self._upload("track.wav", content=_WAV_STUB)
+
+        data = resp.get_json()
+        self.assertFalse(data.get("success"), "Expected error response on conversion failure")
+
+        # No .mp3 files must remain in the media music folder
+        music_dir = os.path.join(self._media_dir, "music")
+        mp3_files = [f for f in os.listdir(music_dir) if f.endswith(".mp3")]
+        self.assertEqual(
+            mp3_files, [],
+            f"Orphaned partial mp3 files left in media folder: {mp3_files}",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
