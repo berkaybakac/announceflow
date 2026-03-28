@@ -44,6 +44,12 @@ class PlaybackRepository(BaseRepository):
         except (KeyError, TypeError, IndexError):
             return default
 
+    @staticmethod
+    def _has_volume_revision_column(cursor) -> bool:
+        """Check schema explicitly via PRAGMA — never infer from exceptions."""
+        cursor.execute("PRAGMA table_info(playback_state)")
+        return any(row[1] == "volume_revision" for row in cursor.fetchall())
+
     # ============ PLAYBACK STATE ============
 
     def get_playback_state(self) -> Dict[str, Any]:
@@ -113,36 +119,35 @@ class PlaybackRepository(BaseRepository):
         cursor = conn.cursor()
         row = None
         try:
-            cursor.execute(
+            if self._has_volume_revision_column(cursor):
+                cursor.execute(
+                    """
+                    INSERT OR IGNORE INTO playback_state (id, volume, last_nonzero_volume, volume_revision)
+                    VALUES (1, 80, 80, 0)
                 """
-                INSERT OR IGNORE INTO playback_state (id, volume, last_nonzero_volume, volume_revision)
-                VALUES (1, 80, 80, 0)
-            """
-            )
-            cursor.execute(
+                )
+                cursor.execute(
+                    """
+                    SELECT volume, last_nonzero_volume, volume_revision
+                    FROM playback_state
+                    WHERE id = 1
                 """
-                SELECT volume, last_nonzero_volume, volume_revision
-                FROM playback_state
-                WHERE id = 1
-            """
-            )
-            row = cursor.fetchone()
-            conn.commit()
-        except sqlite3.OperationalError:
-            # Backward-compatible fallback for pre-migration schemas.
-            cursor.execute(
+                )
+            else:
+                # Pre-migration schema: no revision columns.
+                cursor.execute(
+                    """
+                    INSERT OR IGNORE INTO playback_state (id, volume)
+                    VALUES (1, 80)
                 """
-                INSERT OR IGNORE INTO playback_state (id, volume)
-                VALUES (1, 80)
-            """
-            )
-            cursor.execute(
+                )
+                cursor.execute(
+                    """
+                    SELECT volume
+                    FROM playback_state
+                    WHERE id = 1
                 """
-                SELECT volume
-                FROM playback_state
-                WHERE id = 1
-            """
-            )
+                )
             row = cursor.fetchone()
             conn.commit()
         finally:
@@ -166,77 +171,77 @@ class PlaybackRepository(BaseRepository):
         conn = self.get_connection()
         cursor = conn.cursor()
         try:
-            cursor.execute(
+            if self._has_volume_revision_column(cursor):
+                cursor.execute(
+                    """
+                    INSERT OR IGNORE INTO playback_state (id, volume, last_nonzero_volume, volume_revision)
+                    VALUES (1, 80, 80, 0)
                 """
-                INSERT OR IGNORE INTO playback_state (id, volume, last_nonzero_volume, volume_revision)
-                VALUES (1, 80, 80, 0)
-            """
-            )
-            cursor.execute(
+                )
+                cursor.execute(
+                    """
+                    SELECT volume, last_nonzero_volume, volume_revision
+                    FROM playback_state
+                    WHERE id = 1
                 """
-                SELECT volume, last_nonzero_volume, volume_revision
-                FROM playback_state
-                WHERE id = 1
-            """
-            )
-            row = cursor.fetchone()
+                )
+                row = cursor.fetchone()
 
-            current_volume = self._normalize_volume(self._row_value(row, "volume"))
-            current_last_nonzero = self._normalize_last_nonzero(
-                self._row_value(row, "last_nonzero_volume"),
-                fallback=(current_volume if current_volume > 0 else self._DEFAULT_VOLUME),
-            )
-            current_revision = self._normalize_revision(
-                self._row_value(row, "volume_revision")
-            )
+                current_volume = self._normalize_volume(self._row_value(row, "volume"))
+                current_last_nonzero = self._normalize_last_nonzero(
+                    self._row_value(row, "last_nonzero_volume"),
+                    fallback=(current_volume if current_volume > 0 else self._DEFAULT_VOLUME),
+                )
+                current_revision = self._normalize_revision(
+                    self._row_value(row, "volume_revision")
+                )
 
-            next_volume = self._normalize_volume(volume)
-            next_last_nonzero = (
-                next_volume if next_volume > 0 else current_last_nonzero
-            )
-            next_revision = current_revision + 1
+                next_volume = self._normalize_volume(volume)
+                next_last_nonzero = (
+                    next_volume if next_volume > 0 else current_last_nonzero
+                )
+                next_revision = current_revision + 1
 
-            cursor.execute(
+                cursor.execute(
+                    """
+                    UPDATE playback_state
+                    SET volume = ?,
+                        last_nonzero_volume = ?,
+                        volume_revision = ?,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = 1
+                """,
+                    (next_volume, next_last_nonzero, next_revision),
+                )
+            else:
+                # Pre-migration schema: no revision columns.
+                cursor.execute(
+                    """
+                    INSERT OR IGNORE INTO playback_state (id, volume)
+                    VALUES (1, 80)
                 """
-                UPDATE playback_state
-                SET volume = ?,
-                    last_nonzero_volume = ?,
-                    volume_revision = ?,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = 1
-            """,
-                (next_volume, next_last_nonzero, next_revision),
-            )
-            conn.commit()
-        except sqlite3.OperationalError:
-            # Backward-compatible fallback for pre-migration schemas.
-            cursor.execute(
-                """
-                INSERT OR IGNORE INTO playback_state (id, volume)
-                VALUES (1, 80)
-            """
-            )
-            cursor.execute("SELECT volume FROM playback_state WHERE id = 1")
-            row = cursor.fetchone()
+                )
+                cursor.execute("SELECT volume FROM playback_state WHERE id = 1")
+                row = cursor.fetchone()
 
-            current_volume = self._normalize_volume(self._row_value(row, "volume"))
-            next_volume = self._normalize_volume(volume)
-            next_last_nonzero = (
-                next_volume
-                if next_volume > 0
-                else (current_volume if current_volume > 0 else self._DEFAULT_VOLUME)
-            )
-            next_revision = 0
+                current_volume = self._normalize_volume(self._row_value(row, "volume"))
+                next_volume = self._normalize_volume(volume)
+                next_last_nonzero = (
+                    next_volume
+                    if next_volume > 0
+                    else (current_volume if current_volume > 0 else self._DEFAULT_VOLUME)
+                )
+                next_revision = 0
 
-            cursor.execute(
-                """
-                UPDATE playback_state
-                SET volume = ?,
-                    updated_at = CURRENT_TIMESTAMP
-                WHERE id = 1
-            """,
-                (next_volume,),
-            )
+                cursor.execute(
+                    """
+                    UPDATE playback_state
+                    SET volume = ?,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = 1
+                """,
+                    (next_volume,),
+                )
             conn.commit()
         finally:
             conn.close()

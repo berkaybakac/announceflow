@@ -361,7 +361,7 @@ def api_volume():
             )
         )
         if prev_volume != target_volume:
-            log_web("volume", {"volume": target_volume})
+            log_web("volume", {"volume": target_volume, "muted": muted_intent})
         return _json_success({"success": True, **canonical_state})
 
     # Keep DB as-is when player volume write fails.
