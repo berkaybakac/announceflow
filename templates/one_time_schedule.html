@@ -151,7 +151,7 @@
                     <strong>{{ schedule.filename }}</strong>
                 </td>
                 <td>{{ schedule.display_datetime }}</td>
-                <td style="color: var(--text-muted);">{{ schedule.reason or '-' }}</td>
+                <td class="col-truncate" style="color: var(--text-muted);" title="{{ schedule.reason or '' }}">{{ schedule.reason or '-' }}</td>
                 <td>
                     {% if schedule.status == 'pending' %}
                         {% if schedule.blocked_outside_hours %}
@@ -248,7 +248,7 @@
                     <strong>{{ schedule.filename }}</strong>
                 </td>
                 <td>{{ schedule.display_datetime }}</td>
-                <td style="color: var(--text-muted);">{{ schedule.reason or '-' }}</td>
+                <td class="col-truncate" style="color: var(--text-muted);" title="{{ schedule.reason or '' }}">{{ schedule.reason or '-' }}</td>
                 <td>
                     {% if schedule.status == 'pending' %}
                         {% if schedule.blocked_outside_hours %}
@@ -305,9 +305,30 @@
             const data = await resp.json();
 
             barArea.innerHTML = '';
+
+            // Hour labels row
+            const labelsRow = document.createElement('div');
+            labelsRow.className = 'timeline-row';
+            labelsRow.style.marginBottom = '2px';
+            const labelBar = document.createElement('div');
+            labelBar.className = 'timeline-bar';
+            labelBar.style.height = '16px';
+            labelBar.style.background = 'transparent';
+            labelBar.style.border = 'none';
+            for (let h = 0; h < 24; h++) {
+                const pct = (h * 60 / TOTAL_MINUTES) * 100;
+                const lbl = document.createElement('div');
+                lbl.className = 'timeline-hour-label';
+                lbl.style.left = pct + '%';
+                lbl.style.top = '0';
+                lbl.textContent = String(h).padStart(2, '0');
+                labelBar.appendChild(lbl);
+            }
+            labelsRow.appendChild(labelBar);
+            barArea.appendChild(labelsRow);
+
             const row = document.createElement('div');
             row.className = 'timeline-row';
-            row.style.paddingTop = '18px';  // Space for hour labels
 
             const bar = document.createElement('div');
             bar.className = 'timeline-bar';
