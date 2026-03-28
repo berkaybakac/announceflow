@@ -349,13 +349,87 @@ class Scheduler:
                     self._prayer_pause_state = None
 
     def _move_prayer_state_to_working_hours_if_needed(self) -> None:
+        """Transfer prayer pause state into the working-hours slot when mesai ends mid-prayer.
+
+        OVERLAP SCENARIO (known edge case — Backlog: prayer_working_hours_overlap_v2):
+        ─────────────────────────────────────────────────────────────────────────────
+        Triggered when working hours end while a prayer pause is already active.
+        Example: akşam ezanı 16:55, mesai 17:00 bitiyor.
+
+        Correct behaviour:
+            1. Prayer state is moved to working_hours slot.
+            2. Music does NOT resume at prayer end (17:07) — it would be wrong, mesai over.
+            3. Music resumes the NEXT day at mesai start (09:00). ✓
+
+        Edge case — working_hours state already set (two overlapping pauses):
+            If working_hours_pause_state is not None (mesai ended BEFORE prayer started,
+            e.g. user configured 16:00 end time), the prayer state is DISCARDED.
+            Working_hours state takes precedence. Music still resumes at mesai start
+            but the exact playlist position may differ from what prayer captured.
+
+        HOW TO DIAGNOSE from logs:
+            • "prayer_state_moved_to_working_hours"  → normal overlap, all fine.
+            • "prayer_state_lost_working_hours_already_set" (ERROR) → prayer state
+              was discarded; if customer says "music never came back after prayer",
+              THIS is the cause. Check timestamp against prayer end time.
+              Resolution: will be fixed in prayer_working_hours_overlap_v2 release.
+        """
         with self._pause_state_lock:
             if self._prayer_pause_state is None:
                 return
+
+            prayer_index = self._prayer_pause_state.get("index")
+            prayer_tracks = len(self._prayer_pause_state.get("playlist") or [])
+
             if self._working_hours_pause_state is None:
+                # Normal overlap path: move prayer state so music resumes at mesai start.
                 self._working_hours_pause_state = self._normalize_pause_state(
                     self._prayer_pause_state
                 )
+                log_prayer(
+                    "prayer_state_moved_to_working_hours",
+                    {
+                        "index": prayer_index,
+                        "tracks": prayer_tracks,
+                        "reason": "working_hours_ended_during_prayer",
+                        "note": "Music will resume at next mesai start, NOT at prayer end.",
+                    },
+                )
+                logger.info(
+                    "Prayer↔WorkingHours overlap: prayer state moved to working_hours slot "
+                    "(index=%s, tracks=%s). Music resumes at mesai start.",
+                    prayer_index,
+                    prayer_tracks,
+                )
+            else:
+                # working_hours state already exists (mesai ended BEFORE prayer started,
+                # e.g. mesai 16:00, prayer 16:55). Prayer state is always more recent
+                # because _handle_working_hours() is skipped while prayer is active —
+                # so working_hours slot can only have been set before prayer began.
+                # Overwrite with prayer state so music resumes from the correct position.
+                wh_index = self._working_hours_pause_state.get("index")
+                wh_tracks = len(self._working_hours_pause_state.get("playlist") or [])
+                self._working_hours_pause_state = self._normalize_pause_state(
+                    self._prayer_pause_state
+                )
+                log_prayer(
+                    "prayer_state_overwrote_working_hours",
+                    {
+                        "prayer_index": prayer_index,
+                        "prayer_tracks": prayer_tracks,
+                        "replaced_working_hours_index": wh_index,
+                        "replaced_working_hours_tracks": wh_tracks,
+                        "note": "Music will resume at mesai start from prayer position (more recent).",
+                    },
+                )
+                logger.info(
+                    "Prayer↔WorkingHours overlap — prayer state OVERWRITES working_hours slot "
+                    "(prayer index=%s replaces stale wh index=%s). "
+                    "Music resumes at mesai start from prayer position.",
+                    prayer_index,
+                    wh_index,
+                )
+
             self._prayer_pause_state = None
 
     def _set_pause_state_by_policy(self, state: dict[str, Any], policy: str) -> None:
@@ -924,6 +998,46 @@ class Scheduler:
         Returns True if we should skip the rest of the loop (prayer time active).
         """
         if not is_within_working_hours(config):
+            # ── Bug #6 overlap diagnostic ──────────────────────────────────────────
+            # Outside working hours: prayer handling is skipped here.
+            # If a prayer_pause_state is present, mesai ended WHILE prayer was active
+            # (akşam ezanı + mesai bitiş overlap — e.g. 16:55 ezan, 17:00 mesai bitiş).
+            # We return False so _handle_working_hours() runs THIS tick and transfers
+            # the prayer state via _move_prayer_state_to_working_hours_if_needed().
+            # This log fires once per overlap occurrence (state is cleared by transfer).
+            # ──────────────────────────────────────────────────────────────────────────
+            # DIAGNOSING CUSTOMER COMPLAINTS:
+            #   "Music stopped at prayer time and never came back."
+            #   → Search logs for 'prayer_active_outside_working_hours' to confirm overlap.
+            #   → Then look for 'prayer_state_moved_to_working_hours' (state transferred OK)
+            #     OR 'prayer_state_lost_working_hours_already_set' (state discarded — BUG).
+            #   → If 'moved' log present: music should resume next mesai start. OK.
+            #   → If 'lost' log present: root cause confirmed. Fix: prayer_working_hours_overlap_v2.
+            prayer_state = self._get_pause_state("prayer")
+            if prayer_state is not None:
+                log_prayer(
+                    "prayer_active_outside_working_hours",
+                    {
+                        "index": prayer_state.get("index"),
+                        "tracks": len(prayer_state.get("playlist") or []),
+                        "note": (
+                            "Mesai ended while prayer was active. "
+                            "_handle_working_hours will transfer prayer state to "
+                            "working_hours slot this tick so music resumes at mesai start."
+                        ),
+                    },
+                )
+                logger.info(
+                    "Prayer↔WorkingHours overlap: prayer state present but outside "
+                    "working hours (index=%s, tracks=%s). "
+                    "_handle_working_hours will transfer state this tick. "
+                    "If music does not resume at next mesai start, search logs for "
+                    "'prayer_state_moved_to_working_hours' or "
+                    "'prayer_state_lost_working_hours_already_set'. "
+                    "[Ref: prayer_working_hours_overlap_v2]",
+                    prayer_state.get("index"),
+                    len(prayer_state.get("playlist") or []),
+                )
             return False
 
         prayer_like_silence = bool(
@@ -1015,6 +1129,15 @@ class Scheduler:
         outside_working_hours = not is_within_working_hours(config)
 
         if outside_working_hours:
+            # ── Bug #6 overlap: transfer prayer state if mesai ended during prayer ──
+            # When prayer is active and mesai ends simultaneously, _handle_prayer_time()
+            # returns False early (not in working hours), so this block runs first.
+            # _move_prayer_state_to_working_hours_if_needed() checks if prayer_pause_state
+            # is set and transfers it to the working_hours slot — ensuring music resumes
+            # at mesai start the NEXT DAY, not incorrectly at prayer end.
+            # If prayer_pause_state is None, this is a no-op (normal mesai-end flow).
+            # See _move_prayer_state_to_working_hours_if_needed() docstring for full
+            # overlap scenario, edge cases, and diagnostic log keys.
             self._move_prayer_state_to_working_hours_if_needed()
             resume_state = self._resolve_playlist_resume_state(player)
             # Save playlist state BEFORE stopping (only once)
@@ -1208,14 +1331,43 @@ class Scheduler:
                 self._run_reconcile_watchdog(config, player, silence_decision)
 
             except Exception as e:
-                logger.error(f"Scheduler error: {e}")
+                logger.exception("Scheduler error: %s", e)
 
             time.sleep(self.check_interval)
 
     def _check_one_time_schedules(
         self, outside_working_hours: bool, silence_blocked: bool
     ):
-        """Check and trigger pending one-time schedules."""
+        """Check and trigger pending one-time schedules.
+
+        NTP CLOCK SKEW — KNOWN LIMITATION (Backlog: ntp_skew_v2)
+        ──────────────────────────────────────────────────────────
+        time_diff = (now - scheduled_dt) in seconds. Three zones:
+
+          [0, 120]      fire window  — schedule triggers
+          (120, 600]    grace window — slightly missed, retried next tick
+          > 600         cancel       — assumed unrecoverable, marked cancelled
+
+        WHY THIS IS A PROBLEM ON RASPBERRY PI / EMBEDDED DEVICES:
+        At boot without internet the system clock may be wrong (RTC drift or
+        no RTC battery). When NTP syncs and the clock jumps FORWARD by minutes
+        or hours, any schedule whose scheduled_dt has already passed by > 600 s
+        is silently cancelled — it never plays.
+
+        MITIGATION (this release): cancel threshold raised from 300 s → 600 s
+        (10 min buffer instead of 5 min) to cover typical slow-boot NTP sync.
+
+        FULL FIX: ntp_skew_v2 — boot-time backfill pass + monotonic trigger
+        tracking so schedules that were missed during offline boot are replayed.
+
+        HOW TO DIAGNOSE "schedule never played":
+          1. Search 'one_time_schedule_missed_cancelled' → cancelled? Check
+             'time_diff_seconds': if much > 600, NTP forward jump is the cause.
+          2. Search 'one_time_schedule_grace_window' → sat in grace, then cancelled?
+          3. Search 'one_time_schedule_clock_skew_negative' → NTP backward sync?
+          4. If none of the above: check 'one_time_status_write_failed' for DB errors.
+          Fix: deploy ntp_skew_v2 release.
+        """
         now = now_utc()
         pending = db.get_pending_one_time_schedules()
 
@@ -1250,9 +1402,31 @@ class Scheduler:
             schedule_id = int(schedule["id"])
             media_type = self._normalize_media_type(schedule.get("media_type"))
             is_announcement = media_type == "announcement"
+            filename = schedule.get("filename", "unknown")
 
             if 0 <= time_diff <= 120:
                 if is_announcement:
+                    if outside_working_hours:
+                        logger.warning(
+                            f"One-time announcement outside working hours, skipping: "
+                            f"{filename} (scheduled {scheduled_dt})"
+                        )
+                        try:
+                            db.update_one_time_schedule_status(schedule_id, "cancelled")
+                        except Exception as exc:
+                            logger.exception(
+                                "Failed to cancel one-time announcement outside working hours id=%s",
+                                schedule_id,
+                            )
+                            log_error(
+                                "one_time_status_write_failed",
+                                {
+                                    "action": "cancelled_outside_working_hours",
+                                    "schedule_id": schedule_id,
+                                    "error": str(exc),
+                                },
+                            )
+                        continue
                     duration_seconds = resolve_duration_seconds(schedule.get("media_id"))
                     self._queue_announcement(
                         filepath=schedule["filepath"],
@@ -1266,7 +1440,7 @@ class Scheduler:
 
                 if outside_working_hours:
                     logger.warning(
-                        f"Schedule outside working hours, cancelling: {schedule['filename']} (was scheduled for {scheduled_dt})"
+                        f"Schedule outside working hours, cancelling: {filename} (was scheduled for {scheduled_dt})"
                     )
                     try:
                         db.update_one_time_schedule_status(schedule_id, "cancelled")
@@ -1289,12 +1463,12 @@ class Scheduler:
                 else:
                     # Time to play!
                     logger.info(
-                        f"Triggering one-time schedule: {schedule['filename']} (diff: {time_diff:.0f}s)"
+                        f"Triggering one-time schedule: {filename} (diff: {time_diff:.0f}s)"
                     )
                     log_trigger(
                         "one_time",
                         {
-                            "filename": schedule["filename"],
+                            "filename": filename,
                             "media_type": media_type,
                             "delay_seconds": int(time_diff),
                         },
@@ -1305,12 +1479,132 @@ class Scheduler:
                         is_one_time=True,
                         is_announcement=False,
                     )
-            elif time_diff > 300:
+
+            elif time_diff < 0:
+                # ── NTP BACKWARD SYNC DIAGNOSTIC ────────────────────────────────────
+                # schedule_dt is in the FUTURE relative to now. This happens when:
+                #   a) NTP syncs and jumps the clock backward (corrects a fast clock)
+                #   b) The schedule was created with a future time (normal)
+                # Case (a) is self-healing: when the clock catches up, the schedule
+                # will enter the [0, 120] fire window and trigger normally.
+                # Case (b) is also normal; no action needed.
+                #
+                # WHEN TO WORRY: if the same schedule_id appears here for many ticks
+                # AND never enters [0, 120], the clock may be permanently wrong.
+                # Search logs for this schedule_id to see if it eventually fired.
+                # ────────────────────────────────────────────────────────────────────
+                if time_diff < -30:
+                    # Only log when significantly in the future (>30 s) to avoid
+                    # noisy logs from sub-second clock precision differences.
+                    log_schedule(
+                        "one_time_schedule_clock_skew_negative",
+                        {
+                            "schedule_id": schedule_id,
+                            "filename": filename,
+                            "scheduled_at": str(scheduled_dt),
+                            "now_utc": str(now),
+                            "time_diff_seconds": round(time_diff, 1),
+                            "note": (
+                                "Schedule is in the future. Possible NTP backward sync "
+                                "or normal future schedule. Will retry when clock catches up."
+                            ),
+                        },
+                    )
+                    logger.warning(
+                        "One-time schedule #%s ('%s') is %.0fs in the future "
+                        "(scheduled: %s, now: %s). "
+                        "Possible NTP backward clock sync — will retry on next tick. "
+                        "[Ref: ntp_skew_v2]",
+                        schedule_id,
+                        filename,
+                        abs(time_diff),
+                        scheduled_dt,
+                        now,
+                    )
+
+            elif 120 < time_diff <= 600:
+                # ── GRACE WINDOW — schedule slightly missed ──────────────────────────
+                # The trigger window [0, 120] was missed (scheduler was briefly offline,
+                # system was busy, or NTP jumped forward by a small amount).
+                # We do NOT cancel yet — the schedule stays pending and will be
+                # retried on every tick until time_diff exceeds 600 s.
+                #
+                # WHEN TO WORRY: if a schedule sits here for many ticks and then
+                # gets cancelled (search 'one_time_schedule_missed_cancelled'), the
+                # most likely cause is a slow-boot NTP sync that jumped the clock
+                # forward past the trigger window before the scheduler first ran.
+                # Fix: ntp_skew_v2 (boot backfill).
+                # ────────────────────────────────────────────────────────────────────
+                log_schedule(
+                    "one_time_schedule_grace_window",
+                    {
+                        "schedule_id": schedule_id,
+                        "filename": filename,
+                        "scheduled_at": str(scheduled_dt),
+                        "time_diff_seconds": round(time_diff, 1),
+                        "cancel_threshold_seconds": 600,
+                        "note": (
+                            "Schedule missed trigger window [0, 120] but is within "
+                            "grace window (120, 600]. Will retry next tick. "
+                            "If cancelled shortly after, NTP forward sync at boot "
+                            "is the likely cause."
+                        ),
+                    },
+                )
+                logger.info(
+                    "One-time schedule #%s ('%s') in grace window (%.0fs past due, "
+                    "cancel threshold 600s). Retrying next tick. "
+                    "If cancelled soon after, check for NTP boot sync. [Ref: ntp_skew_v2]",
+                    schedule_id,
+                    filename,
+                    time_diff,
+                )
+
+            elif time_diff > 600:
+                # ── CANCEL THRESHOLD ────────────────────────────────────────────────
+                # Threshold raised from 300 s → 600 s (mitigation for NTP boot sync).
+                # Gives a 10-minute buffer for slow Pi boot + NTP convergence.
+                #
+                # DIAGNOSING MISSED SCHEDULES:
+                # If customer reports "the morning announcement never played", search:
+                #   'one_time_schedule_missed_cancelled' — was it cancelled here?
+                #   Check 'time_diff_seconds': >> 600 → NTP jump at boot is the cause.
+                #   Check 'one_time_schedule_grace_window' before this log — did it
+                #   sit in grace or jump straight here (large NTP forward sync)?
+                # Full fix: ntp_skew_v2 release.
+                # ────────────────────────────────────────────────────────────────────
                 if schedule_id in self._queued_one_time_ids:
+                    # Already queued for playback — do not cancel mid-flight.
                     continue
-                # Missed by more than 5 minutes, mark as cancelled
-                logger.warning(
-                    f"Schedule missed, cancelling: {schedule['filename']} (was scheduled for {scheduled_dt})"
+
+                log_error(
+                    "one_time_schedule_missed_cancelled",
+                    {
+                        "schedule_id": schedule_id,
+                        "filename": filename,
+                        "scheduled_at": str(scheduled_dt),
+                        "now_utc": str(now),
+                        "time_diff_seconds": round(time_diff, 1),
+                        "cancel_threshold_seconds": 600,
+                        "impact": (
+                            "Schedule was not played. If time_diff >> 600, "
+                            "NTP forward sync at boot is the likely cause. "
+                            "Deploy ntp_skew_v2 for permanent fix."
+                        ),
+                        "backlog_ref": "ntp_skew_v2",
+                    },
+                )
+                logger.error(
+                    "One-time schedule #%s ('%s') missed — cancelling. "
+                    "Was due at %s, now %s (%.0fs overdue, threshold 600s). "
+                    "If time_diff is much > 600, NTP forward clock sync at boot "
+                    "is likely the cause. Search 'one_time_schedule_grace_window' "
+                    "for this schedule_id to see full history. [Ref: ntp_skew_v2]",
+                    schedule_id,
+                    filename,
+                    scheduled_dt,
+                    now,
+                    time_diff,
                 )
                 try:
                     db.update_one_time_schedule_status(schedule_id, "cancelled")
@@ -1387,6 +1681,8 @@ class Scheduler:
                 media_type = self._normalize_media_type(schedule.get("media_type"))
                 is_announcement = media_type == "announcement"
                 if is_announcement:
+                    if outside_working_hours:
+                        continue
                     duration_seconds = resolve_duration_seconds(schedule.get("media_id"))
                     self._queue_announcement(
                         filepath=schedule["filepath"],
@@ -1535,7 +1831,16 @@ class Scheduler:
 
     _RESTORE_PLAYER_WAIT_TIMEOUT_S: int = 120
 
-    def _run_restore_worker(self, player) -> None:
+    def _run_restore_worker(self, player, done_event: Optional[threading.Event] = None) -> None:
+        """Restore playlist after announcement playback.
+
+        done_event is captured at _play_media() call-site and passed here so this worker
+        always signals the correct Event even when a second announcement overwrites
+        self._announcement_done before this thread reaches STEP 2.
+
+        Bug guard: do NOT read self._announcement_done here — it may already point to a
+        newer Event belonging to a concurrent announcement. Use the passed done_event only.
+        """
         try:
             while True:
                 _wait_deadline = time.monotonic() + self._RESTORE_PLAYER_WAIT_TIMEOUT_S
@@ -1574,11 +1879,15 @@ class Scheduler:
                         "volume_override_active": True,
                     })
 
-                # STEP 2: Signal announcement done event
-                done = self._announcement_done
-                if done is not None and not done.is_set():
-                    done.set()
-                    self._announcement_done = None
+                # STEP 2: Signal announcement done event.
+                # Use done_event (captured at setup) — NOT self._announcement_done.
+                # self._announcement_done may already point to a second announcement's
+                # Event if back-to-back announcements are dispatched. Signalling the wrong
+                # Event would leave resume_worker_A waiting 120 s on Event_A which is
+                # never set. See: _play_media() where done_event is created and passed.
+                if done_event is not None and not done_event.is_set():
+                    done_event.set()
+                self._announcement_done = None  # clear shared ref regardless
 
                 # STEP 3: Resume playlist (volume is already canonical)
                 with self._restore_lock:
@@ -1599,9 +1908,9 @@ class Scheduler:
                 if current_thread in self._restore_threads:
                     self._restore_threads.remove(current_thread)
 
-    def _start_restore_worker(self, player) -> None:
+    def _start_restore_worker(self, player, done_event: Optional[threading.Event] = None) -> None:
         restore_thread = threading.Thread(
-            target=self._run_restore_worker, args=(player,), daemon=True
+            target=self._run_restore_worker, args=(player, done_event), daemon=True
         )
         with self._restore_lock:
             self._restore_threads.append(restore_thread)
@@ -1737,25 +2046,35 @@ class Scheduler:
             )
         elif not success and override_applied:
             player.set_volume(int(canonical_volume.get("volume", 0)))
+        # Create done_event locally BEFORE spawning any workers so every worker that
+        # needs to signal or wait on it holds the same object reference. Reading
+        # self._announcement_done inside a worker thread is unsafe: a concurrent
+        # announcement can overwrite self._announcement_done before the worker reaches
+        # its signal step, causing the resume worker to wait 120 s on an orphaned Event.
+        done_event: Optional[threading.Event] = None
         if announcement_interrupted_stream:
-            self._announcement_done = threading.Event()
+            done_event = threading.Event()
+            self._announcement_done = done_event
         restore_queued = success and self._queue_restore_target(
             snapshot, volume_override_active=override_applied
         )
         if restore_queued:
-            self._start_restore_worker(player)
+            self._start_restore_worker(player, done_event=done_event)
         elif success and override_applied:
             # No playlist to restore but volume override is active — fallback to session watcher
             _volume_runtime._start_session_watcher(_volume_runtime._override_token)
         elif announcement_interrupted_stream:
-            # No restore worker to signal the event — start a lightweight sentinel
-            _evt = self._announcement_done
+            # No restore worker to signal the event — start a lightweight sentinel.
+            # Capture done_event (not self._announcement_done) so the closure holds the
+            # correct Event even if self._announcement_done is overwritten by a later call.
+            _evt = done_event
             def _signal_on_player_stop():
                 _p = get_player()
                 deadline = time.monotonic() + 120.0
                 while _p.is_playing and time.monotonic() < deadline:
                     time.sleep(0.2)
-                _evt.set()
+                if _evt is not None:
+                    _evt.set()
             threading.Thread(target=_signal_on_player_stop, daemon=True).start()
         if announcement_interrupted_stream:
             self._start_stream_resume_worker_after_announcement()
