@@ -142,12 +142,11 @@ function addSlot(bar, startMin, endMin, type, label, meta, isConflict, queueLabe
         });
     }
     if (isConflict && queueLabels && queueLabels.length > 1) {
-        const ORDINALS = ['①','②','③','④','⑤','⑥','⑦','⑧','⑨','⑩'];
         div.addEventListener('mouseenter', () => {
             const tooltip = document.getElementById('tlTooltip');
             if (!tooltip) return;
             const header = `Sıralı çalacak (${queueLabels.length} anons):`;
-            const list = queueLabels.map((l, idx) => `${ORDINALS[idx] || (idx + 1 + '.')} ${l}`).join('\n');
+            const list = queueLabels.map((l, idx) => `${idx + 1}. ${l}`).join('\n');
             tooltip.textContent = header + '\n' + list;
             tooltip.style.whiteSpace = 'pre-wrap';
             const rect = div.getBoundingClientRect();
