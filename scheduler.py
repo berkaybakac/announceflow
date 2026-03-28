@@ -1533,10 +1533,20 @@ class Scheduler:
         })
         return True
 
+    _RESTORE_PLAYER_WAIT_TIMEOUT_S: int = 120
+
     def _run_restore_worker(self, player) -> None:
         try:
             while True:
+                _wait_deadline = time.monotonic() + self._RESTORE_PLAYER_WAIT_TIMEOUT_S
                 while player.is_playing:
+                    if time.monotonic() >= _wait_deadline:
+                        logger.error(
+                            "Restore worker: player.is_playing did not clear within %ds "
+                            "— mpg123 may be hung. Aborting restore.",
+                            self._RESTORE_PLAYER_WAIT_TIMEOUT_S,
+                        )
+                        return
                     time.sleep(0.5)
 
                 # STEP 1: Restore volume BEFORE playlist resume

@@ -214,3 +214,72 @@ class TestResumeWorkerEventCoordination:
 
         svc.force_stop_by_policy.assert_called_once()
         svc.resume_after_announcement.assert_not_called()
+
+
+class TestRestoreWorkerTimeout:
+    """Regression: _run_restore_worker had no timeout on the is_playing poll loop.
+
+    If mpg123 hung and player.is_playing never cleared, the restore thread
+    would loop forever at sleep(0.5), blocking all future playlist restores.
+
+    Fix: added _RESTORE_PLAYER_WAIT_TIMEOUT_S (120 s) deadline; worker logs
+    an error and returns (triggering finally-block cleanup) when exceeded.
+    """
+
+    def test_worker_exits_when_player_hangs(self):
+        """Hung player (is_playing stays True) must not block the thread forever."""
+        sched = _make_scheduler()
+        sched._RESTORE_PLAYER_WAIT_TIMEOUT_S = 0  # instant timeout for test speed
+
+        player = MagicMock()
+        player.is_playing = True  # Never stops — looped forever before fix
+
+        sched._restore_target_state = None
+        sched._announcement_done = None
+
+        t = threading.Thread(target=sched._run_restore_worker, args=(player,), daemon=True)
+        t.start()
+        t.join(timeout=2.0)
+
+        assert not t.is_alive(), "Worker must exit after timeout, not loop forever"
+
+    def test_worker_timeout_resets_restore_in_progress(self):
+        """After a timeout abort, _restore_in_progress is cleared and thread removed."""
+        sched = _make_scheduler()
+        sched._RESTORE_PLAYER_WAIT_TIMEOUT_S = 0
+
+        player = MagicMock()
+        player.is_playing = True
+
+        restore_thread = threading.Thread(
+            target=sched._run_restore_worker, args=(player,), daemon=True
+        )
+        with sched._restore_lock:
+            sched._restore_threads.append(restore_thread)
+            sched._restore_in_progress = True
+
+        restore_thread.start()
+        restore_thread.join(timeout=2.0)
+
+        assert not restore_thread.is_alive()
+        assert sched._restore_in_progress is False, "finally block must clear flag"
+        assert restore_thread not in sched._restore_threads, "finally block must deregister thread"
+
+    def test_worker_normal_flow_unaffected(self):
+        """When player stops before timeout, worker proceeds normally."""
+        sched = _make_scheduler()
+        sched._RESTORE_PLAYER_WAIT_TIMEOUT_S = 30  # generous — player already idle
+
+        done = threading.Event()
+        sched._announcement_done = done
+        sched._restore_target_state = None  # no state → breaks after signalling done
+
+        player = MagicMock()
+        player.is_playing = False  # Already stopped
+
+        t = threading.Thread(target=sched._run_restore_worker, args=(player,), daemon=True)
+        t.start()
+        t.join(timeout=2.0)
+
+        assert not t.is_alive()
+        assert done.is_set(), "Normal path must still signal _announcement_done"
