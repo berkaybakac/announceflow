@@ -363,16 +363,13 @@ class Scheduler:
 
         Edge case — working_hours state already set (two overlapping pauses):
             If working_hours_pause_state is not None (mesai ended BEFORE prayer started,
-            e.g. user configured 16:00 end time), the prayer state is DISCARDED.
-            Working_hours state takes precedence. Music still resumes at mesai start
-            but the exact playlist position may differ from what prayer captured.
+            e.g. mesai 16:00, prayer 16:55), prayer state OVERWRITES working_hours state.
+            Prayer state is always more recent (working_hours handler is skipped during
+            prayer). Music resumes at mesai start from the prayer position. ✓
 
         HOW TO DIAGNOSE from logs:
             • "prayer_state_moved_to_working_hours"  → normal overlap, all fine.
-            • "prayer_state_lost_working_hours_already_set" (ERROR) → prayer state
-              was discarded; if customer says "music never came back after prayer",
-              THIS is the cause. Check timestamp against prayer end time.
-              Resolution: will be fixed in prayer_working_hours_overlap_v2 release.
+            • "prayer_state_overwrote_working_hours" → edge case, prayer position used.
         """
         with self._pause_state_lock:
             if self._prayer_pause_state is None:
