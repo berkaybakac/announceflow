@@ -406,6 +406,33 @@
         .table {
             width: 100%;
             border-collapse: collapse;
+            table-layout: fixed;
+        }
+
+        .col-truncate {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            max-width: 0;
+        }
+
+        #recurringSchedulesTable th,
+        #recurringSchedulesTable td {
+            padding: 10px 8px;
+        }
+
+        #recurringSchedulesTable {
+            min-width: 490px;
+        }
+
+        #musicSchedulesTable,
+        #announcementSchedulesTable {
+            min-width: 455px;
+        }
+
+        #musicSchedulesTable th, #musicSchedulesTable td,
+        #announcementSchedulesTable th, #announcementSchedulesTable td {
+            padding: 10px 8px;
         }
 
         .table th,
@@ -964,6 +991,7 @@
             pointer-events: none;
             box-shadow: 0 4px 20px rgba(0,0,0,0.5);
             transform: translate(-50%, calc(-100% - 10px));
+            word-break: break-word;
         }
         .timeline-bar {
             position: relative;

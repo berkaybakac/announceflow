@@ -147,12 +147,12 @@ function addSlot(bar, startMin, endMin, type, label, meta, isConflict, queueLabe
             const tooltip = document.getElementById('tlTooltip');
             if (!tooltip) return;
             const header = `Sıralı çalacak (${queueLabels.length} anons):`;
-            const list = queueLabels.map((l, idx) => `${ORDINALS[idx] || (idx + 1 + '.')} ${l}`).join('  ');
+            const list = queueLabels.map((l, idx) => `${ORDINALS[idx] || (idx + 1 + '.')} ${l}`).join('\n');
             tooltip.textContent = header + '\n' + list;
-            tooltip.style.whiteSpace = 'pre';
+            tooltip.style.whiteSpace = 'pre-wrap';
             const rect = div.getBoundingClientRect();
             tooltip.style.left = (rect.left + rect.width / 2) + 'px';
-            tooltip.style.top = (rect.top + window.scrollY) + 'px';
+            tooltip.style.top = rect.top + 'px';
             tooltip.style.display = 'block';
         });
         div.addEventListener('mouseleave', () => {

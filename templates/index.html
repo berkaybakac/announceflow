@@ -213,14 +213,14 @@
         <thead>
             <tr>
                 <th>Dosya</th>
-                <th>Tarih/Saat</th>
-                <th>Durum</th>
+                <th style="width: 145px;">Tarih/Saat</th>
+                <th style="width: 185px;">Durum</th>
             </tr>
         </thead>
         <tbody id="upcoming-schedules-body">
             {% for schedule in upcoming_schedules[:5] %}
             <tr>
-                <td>{{ schedule.filename }}</td>
+                <td class="col-truncate" title="{{ schedule.filename }}">{{ schedule.filename }}</td>
                 <td>{{ schedule.display_datetime }}</td>
                 <td>
                     {% if schedule.blocked_outside_hours %}
