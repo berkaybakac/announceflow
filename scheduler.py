@@ -1595,7 +1595,14 @@ class Scheduler:
         )
         with self._restore_lock:
             self._restore_threads.append(restore_thread)
-        restore_thread.start()
+        try:
+            restore_thread.start()
+        except Exception:
+            with self._restore_lock:
+                self._restore_in_progress = False
+                if restore_thread in self._restore_threads:
+                    self._restore_threads.remove(restore_thread)
+            raise
 
     def _finalize_one_time_status(
         self, success: bool, schedule_id: int, is_one_time: bool

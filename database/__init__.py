@@ -62,24 +62,26 @@ def _get_audio_duration(file_path: str) -> int:
 def _backfill_durations():
     """Backfill missing duration values for existing media files."""
     conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT id, filepath FROM media_files WHERE duration_seconds = 0 OR duration_seconds IS NULL"
-    )
-    rows = cursor.fetchall()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, filepath FROM media_files WHERE duration_seconds = 0 OR duration_seconds IS NULL"
+        )
+        rows = cursor.fetchall()
 
-    for row in rows:
-        mid, fpath = row["id"], row["filepath"]
-        if os.path.exists(fpath):
-            duration = _get_audio_duration(fpath)
-            if duration > 0:
-                cursor.execute(
-                    "UPDATE media_files SET duration_seconds = ? WHERE id = ?",
-                    (duration, mid),
-                )
+        for row in rows:
+            mid, fpath = row["id"], row["filepath"]
+            if os.path.exists(fpath):
+                duration = _get_audio_duration(fpath)
+                if duration > 0:
+                    cursor.execute(
+                        "UPDATE media_files SET duration_seconds = ? WHERE id = ?",
+                        (duration, mid),
+                    )
 
-    conn.commit()
-    conn.close()
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def get_db_connection():

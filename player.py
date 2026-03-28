@@ -236,7 +236,7 @@ class AudioPlayer:
                 ],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
-                timeout=180,
+                timeout=60,
             )
             if result.returncode != 0:
                 logger.error(
@@ -254,6 +254,18 @@ class AudioPlayer:
             os.replace(temp_path, file_path)
             logger.info(f"Auto-converted for mpg123 compatibility: {os.path.basename(file_path)}")
             return True
+        except subprocess.TimeoutExpired:
+            logger.error(
+                f"[ANONS_KAYIP] Ses dosyası dönüştürme zaman aşımına uğradı (60s) — "
+                f"dosya uyumsuz formatta yüklenmiş olabilir (WhatsApp/telefon kaydı): "
+                f"{os.path.basename(file_path)}. "
+                f"Bu süre zarfında zamanlanmış anonslar kaçmış olabilir."
+            )
+            log_error(
+                "mp3_conversion_timeout",
+                {"file": os.path.basename(file_path), "timeout_seconds": 60},
+            )
+            return False
         except (subprocess.SubprocessError, OSError) as e:
             logger.error(f"Auto-conversion error for {os.path.basename(file_path)}: {e}")
             return False
