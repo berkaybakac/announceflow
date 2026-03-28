@@ -193,7 +193,7 @@
                     {{ schedule.start_time }} - {{ schedule.end_time or '23:59' }} (her {{ schedule.interval_minutes }} dk)
                     {% endif %}
                 </td>
-                <td style="color: var(--text-muted);">{{ schedule.reason or '-' }}</td>
+                <td class="col-truncate" style="color: var(--text-muted);" title="{{ schedule.reason or '' }}">{{ schedule.reason or '-' }}</td>
                 <td>
                     {% if schedule.is_active %}
                     <span class="badge badge-success">Aktif</span>
