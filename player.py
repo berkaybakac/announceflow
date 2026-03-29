@@ -155,6 +155,7 @@ class AudioPlayer:
                 ["amixer", "-c", card, "set", control, *value_args],
                 capture_output=True,
                 text=True,
+                timeout=5,
             )
             if result.returncode == 0:
                 return True
@@ -164,6 +165,7 @@ class AudioPlayer:
             ["amixer", "set", control, *value_args],
             capture_output=True,
             text=True,
+            timeout=5,
         )
         return result.returncode == 0
 
@@ -552,6 +554,8 @@ class AudioPlayer:
             return True
         except Exception as e:
             logger.error(f"mpg123 error: {e}")
+            self.is_playing = False
+            self.current_file = None
             return False
 
     def _play_pygame(
