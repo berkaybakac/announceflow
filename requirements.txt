@@ -1,48 +1,22 @@
-# AnnounceFlow Server Dependencies (Pi4 / Linux)
-# Generated for zero-error installation on new machines.
+# Server dependencies
+# Known working pinned set for this project.
 
-# ---------------------------------------------------------
-# Core Web Framework (Flask Stack)
-# ---------------------------------------------------------
-Flask==3.0.0         # Web Application Framework
-Werkzeug==3.0.1      # WSGI Web Application Library
-Jinja2==3.1.2        # Templating Engine
-click==8.1.7         # Composable Command Line Interface
-itsdangerous==2.1.2  # Secure Data Helpers
-blinker==1.6.3       # Fast Broadcasting Signals
+Flask==3.0.0
+Werkzeug==3.0.1
+Jinja2==3.1.2
+click==8.1.7
+itsdangerous==2.1.2
+blinker==1.6.3
+waitress==3.0.0
+requests==2.31.0
+urllib3==2.0.7
+certifi==2023.7.22
+charset-normalizer==3.3.0
+idna==3.4
+pygame==2.5.2
+typing-extensions==4.10.0
 
-# ---------------------------------------------------------
-# Production Server
-# ---------------------------------------------------------
-waitress==3.0.0      # Production-quality pure-Python WSGI server
-
-# ---------------------------------------------------------
-# Network & API Clients
-# ---------------------------------------------------------
-requests==2.31.0     # HTTP Library for Python
-urllib3==2.0.7       # HTTP Library with thread-safe connection pooling
-certifi==2023.7.22   # Python package for providing Mozilla's CA Bundle
-charset-normalizer==3.3.0 # The Real First Class Charset/Encoding Detector
-idna==3.4            # Internationalized Domain Names in Applications
-
-# ---------------------------------------------------------
-# Audio & Multimedia
-# ---------------------------------------------------------
-pygame==2.5.2        # Cross-platform library for multimedia (Audio fallback)
-
-# ---------------------------------------------------------
-# Utilities
-# ---------------------------------------------------------
-typing-extensions==4.10.0 # Backported and Experimental Type Hints
-
-# ---------------------------------------------------------
-# System Requirements (Cannot be installed via pip)
-# ---------------------------------------------------------
-# These must be installed via your OS package manager:
-#
-# Ubuntu / Raspberry Pi OS:
-#   sudo apt update
-#   sudo apt install -y ffmpeg mpg123 python3-tk
-#
-# macOS (Homebrew):
-#   brew install ffmpeg mpg123 python-tk
+# Installed separately via OS package manager:
+# ffmpeg
+# mpg123
+# python3-tk / python-tk

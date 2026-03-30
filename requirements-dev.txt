@@ -1,8 +1,5 @@
-# Development Dependencies
-# Code Quality & Formatting
-black==23.12.1   # Code formatter - automatic style consistency
-flake8==6.1.0    # Linter - catches bugs and style issues
+# Development dependencies
+# Known working pinned set for this project.
 
-# Usage:
-#   black .              # Format all Python files
-#   flake8 .             # Check for issues
+black==23.12.1
+flake8==6.1.0

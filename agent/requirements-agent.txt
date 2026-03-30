@@ -1,37 +1,18 @@
-# AnnounceFlow Agent Dependencies (Windows)
-# Used by CI workflow and local agent development.
+# Windows agent dependencies
+# Known working pinned set for this project.
 
-# ---------------------------------------------------------
-# Network & API Clients
-# ---------------------------------------------------------
-requests==2.31.0     # HTTP Library for Python
-urllib3==2.0.7       # HTTP Library with thread-safe connection pooling
-certifi==2023.7.22   # Python package for providing Mozilla's CA Bundle
-charset-normalizer==3.3.0 # The Real First Class Charset/Encoding Detector
-idna==3.4            # Internationalized Domain Names in Applications
-
-# ---------------------------------------------------------
-# Secure Credential Storage
-# ---------------------------------------------------------
-keyring==24.0.0      # OS-native keychain integration (Win/Mac/Linux)
-
-# ---------------------------------------------------------
-# System Tray GUI
-# ---------------------------------------------------------
-pystray==0.19.5      # System tray icon
-Pillow==10.1.0       # Image processing (required by pystray)
-
-# ---------------------------------------------------------
-# Audio Capture (WASAPI loopback)
-# ---------------------------------------------------------
-soundcard==0.4.4     # WASAPI loopback audio capture (no extra drivers needed)
-numpy==1.24.4        # PCM format conversion (float32 → s16le)
-scipy==1.11.3        # High-quality audio resampling (interp -> resample)
-
-# ---------------------------------------------------------
-# Build Tools (PyInstaller)
-# ---------------------------------------------------------
-pyinstaller==6.3.0   # Bundle a Python application and all its dependencies
-pyinstaller-hooks-contrib==2023.10 # Community maintained hooks
-altgraph==0.17.4     # Python graph (network) package
-pefile==2023.2.7     # Python portable executable reader
+requests==2.31.0
+urllib3==2.0.7
+certifi==2023.7.22
+charset-normalizer==3.3.0
+idna==3.4
+keyring==24.0.0
+pystray==0.19.5
+Pillow==10.1.0
+soundcard==0.4.4
+numpy==1.24.4
+scipy==1.11.3
+pyinstaller==6.3.0
+pyinstaller-hooks-contrib==2023.10
+altgraph==0.17.4
+pefile==2023.2.7

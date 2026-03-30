@@ -9,10 +9,9 @@
 [![SQLite](https://img.shields.io/badge/SQLite-WAL_Mode-003B57?logo=sqlite)](https://sqlite.org)
 [![Raspberry Pi](https://img.shields.io/badge/Raspberry%20Pi%204-Deployed-A22846?logo=raspberrypi)](https://raspberrypi.org)
 [![Tests](https://img.shields.io/badge/Tests-Pytest_Suite-2ea44f)](#testing)
-[![Version](https://img.shields.io/badge/Version-2.2.0-blue)](https://github.com/berkaybakac/announceflow/releases/tag/v2.2.0)
 [![License](https://img.shields.io/badge/License-Proprietary-red)](#license)
 
-*Running in a real store environment since January 2026*
+*Validated on Raspberry Pi 4 (1 GB RAM) in a real store environment since January 2026*
 
 </div>
 
@@ -26,9 +25,9 @@
 >
 > **Why it's hard:** LAN instability, power loss, no on-site IT support. The system must keep audio running without manual intervention during business hours.
 >
-> **Scale:** Single-branch retail, one Pi per store, deployed and operating since January 2026.
+> **Scale:** Single-branch retail, one Pi per store.
 >
-> **Tested:** Broad pytest coverage for scheduler timing, prayer-time overlap, stream health monitoring, media validation, and agent flows.
+> **Tested:** Roughly 140+ test files and 700+ test cases covering scheduler timing, prayer-time overlap, stream health monitoring, media validation, and agent flows.
 
 ---
 
@@ -37,7 +36,7 @@
 AnnounceFlow is an in-store audio control platform built for single-branch retail operations on Raspberry Pi 4.
 It handles background playlist playback, scheduled announcements, prayer-time automation, live streaming from a Windows sender, and real-time volume/mute control. Operators use a web panel for daily tasks; a Windows desktop agent handles technical setup.
 
-The implementation is shaped by field constraints: LAN instability, power loss, limited on-site technical support, and the need for zero-downtime audio continuity during business hours.
+The implementation is shaped by field constraints: LAN instability, power loss, limited on-site technical support, and the need for unattended audio continuity during business hours.
 
 Deployment is intentionally simple: SSH + rsync + systemd with manual release control.
 
@@ -167,7 +166,7 @@ Full deployment guide, release workflow, hostname standard, and agent distributi
 python -m pytest -q
 ```
 
-Verified locally with `pytest -q`: `677 passed, 14 skipped, 10 subtests passed` (March 30, 2026).
+Roughly 140+ test files and 700+ test cases cover both happy paths and field-observed failure modes.
 
 Test areas include: API and auth flows, stream lifecycle, agent login and discovery, schedule conflict detection, volume state contracts, mute restore sequences, announcement queue backlog, NTP clock skew handling, prayer-time overlap priority, scheduler loop errors, timeline slot rendering, slot map service, audio alert evaluation, media upload validation, and playback repository schema migration.
 
@@ -175,37 +174,24 @@ Test areas include: API and auth flows, stream lifecycle, agent login and discov
 
 ## Engineering Under Constraints
 
-Running on a Raspberry Pi 4 in a retail store means dealing with SD card wear, power loss, LAN instability, non-technical operators, and no remote access. These are the engineering responses to real failures encountered in the field.
+Running on a Raspberry Pi 4 in a retail store means dealing with power loss, SD-backed storage, LAN instability, non-technical operators, and no remote access. These are the engineering decisions that matter most in practice.
 
-**Power loss recovery.**
-Playlist state is persisted to SQLite after every operation. On boot, the system restores the previous playlist position but checks prayer-time and business-hours policy first. If the API call for prayer times fails, playback stays silent (fail-safe). Music never plays at the wrong time after an unexpected reboot.
+**Power loss and policy-safe recovery.**
+Playlist state is persisted after every operation. On boot, restoration is gated by prayer-time and business-hours policy, and unknown prayer data resolves to silence instead of accidental playback. This prevents unintended playback after an unexpected reboot.
 
-**SD card longevity.**
-SQLite runs in WAL mode to reduce random writes. Application logs are capped at 500 KB with 3 rotated backups. ffmpeg stream logs use a custom rotating writer capped at 2 MB with 5 backups. Partial files from failed media conversions are cleaned up immediately.
+**Priority-aware scheduling on a low-resource device.**
+One-time and recurring announcements share a queue-lite scheduler with overlap handling, silence-policy checks, duplicate suppression, and monotonic timing guards. The focus is correctness under restarts, clock shifts, and repeated operator actions.
 
-**Pi 4 audio calibration.**
-The Raspberry Pi 4 analog output has a non-linear volume curve: hardware 70% is barely audible, hardware 100% is only +4 dB above that. A sqrt-based calibration maps UI 0-100% to the usable hardware range (70-100%), so operators get predictable volume control instead of a binary loud/silent knob.
+**Defensive media pipeline for real-world voice files.**
+Operators upload audio exported from phones and messaging apps, not curated studio assets. The system detects mislabeled codecs, normalizes incompatible voice files before playback, and cleans up partial conversion output on failure.
 
-**ALSA device auto-detection.**
-Audio output device is discovered through a 6-step fallback chain: environment variable, USB DAC probe, headphone card match, then known defaults (`plughw:2,0`, `plughw:0,0`, `default`). Duplicates are skipped. This handles Pi setups with different audio hardware without manual configuration.
+**Resilient stream control plane.**
+The web panel, receiver process, and Windows agent coordinate stream ownership through heartbeat-driven liveness checks, pause/resume transitions, and health alerts. This keeps live audio control recoverable even when the sender or network behaves badly.
 
-**Codec auto-fix.**
-Operators upload voice recordings from WhatsApp or phone memos as `.mp3` files, but these are often AAC in an MP3 container. mpg123 can't play them. The system detects the codec mismatch via ffprobe and auto-converts to real MP3 before saving. Failed conversions clean up partial files.
+**Operational durability on edge hardware.**
+SQLite WAL mode, rotated logs, subprocess cleanup, fallback audio-device selection, and field diagnostics are treated as first-class concerns. The goal is a system that keeps working on-site, not just a panel that works in a clean dev environment.
 
-**UDP jitter buffer.**
-Live stream uses a 4 MB UDP FIFO buffer (configurable), which absorbs roughly 47 seconds of network jitter at mono 44.1 kHz. Overruns are non-fatal. This prevents audio dropouts during LAN congestion without requiring QoS configuration on the store's consumer-grade router.
-
-**Subprocess lifecycle.**
-Before starting a new mpg123 process, any orphan from a previous session is killed and waited on. ffmpeg stderr is drained by a dedicated daemon thread to prevent pipe buffer deadlock. Stream shutdown follows a SIGTERM-then-SIGKILL sequence with a 1-second grace window.
-
-**Clock skew immunity.**
-Schedule gap timers use `time.monotonic()` so NTP corrections don't cause announcement replays or skipped slots. Absolute schedule times use wall clock. All stored timestamps are UTC. Timezone handling falls back to UTC if the system timezone database is corrupted.
-
-**Stream observability.**
-Each stream session gets a correlation ID (`local-{pid}-{timestamp}`). The receiver tracks ALSA xruns, UDP overruns, demux errors, and network timeouts as counters, then emits a summary on session end. The web panel exposes these via `/api/stream/alerts` for real-time monitoring.
-
-**Deduplication guards.**
-Upload button double-clicks are caught by a 15-second dedup window keyed on `(filename, type, size)`. Scheduled announcements are deduped by `source:id:minute` to prevent the scheduler's 10 Hz tick from queuing duplicates. A 10-second gap is enforced between consecutive announcements.
+Detailed implementation notes, lower-level measurements, and exact runtime heuristics: [`docs/RELIABILITY.md`](docs/RELIABILITY.md)
 
 ---
 
@@ -227,10 +213,11 @@ See `.env.example` and `config.example.json` for the common local setup defaults
 
 ## What This Project Demonstrates
 
-- Running a production service on constrained edge hardware with real uptime requirements.
-- Designing for failure: power loss, network drops, clock skew, codec mismatches, orphan processes.
-- Bridging the gap between operator simplicity and engineering depth (non-technical staff use it daily).
-- A broad regression suite covering field-observed edge cases, not theoretical scenarios.
+- Reliability engineering on a low-resource edge device used by non-technical operators.
+- Priority-aware scheduling and silence-policy coordination under real timing constraints.
+- A resilient stream control plane across the web panel, receiver, and Windows agent.
+- A defensive media pipeline for real-world voice uploads and playback failures.
+- Broad regression coverage around field failures, not only happy-path behavior.
 
 ---
 
@@ -239,7 +226,7 @@ See `.env.example` and `config.example.json` for the common local setup defaults
 | Decision | Rationale |
 |----------|-----------|
 | **Vanilla JavaScript** over React/Vue | No build step, no node dependency on Pi. Keeps deployment a single rsync. The UI is operator-focused, not a complex SPA. |
-| **SQLite (WAL)** over PostgreSQL | No database server process on a 4 GB Pi. WAL mode provides the read concurrency needed for panel + scheduler. |
+| **SQLite (WAL)** over PostgreSQL | No database server process on a low-memory Pi-class device. WAL mode provides the read concurrency needed for panel + scheduler. |
 | **Session-based auth** over JWT/OAuth | Single-user system on a private LAN. Token infrastructure would add complexity with no security benefit in this threat model. |
 | **No containerization** | Docker on Pi 4 adds memory overhead and startup latency. systemd gives direct hardware access (ALSA, GPIO) and simpler debugging. |
 | **Manual deploy** (`deploy.sh` + systemd) | One Pi, one store. CI/CD pipeline would be overengineering. The deploy script is idempotent with health checks and release stamping. |
