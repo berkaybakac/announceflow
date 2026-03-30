@@ -10,10 +10,12 @@ __pycache__/
 **/.DS_Store
 Thumbs.db
 
-# Markdown Policy (repo: only selected root docs)
+# Markdown Policy (repo: only selected docs)
 *.md
 !README.md
 !CONTRIBUTING.md
+!docs/API.md
+!docs/OPERATIONS.md
 
 # Development Environment
 .env
@@ -66,7 +68,9 @@ htmlcov/
 # Script bytecode
 scripts/__pycache__/
 
-# Docs (local-only, never versioned)
-docs/
+# Docs (local-only, never versioned — except linked references)
+docs/*
+!docs/API.md
+!docs/OPERATIONS.md
 agent/VBCABLE_Driver_Pack45/
 agent/VBCABLE_Setup_x64.exe
