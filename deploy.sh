@@ -69,7 +69,8 @@ fi
 if git -C "${SCRIPT_DIR}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
     RELEASE_COMMIT="$(git -C "${SCRIPT_DIR}" rev-parse HEAD 2>/dev/null || echo unknown)"
     RELEASE_COMMIT_SHORT="$(git -C "${SCRIPT_DIR}" rev-parse --short HEAD 2>/dev/null || echo unknown)"
-    RELEASE_REF="$(git -C "${SCRIPT_DIR}" describe --tags --always --dirty 2>/dev/null || echo unknown)"
+    # Show operator-facing release as the nearest tag (no commit suffix/hash).
+    RELEASE_REF="$(git -C "${SCRIPT_DIR}" describe --tags --abbrev=0 2>/dev/null || echo unknown)"
     RELEASE_BRANCH="$(git -C "${SCRIPT_DIR}" rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
 else
     RELEASE_COMMIT="unknown"
