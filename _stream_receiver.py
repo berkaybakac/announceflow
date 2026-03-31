@@ -10,12 +10,14 @@ Transport: UDP on configurable port (default 5800)
 Usage: python _stream_receiver.py [port] [alsa_device]
 """
 import atexit
+import json
 import os
 import re
 import shlex
 import signal
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from datetime import datetime, timezone
@@ -169,6 +171,38 @@ _last_jitter_anomaly_mono: float = 0.0
 _JITTER_ANOMALY_INTERVAL: float = 60.0
 
 
+# Xrun status file: receiver writes current count so StreamManager can read it.
+_XRUN_STATUS_DIR = os.environ.get("ANNOUNCEFLOW_LOG_DIR", "").strip() or os.path.join(
+    os.path.dirname(os.path.abspath(__file__)), "logs"
+)
+XRUN_STATUS_FILE = os.path.join(_XRUN_STATUS_DIR, "receiver_xrun_status.json")
+
+
+def _write_xrun_status(counters: Dict[str, Any], correlation_id: str) -> None:
+    """Atomically write xrun count to a status file for StreamManager to read."""
+    try:
+        data = {
+            "alsa_xrun": counters.get("alsa_xrun", 0),
+            "udp_overrun": counters.get("udp_overrun", 0),
+            "mono_ts": time.monotonic(),
+            "correlation_id": correlation_id,
+        }
+        tmp_fd, tmp_path = tempfile.mkstemp(
+            dir=_XRUN_STATUS_DIR, prefix=".xrun_status_", suffix=".tmp"
+        )
+        try:
+            with os.fdopen(tmp_fd, "w") as f:
+                json.dump(data, f)
+            os.replace(tmp_path, XRUN_STATUS_FILE)
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+    except Exception:
+        pass
+
+
 def _log_jitter_anomaly(
     counters: Dict[str, Any], correlation_id: str, trigger: str
 ) -> None:
@@ -218,6 +252,7 @@ def _log_xrun_snapshot(counters: Dict[str, Any], correlation_id: str) -> None:
     snap["xrun_count_so_far"] = counters.get("alsa_xrun", 0)
     snap["udp_overrun_so_far"] = counters.get("udp_overrun", 0)
     _safe_log_error("xrun_snapshot", snap)
+    _write_xrun_status(counters, correlation_id)
 
 
 def _find_ffmpeg():

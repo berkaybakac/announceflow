@@ -59,3 +59,27 @@ SSH multiplexing is used to avoid repeated password prompts.
 4. Run test gate (`python -m pytest -q`).
 5. Validate panel health and agent download path.
 6. Commit, tag, release notes.
+
+## XRUN Auto-Restart Validation (Staging/Pi)
+
+Expected event names:
+
+- `stream_xrun_auto_restart` (success only)
+- `stream_xrun_auto_restart_aborted`
+- `stream_xrun_auto_restart_skipped_throttled`
+- `stream_xrun_auto_restart_failed`
+
+Expected payload keys (all events above):
+
+- `correlation_id`, `xruns_in_window`, `total_xruns`
+- `restarts_this_hour`, `state`, `active`, `reason`
+
+Manual race scenario (critical):
+
+1. Keep stream state `live`.
+2. Increase `logs/receiver_xrun_status.json` `alsa_xrun` to cross threshold for active `correlation_id`.
+3. Immediately trigger stream stop from panel/API.
+4. Verify no false success:
+   - terminal event should be `...aborted` or `...failed`
+   - no `stream_xrun_auto_restart` for that intent
+   - stream stays stopped (no unintended restart).
