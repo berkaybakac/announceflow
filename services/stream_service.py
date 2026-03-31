@@ -90,6 +90,8 @@ class StreamService:
         self._active_device_name: Optional[str] = None
         self._preferred_device_id: Optional[str] = None
         self._preferred_device_name: Optional[str] = None
+        # Monotonic timestamp of session start (for duration calculation).
+        self._session_started_at: float = 0.0
         # Monotonic timestamp of the last accepted heartbeat.
         # Stays 0.0 until the first heartbeat() call is received so that
         # old clients that never call heartbeat are never auto-stopped.
@@ -542,6 +544,7 @@ class StreamService:
                         source_before_stream=inherited_source,
                         last_error=None,
                     )
+                    self._session_started_at = time.monotonic()
                     self._active_correlation_id = request_correlation_id
                     self._active_device_id = request_device_id
                     self._active_device_name = request_device_name
@@ -640,6 +643,7 @@ class StreamService:
                     source_before_stream=source_before,
                     last_error=None,
                 )
+                self._session_started_at = time.monotonic()
                 self._active_correlation_id = request_correlation_id
                 self._active_device_id = request_device_id
                 self._active_device_name = request_device_name
@@ -731,13 +735,20 @@ class StreamService:
                     source_before_stream="none",
                     last_error=stop_error,
                 )
+                session_duration = round(
+                    time.monotonic() - self._session_started_at, 1
+                ) if self._session_started_at > 0 else 0.0
                 log_system(
                     "stream_stopped",
                     {
                         "restored_source": source_before,
                         "correlation_id": correlation_id,
+                        "session_duration_seconds": session_duration,
+                        "device_id": self._active_device_id,
+                        "device_name": self._active_device_name,
                     },
                 )
+                self._session_started_at = 0.0
                 self._active_correlation_id = None
                 self._active_device_id = None
                 self._active_device_name = None

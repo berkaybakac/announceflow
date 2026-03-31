@@ -85,6 +85,7 @@ def setup_logging():
 
 def main():
     """Main entry point."""
+    boot_t0 = time.monotonic()
     logger = setup_logging()
 
     logger.info("=" * 50)
@@ -215,12 +216,23 @@ def main():
     scheduler = get_scheduler()
     scheduler.start()
 
+    boot_duration_ms = round((time.monotonic() - boot_t0) * 1000)
+    log_system(
+        "boot_complete",
+        {"duration_ms": boot_duration_ms},
+    )
+    logger.info("Boot tamamlandı (%d ms)", boot_duration_ms)
+
     # Signal handlers
     def graceful_exit(signum, frame):
         logger.info("Kapatma sinyali alındı. Sistem durduruluyor...")
         signal_name = "SIGINT" if signum == signal.SIGINT else "SIGTERM"
+
+        # Log playlist session summary before shutdown
+        player.log_session_summary()
+
         log_system("shutdown", {"signal": signal_name})
-        
+
         # Stop stream receiver and playback
         try:
             from services.stream_service import get_stream_service
