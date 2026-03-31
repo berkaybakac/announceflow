@@ -69,6 +69,12 @@ def _to_float_or_none(value: object) -> Optional[float]:
         return None
 
 
+def _fmt_int_or_dash(value: Optional[object]) -> str:
+    if value is None:
+        return "-"
+    return str(int(value))
+
+
 def _iter_jsonl(path: str):
     with open(path, "r", encoding="utf-8", errors="replace") as f:
         for line in f:
@@ -89,6 +95,11 @@ def main() -> int:
     parser.add_argument("--since", default="", help="ISO lower bound")
     parser.add_argument("--until", default="", help="ISO upper bound")
     parser.add_argument("--limit", type=int, default=0, help="max rows (0=all)")
+    parser.add_argument(
+        "--compact",
+        action="store_true",
+        help="print compact columns for narrow terminals",
+    )
     args = parser.parse_args()
 
     if not os.path.isfile(args.file):
@@ -199,13 +210,20 @@ def main() -> int:
     if args.limit > 0:
         ordered = ordered[: args.limit]
 
-    print(
-        "correlation_id | start->rx_start_ms | rx_start->first_input_ms | "
-        "first_input->first_output_ms | overruns | alsa_xrun | xrun_peak_1s | "
-        "xrun_peak_60s | xrun_max_consecutive | xrun_rate_s | xrun_burst_rate_s | "
-        "demux_err | imm_exit | duration_s | rc"
-    )
-    print("-" * 220)
+    if args.compact:
+        print(
+            "correlation_id | alsa_xrun | xrun_peak_1s | xrun_peak_60s | "
+            "xrun_max_consecutive | xrun_rate_s | xrun_burst_rate_s | duration_s | rc"
+        )
+        print("-" * 120)
+    else:
+        print(
+            "correlation_id | start->rx_start_ms | rx_start->first_input_ms | "
+            "first_input->first_output_ms | overruns | alsa_xrun | xrun_peak_1s | "
+            "xrun_peak_60s | xrun_max_consecutive | xrun_rate_s | xrun_burst_rate_s | "
+            "demux_err | imm_exit | duration_s | rc"
+        )
+        print("-" * 220)
 
     for r in ordered:
         a = _ms_between(r.get("stream_started_ts"), r.get("receiver_started_ts"))
@@ -213,30 +231,28 @@ def main() -> int:
         c = _ms_between(r.get("first_input_at"), r.get("first_output_at"))
         duration_s = r.get("duration_seconds")
         duration_text = "-" if duration_s is None else f"{duration_s:.3f}"
-        peak_1s = (
-            "-"
-            if r.get("xrun_peak_1s") is None
-            else str(int(r.get("xrun_peak_1s") or 0))
-        )
-        peak_60s = (
-            "-"
-            if r.get("xrun_peak_60s") is None
-            else str(int(r.get("xrun_peak_60s") or 0))
-        )
-        max_consecutive = (
-            "-"
-            if r.get("xrun_max_consecutive") is None
-            else str(int(r.get("xrun_max_consecutive") or 0))
-        )
-        print(
-            f"{r['correlation_id']} | {_fmt_ms(a)} | {_fmt_ms(b)} | {_fmt_ms(c)} | "
-            f"{int(r.get('udp_overrun') or 0)} | {int(r.get('alsa_xrun') or 0)} | "
-            f"{peak_1s} | {peak_60s} | {max_consecutive} | "
-            f"{_fmt_rate(r.get('xrun_session_rate_per_sec'))} | "
-            f"{_fmt_rate(r.get('xrun_burst_rate_per_sec'))} | "
-            f"{int(r.get('demux_errors') or 0)} | "
-            f"{int(r.get('immediate_exit') or 0)} | {duration_text} | {r.get('return_code')}"
-        )
+        peak_1s = _fmt_int_or_dash(r.get("xrun_peak_1s"))
+        peak_60s = _fmt_int_or_dash(r.get("xrun_peak_60s"))
+        max_consecutive = _fmt_int_or_dash(r.get("xrun_max_consecutive"))
+
+        if args.compact:
+            print(
+                f"{r['correlation_id']} | {int(r.get('alsa_xrun') or 0)} | "
+                f"{peak_1s} | {peak_60s} | {max_consecutive} | "
+                f"{_fmt_rate(r.get('xrun_session_rate_per_sec'))} | "
+                f"{_fmt_rate(r.get('xrun_burst_rate_per_sec'))} | "
+                f"{duration_text} | {r.get('return_code')}"
+            )
+        else:
+            print(
+                f"{r['correlation_id']} | {_fmt_ms(a)} | {_fmt_ms(b)} | {_fmt_ms(c)} | "
+                f"{int(r.get('udp_overrun') or 0)} | {int(r.get('alsa_xrun') or 0)} | "
+                f"{peak_1s} | {peak_60s} | {max_consecutive} | "
+                f"{_fmt_rate(r.get('xrun_session_rate_per_sec'))} | "
+                f"{_fmt_rate(r.get('xrun_burst_rate_per_sec'))} | "
+                f"{int(r.get('demux_errors') or 0)} | "
+                f"{int(r.get('immediate_exit') or 0)} | {duration_text} | {r.get('return_code')}"
+            )
 
     total_sessions = len(ordered)
     xrun_sessions = sum(1 for r in ordered if int(r.get("alsa_xrun") or 0) > 0)

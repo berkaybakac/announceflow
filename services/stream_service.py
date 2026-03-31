@@ -46,6 +46,13 @@ XRUN_AUTO_RESTART_COOLDOWN_SECONDS = 60.0
 _XRUN_DRY_RUN_ENV = "ANNOUNCEFLOW_XRUN_AUTO_RECOVERY_DRY_RUN"
 _XRUN_THRESHOLD_ENV = "ANNOUNCEFLOW_XRUN_RESTART_THRESHOLD"
 _XRUN_WINDOW_ENV = "ANNOUNCEFLOW_XRUN_RESTART_WINDOW_SECONDS"
+_xrun_policy_cache_lock = threading.Lock()
+_xrun_policy_cache: Dict[str, Any] = {
+    "threshold": XRUN_RESTART_THRESHOLD,
+    "window_seconds": XRUN_RESTART_WINDOW_SECONDS,
+    "dry_run": XRUN_AUTO_RECOVERY_DRY_RUN_DEFAULT,
+    "raw_values": (None, None, None),
+}
 
 
 def _coerce_non_negative_int(value: Any, default: int = 0) -> int:
@@ -66,12 +73,18 @@ def _coerce_non_negative_float(value: Any, default: float = 0.0) -> float:
     return max(0.0, parsed)
 
 
-def _read_env_int(name: str, default: int, *, min_value: int = 1) -> int:
-    raw = os.environ.get(name)
-    if raw is None:
+def _read_env_int(
+    name: str,
+    default: int,
+    *,
+    min_value: int = 1,
+    raw: Optional[str] = None,
+) -> int:
+    raw_value = os.environ.get(name) if raw is None else raw
+    if raw_value is None:
         return default
     try:
-        value = int(str(raw).strip())
+        value = int(str(raw_value).strip())
     except (TypeError, ValueError):
         return default
     if value < min_value:
@@ -79,12 +92,18 @@ def _read_env_int(name: str, default: int, *, min_value: int = 1) -> int:
     return value
 
 
-def _read_env_float(name: str, default: float, *, min_value: float = 1.0) -> float:
-    raw = os.environ.get(name)
-    if raw is None:
+def _read_env_float(
+    name: str,
+    default: float,
+    *,
+    min_value: float = 1.0,
+    raw: Optional[str] = None,
+) -> float:
+    raw_value = os.environ.get(name) if raw is None else raw
+    if raw_value is None:
         return default
     try:
-        value = float(str(raw).strip())
+        value = float(str(raw_value).strip())
     except (TypeError, ValueError):
         return default
     if value < min_value:
@@ -92,11 +111,11 @@ def _read_env_float(name: str, default: float, *, min_value: float = 1.0) -> flo
     return value
 
 
-def _read_env_bool(name: str, default: bool) -> bool:
-    raw = os.environ.get(name)
-    if raw is None:
+def _read_env_bool(name: str, default: bool, *, raw: Optional[str] = None) -> bool:
+    raw_value = os.environ.get(name) if raw is None else raw
+    if raw_value is None:
         return default
-    text = str(raw).strip().lower()
+    text = str(raw_value).strip().lower()
     if text in {"1", "true", "yes", "on"}:
         return True
     if text in {"0", "false", "no", "off"}:
@@ -105,21 +124,41 @@ def _read_env_bool(name: str, default: bool) -> bool:
 
 
 def _get_xrun_policy_config() -> tuple[int, float, bool]:
-    threshold = _read_env_int(
-        _XRUN_THRESHOLD_ENV,
-        XRUN_RESTART_THRESHOLD,
-        min_value=1,
-    )
-    window_seconds = _read_env_float(
-        _XRUN_WINDOW_ENV,
-        XRUN_RESTART_WINDOW_SECONDS,
-        min_value=1.0,
-    )
-    dry_run = _read_env_bool(
-        _XRUN_DRY_RUN_ENV,
-        XRUN_AUTO_RECOVERY_DRY_RUN_DEFAULT,
-    )
-    return threshold, window_seconds, dry_run
+    raw_threshold = os.environ.get(_XRUN_THRESHOLD_ENV)
+    raw_window = os.environ.get(_XRUN_WINDOW_ENV)
+    raw_dry_run = os.environ.get(_XRUN_DRY_RUN_ENV)
+    raw_values = (raw_threshold, raw_window, raw_dry_run)
+    with _xrun_policy_cache_lock:
+        cached_raw_values = _xrun_policy_cache.get("raw_values", (None, None, None))
+        if raw_values == cached_raw_values:
+            return (
+                int(_xrun_policy_cache["threshold"]),
+                float(_xrun_policy_cache["window_seconds"]),
+                bool(_xrun_policy_cache["dry_run"]),
+            )
+
+        threshold = _read_env_int(
+            _XRUN_THRESHOLD_ENV,
+            XRUN_RESTART_THRESHOLD,
+            min_value=1,
+            raw=raw_threshold,
+        )
+        window_seconds = _read_env_float(
+            _XRUN_WINDOW_ENV,
+            XRUN_RESTART_WINDOW_SECONDS,
+            min_value=1.0,
+            raw=raw_window,
+        )
+        dry_run = _read_env_bool(
+            _XRUN_DRY_RUN_ENV,
+            XRUN_AUTO_RECOVERY_DRY_RUN_DEFAULT,
+            raw=raw_dry_run,
+        )
+        _xrun_policy_cache["threshold"] = threshold
+        _xrun_policy_cache["window_seconds"] = window_seconds
+        _xrun_policy_cache["dry_run"] = dry_run
+        _xrun_policy_cache["raw_values"] = raw_values
+        return threshold, window_seconds, dry_run
 
 
 def _new_correlation_id() -> str:
