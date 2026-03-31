@@ -12,7 +12,7 @@ import time
 from typing import Optional, Callable
 
 import database as db
-from logger import log_play, log_volume, log_error
+from logger import log_play, log_volume, log_error, log_system
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +72,12 @@ class AudioPlayer:
         self._stop_event = threading.Event()
         self._playback_session: int = 0
         self._user_on_track_end = on_track_end
+
+        # Session counters for daily summary
+        self._session_tracks_played: int = 0
+        self._session_tracks_skipped: int = 0
+        self._session_play_started_at: float = 0.0
+        self._session_play_seconds: float = 0.0
 
         # Playlist support
         self._playlist: list = []  # List of file paths
@@ -370,6 +376,10 @@ class AudioPlayer:
             if next_index >= total_tracks:
                 if self._playlist_loop:
                     next_index = 0
+                    log_play(
+                        "playlist_loop_restart",
+                        {"total_tracks": total_tracks, "loop_cycle": self._session_tracks_played // total_tracks + 1 if total_tracks else 1},
+                    )
                 else:
                     self._playlist_active = False
                     db.save_playlist_state(active=False)
@@ -398,6 +408,8 @@ class AudioPlayer:
                     "track_start",
                     {"file": track_name, "index": next_index + 1, "total": total_tracks},
                 )
+                self._session_tracks_played += 1
+                self._session_play_started_at = time.monotonic()
                 return True
 
             logger.error(f"Playlist track failed to start, skipping: {track_name}")
@@ -405,6 +417,7 @@ class AudioPlayer:
                 "playlist_track_start_failed",
                 {"file": track_name, "index": next_index + 1},
             )
+            self._session_tracks_skipped += 1
             cursor = next_index
             checked += 1
 
@@ -816,6 +829,28 @@ class AudioPlayer:
         state["playlist"] = self.get_playlist_state()
         return state
 
+    def log_session_summary(self) -> None:
+        """Log cumulative playback stats and reset counters."""
+        # Account for in-progress track
+        play_seconds = self._session_play_seconds
+        if self._session_play_started_at > 0:
+            play_seconds += time.monotonic() - self._session_play_started_at
+        if self._session_tracks_played == 0 and self._session_tracks_skipped == 0:
+            return
+        log_system(
+            "playlist_session_summary",
+            {
+                "tracks_played": self._session_tracks_played,
+                "tracks_skipped": self._session_tracks_skipped,
+                "play_seconds": round(play_seconds, 1),
+                "play_minutes": round(play_seconds / 60, 1),
+            },
+        )
+        self._session_tracks_played = 0
+        self._session_tracks_skipped = 0
+        self._session_play_seconds = 0.0
+        self._session_play_started_at = 0.0
+
     def _start_monitor_mpg123(
         self, process: Optional[subprocess.Popen], playback_session: int
     ):
@@ -844,6 +879,9 @@ class AudioPlayer:
 
                     logger.info("Track ended (mpg123)")
                     log_play("track_end", {"backend": "mpg123"})
+                    if self._session_play_started_at > 0:
+                        self._session_play_seconds += time.monotonic() - self._session_play_started_at
+                        self._session_play_started_at = 0.0
 
                     if self.on_track_end:
                         self.on_track_end()
@@ -879,6 +917,9 @@ class AudioPlayer:
 
                     logger.info("Track ended (pygame)")
                     log_play("track_end", {"backend": "pygame"})
+                    if self._session_play_started_at > 0:
+                        self._session_play_seconds += time.monotonic() - self._session_play_started_at
+                        self._session_play_started_at = 0.0
 
                     if self.on_track_end:
                         self.on_track_end()

@@ -155,9 +155,22 @@ def log_volume(event: str, data: Optional[Dict[str, Any]] = None) -> None:
     log_event(EventCategory.VOLUME, event, data)
 
 
+_web_event_count: int = 0
+
+
 def log_web(event: str, data: Optional[Dict[str, Any]] = None) -> None:
     """Log a WEB event."""
+    global _web_event_count
+    _web_event_count += 1
     log_event(EventCategory.WEB, event, data)
+
+
+def get_and_reset_web_event_count() -> int:
+    """Return accumulated web event count and reset to zero."""
+    global _web_event_count
+    count = _web_event_count
+    _web_event_count = 0
+    return count
 
 
 def log_error(event: str, data: Optional[Dict[str, Any]] = None) -> None:

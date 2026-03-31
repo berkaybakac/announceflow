@@ -12,7 +12,7 @@ from typing import Optional, Any
 
 import database as db
 from player import get_player
-from logger import log_trigger, log_schedule, log_prayer, log_error
+from logger import log_trigger, log_schedule, log_prayer, log_error, log_system, get_and_reset_web_event_count
 from services.config_service import load_config
 from services.schedule_conflict_service import resolve_duration_seconds
 from services.silence_policy import (
@@ -111,6 +111,14 @@ class Scheduler:
         }
         self._announcement_health_log_interval_seconds: int = 60
         self._announcement_last_health_log_monotonic: float = 0.0
+        self._system_health_log_interval_seconds: int = 300  # 5 minutes
+        self._system_health_last_log_monotonic: float = 0.0
+        # Daily usage summary counters (reset at midnight)
+        self._daily_current_date: Optional[str] = None
+        self._daily_triggers_one_time: int = 0
+        self._daily_triggers_recurring: int = 0
+        self._daily_prayer_silences: int = 0
+        self._daily_working_hours_blocks: int = 0
         self._announcement_enqueue_seq: int = 0
         self._media_type_audited: bool = False
         # Per-tick guard: at most one _play_media call succeeds per scheduler tick.
@@ -612,6 +620,104 @@ class Scheduler:
             }
         log_schedule("announcement_queue_health", snapshot)
 
+    def _log_system_health(self) -> None:
+        now_mono = time.monotonic()
+        if (
+            self._system_health_last_log_monotonic
+            and (now_mono - self._system_health_last_log_monotonic)
+            < self._system_health_log_interval_seconds
+        ):
+            return
+        self._system_health_last_log_monotonic = now_mono
+        try:
+            import shutil
+            disk = shutil.disk_usage("/")
+            disk_used_pct = round(disk.used / disk.total * 100, 1)
+            disk_free_mb = disk.free // (1024 * 1024)
+        except Exception:
+            disk_used_pct = -1
+            disk_free_mb = -1
+        try:
+            with open("/proc/meminfo") as f:
+                meminfo = {}
+                for line in f:
+                    parts = line.split()
+                    if parts[0] in ("MemTotal:", "MemAvailable:"):
+                        meminfo[parts[0].rstrip(":")] = int(parts[1])
+                mem_total_mb = meminfo.get("MemTotal", 0) // 1024
+                mem_available_mb = meminfo.get("MemAvailable", 0) // 1024
+        except Exception:
+            mem_total_mb = -1
+            mem_available_mb = -1
+        try:
+            with open("/proc/loadavg") as f:
+                load_1m = float(f.read().split()[0])
+        except Exception:
+            load_1m = -1.0
+        # WiFi signal quality (Linux/Pi only)
+        wifi_signal_dbm = -1
+        wifi_link_quality = ""
+        try:
+            import subprocess as _sp
+            iw_out = _sp.check_output(
+                ["iwconfig", "wlan0"], stderr=_sp.DEVNULL, timeout=3
+            ).decode(errors="replace")
+            for iw_line in iw_out.splitlines():
+                if "Signal level" in iw_line:
+                    m = __import__("re").search(r"Signal level[=:](-?\d+)", iw_line)
+                    if m:
+                        wifi_signal_dbm = int(m.group(1))
+                if "Link Quality" in iw_line:
+                    m = __import__("re").search(r"Link Quality[=:](\S+)", iw_line)
+                    if m:
+                        wifi_link_quality = m.group(1)
+        except Exception:
+            pass
+        player = get_player()
+        player_state = player.get_state()
+        stream_svc = get_stream_service()
+        stream_status = stream_svc.status()
+        log_system(
+            "system_health",
+            {
+                "disk_used_pct": disk_used_pct,
+                "disk_free_mb": disk_free_mb,
+                "mem_total_mb": mem_total_mb,
+                "mem_available_mb": mem_available_mb,
+                "load_1m": load_1m,
+                "wifi_signal_dbm": wifi_signal_dbm,
+                "wifi_link_quality": wifi_link_quality,
+                "player_playing": player_state.get("is_playing", False),
+                "stream_active": stream_status.get("active", False),
+            },
+        )
+
+    def _check_daily_usage_summary(self) -> None:
+        """Emit a daily_usage_summary at midnight boundary and reset counters."""
+        today = datetime.now().strftime("%Y-%m-%d")
+        if self._daily_current_date is None:
+            self._daily_current_date = today
+            return
+        if today == self._daily_current_date:
+            return
+        # Date changed — emit summary for the previous day
+        log_system(
+            "daily_usage_summary",
+            {
+                "date": self._daily_current_date,
+                "triggers_one_time": self._daily_triggers_one_time,
+                "triggers_recurring": self._daily_triggers_recurring,
+                "prayer_silences": self._daily_prayer_silences,
+                "working_hours_blocks": self._daily_working_hours_blocks,
+                "web_events": get_and_reset_web_event_count(),
+            },
+        )
+        self._daily_current_date = today
+        self._daily_triggers_one_time = 0
+        self._daily_triggers_recurring = 0
+        self._daily_prayer_silences = 0
+        self._daily_working_hours_blocks = 0
+
     def _queue_announcement(
         self,
         *,
@@ -1070,6 +1176,7 @@ class Scheduler:
                         "reason_code": silence_decision.get("reason_code", "unknown"),
                     },
                 )
+                self._daily_prayer_silences += 1
 
             # Stop only if something is actually playing.
             if player.is_playing or player._playlist_active:
@@ -1160,6 +1267,7 @@ class Scheduler:
                         "tracks": len(resume_state["playlist"]),
                     },
                 )
+                self._daily_working_hours_blocks += 1
 
             # Use stop() instead of stop_playlist() to preserve DB state
             if player.is_playing or player._playlist_active:
@@ -1324,6 +1432,8 @@ class Scheduler:
                     silence_blocked=prayer_pause_active,
                 )
                 self._log_announcement_queue_health()
+                self._log_system_health()
+                self._check_daily_usage_summary()
 
                 self._run_reconcile_watchdog(config, player, silence_decision)
 
@@ -1470,6 +1580,7 @@ class Scheduler:
                             "delay_seconds": int(time_diff),
                         },
                     )
+                    self._daily_triggers_one_time += 1
                     self._play_media(
                         schedule["filepath"],
                         schedule_id,
@@ -1701,6 +1812,7 @@ class Scheduler:
                             "schedule_id": schedule_id,
                         },
                     )
+                    self._daily_triggers_recurring += 1
                     self._play_media(
                         schedule["filepath"],
                         schedule_id,

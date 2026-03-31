@@ -140,6 +140,86 @@ def _safe_log_error(event: str, data: dict) -> None:
         pass
 
 
+def _read_proc_stat_snapshot() -> dict:
+    """Read CPU and memory from /proc on Linux. Returns fallbacks on other OS."""
+    snapshot: Dict[str, Any] = {"cpu_pct": -1.0, "mem_available_mb": -1}
+    try:
+        with open("/proc/loadavg") as f:
+            snapshot["load_1m"] = float(f.read().split()[0])
+    except Exception:
+        snapshot["load_1m"] = -1.0
+    try:
+        with open("/proc/meminfo") as f:
+            for line in f:
+                if line.startswith("MemAvailable:"):
+                    snapshot["mem_available_mb"] = int(line.split()[1]) // 1024
+                    break
+    except Exception:
+        pass
+    return snapshot
+
+
+# Throttle xrun snapshots: at most one per 30 seconds to avoid log flood.
+_last_xrun_snapshot_mono: float = 0.0
+_XRUN_SNAPSHOT_INTERVAL: float = 30.0
+
+
+# Throttle jitter anomaly logs: at most one per 60 seconds.
+_last_jitter_anomaly_mono: float = 0.0
+_JITTER_ANOMALY_INTERVAL: float = 60.0
+
+
+def _log_jitter_anomaly(
+    counters: Dict[str, Any], correlation_id: str, trigger: str
+) -> None:
+    """Log network-level anomaly when UDP overrun or rapid xrun burst occurs.
+
+    UDP circular buffer overrun means the sender is pushing data faster
+    than ffmpeg can consume, OR packets arrived in a burst after a gap
+    (network jitter).  Logging this alongside xrun helps isolate whether
+    the root cause is sender-side (CPU spike), network (WiFi jitter), or
+    Pi-side (ALSA stall).  Throttled to one per 60 s.
+    """
+    global _last_jitter_anomaly_mono
+    now = time.monotonic()
+    if now - _last_jitter_anomaly_mono < _JITTER_ANOMALY_INTERVAL:
+        return
+    _last_jitter_anomaly_mono = now
+
+    snap = _read_proc_stat_snapshot()
+    _safe_log_error(
+        "stream_jitter_anomaly",
+        {
+            "correlation_id": correlation_id,
+            "trigger": trigger,
+            "udp_overrun_total": counters.get("udp_overrun", 0),
+            "alsa_xrun_total": counters.get("alsa_xrun", 0),
+            "load_1m": snap.get("load_1m", -1.0),
+            "mem_available_mb": snap.get("mem_available_mb", -1),
+        },
+    )
+
+
+def _log_xrun_snapshot(counters: Dict[str, Any], correlation_id: str) -> None:
+    """Log a system-state snapshot at the moment of an ALSA xrun.
+
+    Captures CPU load and available RAM so post-mortem analysis can
+    distinguish Pi overload (high CPU) from network starvation (low CPU
+    + jitter).  Throttled to one snapshot per 30 s.
+    """
+    global _last_xrun_snapshot_mono
+    now = time.monotonic()
+    if now - _last_xrun_snapshot_mono < _XRUN_SNAPSHOT_INTERVAL:
+        return
+    _last_xrun_snapshot_mono = now
+
+    snap = _read_proc_stat_snapshot()
+    snap["correlation_id"] = correlation_id
+    snap["xrun_count_so_far"] = counters.get("alsa_xrun", 0)
+    snap["udp_overrun_so_far"] = counters.get("udp_overrun", 0)
+    _safe_log_error("xrun_snapshot", snap)
+
+
 def _find_ffmpeg():
     """Return path to ffmpeg binary."""
     if getattr(sys, "frozen", False):
@@ -370,12 +450,14 @@ def _process_ffmpeg_line(
         if counters.get("first_overrun_at") is None:
             counters["first_overrun_at"] = event_ts
         counters["repeat_context"] = "udp_overrun"
+        _log_jitter_anomaly(counters, correlation_id, "udp_overrun")
     if "alsa buffer xrun" in lower:
         counters["alsa_xrun"] += 1
         counters["last_xrun_at"] = event_ts
         if counters.get("first_xrun_at") is None:
             counters["first_xrun_at"] = event_ts
         counters["repeat_context"] = "alsa_xrun"
+        _log_xrun_snapshot(counters, correlation_id)
     if "error during demuxing" in lower:
         counters["demux_errors"] += 1
     if "immediate exit requested" in lower:
