@@ -27,7 +27,7 @@
 >
 > **Scale:** Single-branch retail, one Pi per store.
 >
-> **Tested:** Roughly 140+ test files and 700+ test cases covering scheduler timing, prayer-time overlap, stream health monitoring, media validation, and agent flows.
+> **Tested:** ~700 test cases across 140+ files.
 
 ---
 
@@ -166,15 +166,11 @@ Full deployment guide, release workflow, hostname standard, and agent distributi
 python -m pytest -q
 ```
 
-Roughly 140+ test files and 700+ test cases cover both happy paths and field-observed failure modes.
-
-Test areas include: API and auth flows, stream lifecycle, agent login and discovery, schedule conflict detection, volume state contracts, mute restore sequences, announcement queue backlog, NTP clock skew handling, prayer-time overlap priority, scheduler loop errors, timeline slot rendering, slot map service, audio alert evaluation, media upload validation, and playback repository schema migration.
+Covers both happy paths and field-observed failure modes across scheduling, stream lifecycle, agent flows, volume contracts, prayer-time overlap, media validation, and more.
 
 ---
 
 ## Engineering Under Constraints
-
-Running on a Raspberry Pi 4 in a retail store means dealing with power loss, SD-backed storage, LAN instability, non-technical operators, and no remote access. These are the engineering decisions that matter most in practice.
 
 **Power loss and policy-safe recovery.**
 Playlist state is persisted after every operation. On boot, restoration is gated by prayer-time and business-hours policy, and unknown prayer data resolves to silence instead of accidental playback. This prevents unintended playback after an unexpected reboot.
@@ -208,16 +204,6 @@ Detailed implementation notes, lower-level measurements, and exact runtime heuri
 | `ANNOUNCEFLOW_LOG_DIR` | Custom directory for rotated logs |
 
 See `.env.example` and `config.example.json` for the common local setup defaults.
-
----
-
-## What This Project Demonstrates
-
-- Reliability engineering on a low-resource edge device used by non-technical operators.
-- Priority-aware scheduling and silence-policy coordination under real timing constraints.
-- A resilient stream control plane across the web panel, receiver, and Windows agent.
-- A defensive media pipeline for real-world voice uploads and playback failures.
-- Broad regression coverage around field failures, not only happy-path behavior.
 
 ---
 
