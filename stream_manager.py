@@ -9,13 +9,14 @@ Responsibilities:
 
 V1 scope: single receiver, same LAN, process-based.
 """
+import json
 import logging
 import os
 import subprocess
 import sys
 import threading
 import time
-from typing import Optional
+from typing import Any, Dict, Optional
 
 from logger import log_system
 
@@ -360,3 +361,17 @@ class StreamManager:
             self._process = None
             return False
         return True
+
+    def read_xrun_status(self) -> Optional[Dict[str, Any]]:
+        """Read xrun status written by the receiver subprocess.
+
+        Returns dict with keys alsa_xrun, udp_overrun, mono_ts,
+        correlation_id — or None if unavailable.
+        """
+        from _stream_receiver import XRUN_STATUS_FILE
+
+        try:
+            with open(XRUN_STATUS_FILE) as f:
+                return json.load(f)
+        except (OSError, json.JSONDecodeError, ValueError):
+            return None
