@@ -27,6 +27,7 @@ CRITICAL_EVENTS = {
 WARN_EVENT_THRESHOLDS = {
     "stream_receiver_alsa_xrun": 3,
     "stream_receiver_udp_overrun": 1,
+    "stream_xrun_auto_restart_dry_run": 1,
 }
 
 _WARN_EVENT_COUNT_KEYS = {
@@ -43,6 +44,7 @@ _CRITICAL_REASON_TEXT = {
 _WARN_REASON_TEXT = {
     "stream_receiver_alsa_xrun": "ALSA XRUN arttı",
     "stream_receiver_udp_overrun": "UDP overrun tespit edildi",
+    "stream_xrun_auto_restart_dry_run": "XRUN dry-run alarm eşiği aşıldı",
 }
 
 
@@ -189,4 +191,3 @@ def get_audio_alerts(
         "window_minutes": window,
         "counts": counts,
     }
-

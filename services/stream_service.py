@@ -12,6 +12,8 @@ Responsibilities:
 V1 scope: single session, same LAN, no DB persistence for stream state.
 """
 import logging
+import math
+import os
 import threading
 import time
 from datetime import datetime, timezone
@@ -34,10 +36,90 @@ AGENT_ONLINE_TTL_SECONDS = 20.0
 XRUN_RESTART_THRESHOLD = 100
 # Rolling window duration in seconds (5 minutes).
 XRUN_RESTART_WINDOW_SECONDS = 300.0
+# By default, only emit alarms/telemetry when threshold is exceeded.
+XRUN_AUTO_RECOVERY_DRY_RUN_DEFAULT = True
 # Max auto-restarts per hour to prevent restart loops.
 XRUN_MAX_RESTARTS_PER_HOUR = 3
 # Cooldown after a successful auto-restart to avoid burst restart loops.
 XRUN_AUTO_RESTART_COOLDOWN_SECONDS = 60.0
+
+_XRUN_DRY_RUN_ENV = "ANNOUNCEFLOW_XRUN_AUTO_RECOVERY_DRY_RUN"
+_XRUN_THRESHOLD_ENV = "ANNOUNCEFLOW_XRUN_RESTART_THRESHOLD"
+_XRUN_WINDOW_ENV = "ANNOUNCEFLOW_XRUN_RESTART_WINDOW_SECONDS"
+
+
+def _coerce_non_negative_int(value: Any, default: int = 0) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(0, parsed)
+
+
+def _coerce_non_negative_float(value: Any, default: float = 0.0) -> float:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return default
+    if not math.isfinite(parsed):
+        return default
+    return max(0.0, parsed)
+
+
+def _read_env_int(name: str, default: int, *, min_value: int = 1) -> int:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return default
+    if value < min_value:
+        return default
+    return value
+
+
+def _read_env_float(name: str, default: float, *, min_value: float = 1.0) -> float:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = float(str(raw).strip())
+    except (TypeError, ValueError):
+        return default
+    if value < min_value:
+        return default
+    return value
+
+
+def _read_env_bool(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    text = str(raw).strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
+def _get_xrun_policy_config() -> tuple[int, float, bool]:
+    threshold = _read_env_int(
+        _XRUN_THRESHOLD_ENV,
+        XRUN_RESTART_THRESHOLD,
+        min_value=1,
+    )
+    window_seconds = _read_env_float(
+        _XRUN_WINDOW_ENV,
+        XRUN_RESTART_WINDOW_SECONDS,
+        min_value=1.0,
+    )
+    dry_run = _read_env_bool(
+        _XRUN_DRY_RUN_ENV,
+        XRUN_AUTO_RECOVERY_DRY_RUN_DEFAULT,
+    )
+    return threshold, window_seconds, dry_run
 
 
 def _new_correlation_id() -> str:
@@ -205,14 +287,30 @@ class StreamService:
         if status is None:
             return False
 
-        try:
-            current_xrun = int(status.get("alsa_xrun") or 0)
-        except (TypeError, ValueError):
-            current_xrun = 0
+        threshold, window_seconds, dry_run = _get_xrun_policy_config()
+        current_xrun = _coerce_non_negative_int(status.get("alsa_xrun"), default=0)
         if current_xrun <= 0:
             return False
 
         status_correlation_id = str(status.get("correlation_id") or "").strip() or None
+        status_peak_1s = _coerce_non_negative_int(status.get("xrun_peak_1s"), default=0)
+        status_peak_60s = _coerce_non_negative_int(status.get("xrun_peak_60s"), default=0)
+        status_max_consecutive = _coerce_non_negative_int(
+            status.get("xrun_max_consecutive"),
+            default=0,
+        )
+        status_current_consecutive = _coerce_non_negative_int(
+            status.get("xrun_current_consecutive"),
+            default=0,
+        )
+        status_session_rate = _coerce_non_negative_float(
+            status.get("xrun_session_rate_per_sec"),
+            default=0.0,
+        )
+        status_burst_rate = _coerce_non_negative_float(
+            status.get("xrun_burst_rate_per_sec"),
+            default=0.0,
+        )
         now = time.monotonic()
         intent_id: Optional[str] = None
         correlation_id: Optional[str] = None
@@ -220,6 +318,26 @@ class StreamService:
         restarts_this_hour = 0
         event_name: Optional[str] = None
         event_payload: Optional[dict] = None
+
+        def _xrun_event_payload(*, reason: str, restarts_count: int, state: str, active: bool) -> dict:
+            return {
+                "correlation_id": correlation_id,
+                "xruns_in_window": xruns_in_window,
+                "total_xruns": current_xrun,
+                "restarts_this_hour": restarts_count,
+                "state": state,
+                "active": active,
+                "reason": reason,
+                "dry_run": dry_run,
+                "threshold": threshold,
+                "window_seconds": window_seconds,
+                "xrun_peak_1s": status_peak_1s,
+                "xrun_peak_60s": status_peak_60s,
+                "xrun_max_consecutive": status_max_consecutive,
+                "xrun_current_consecutive": status_current_consecutive,
+                "xrun_session_rate_per_sec": status_session_rate,
+                "xrun_burst_rate_per_sec": status_burst_rate,
+            }
 
         with self._lock:
             if not self._status.active or self._status.state != "live":
@@ -240,13 +358,13 @@ class StreamService:
                 return False
 
             # Slide window if it expired.
-            if now - self._xrun_window_start_mono > XRUN_RESTART_WINDOW_SECONDS:
+            if now - self._xrun_window_start_mono > window_seconds:
                 self._xrun_window_start_mono = now
                 self._xrun_window_start_count = current_xrun
 
             xruns_in_window = current_xrun - self._xrun_window_start_count
             self._xrun_last_known_count = current_xrun
-            if xruns_in_window < XRUN_RESTART_THRESHOLD:
+            if xruns_in_window < threshold:
                 return False
 
             # Throttle: max N restarts per hour.
@@ -257,26 +375,32 @@ class StreamService:
             restarts_this_hour = len(self._xrun_auto_restart_times)
             if restarts_this_hour >= XRUN_MAX_RESTARTS_PER_HOUR:
                 event_name = "stream_xrun_auto_restart_skipped_throttled"
-                event_payload = {
-                    "correlation_id": correlation_id,
-                    "xruns_in_window": xruns_in_window,
-                    "total_xruns": current_xrun,
-                    "restarts_this_hour": restarts_this_hour,
-                    "state": self._status.state,
-                    "active": bool(self._status.active),
-                    "reason": "restart_budget_exhausted",
-                }
+                event_payload = _xrun_event_payload(
+                    reason="restart_budget_exhausted",
+                    restarts_count=restarts_this_hour,
+                    state=self._status.state,
+                    active=bool(self._status.active),
+                )
             elif now < self._xrun_restart_cooldown_until_mono:
                 event_name = "stream_xrun_auto_restart_skipped_cooldown"
-                event_payload = {
-                    "correlation_id": correlation_id,
-                    "xruns_in_window": xruns_in_window,
-                    "total_xruns": current_xrun,
-                    "restarts_this_hour": restarts_this_hour,
-                    "state": self._status.state,
-                    "active": bool(self._status.active),
-                    "reason": "cooldown_active",
-                }
+                event_payload = _xrun_event_payload(
+                    reason="cooldown_active",
+                    restarts_count=restarts_this_hour,
+                    state=self._status.state,
+                    active=bool(self._status.active),
+                )
+            elif dry_run:
+                # Re-arm window after each dry-run alarm to avoid repeating the
+                # same threshold crossing every monitor tick.
+                self._xrun_window_start_mono = now
+                self._xrun_window_start_count = current_xrun
+                event_name = "stream_xrun_auto_restart_dry_run"
+                event_payload = _xrun_event_payload(
+                    reason="threshold_exceeded_dry_run",
+                    restarts_count=restarts_this_hour,
+                    state=self._status.state,
+                    active=bool(self._status.active),
+                )
             else:
                 self._xrun_restart_intent_seq += 1
                 intent_id = (
@@ -299,6 +423,15 @@ class StreamService:
                     xruns_in_window,
                     correlation_id,
                 )
+            elif event_name == "stream_xrun_auto_restart_dry_run":
+                logger.warning(
+                    "[DRY-RUN ALARM] XRUN threshold exceeded "
+                    "(xruns_in_window=%d threshold=%d window_seconds=%.1f cid=%s)",
+                    xruns_in_window,
+                    threshold,
+                    window_seconds,
+                    correlation_id,
+                )
             log_system(event_name, event_payload)
             return False
 
@@ -309,7 +442,7 @@ class StreamService:
             "StreamService: xrun auto-restart decision "
             "(xruns_in_window=%d threshold=%d cid=%s intent_id=%s)",
             xruns_in_window,
-            XRUN_RESTART_THRESHOLD,
+            threshold,
             correlation_id,
             intent_id,
         )
@@ -318,15 +451,12 @@ class StreamService:
             with self._lock:
                 if self._xrun_restart_intent_id == intent_id:
                     self._xrun_restart_intent_id = None
-                event_payload = {
-                    "correlation_id": correlation_id,
-                    "xruns_in_window": xruns_in_window,
-                    "total_xruns": current_xrun,
-                    "restarts_this_hour": len(self._xrun_auto_restart_times),
-                    "state": self._status.state,
-                    "active": bool(self._status.active),
-                    "reason": "stop_receiver_failed",
-                }
+                event_payload = _xrun_event_payload(
+                    reason="stop_receiver_failed",
+                    restarts_count=len(self._xrun_auto_restart_times),
+                    state=self._status.state,
+                    active=bool(self._status.active),
+                )
             log_system("stream_xrun_auto_restart_failed", event_payload)
             return False
 
@@ -346,15 +476,12 @@ class StreamService:
             if abort_reason:
                 if self._xrun_restart_intent_id == intent_id:
                     self._xrun_restart_intent_id = None
-                event_payload = {
-                    "correlation_id": correlation_id,
-                    "xruns_in_window": xruns_in_window,
-                    "total_xruns": current_xrun,
-                    "restarts_this_hour": len(self._xrun_auto_restart_times),
-                    "state": self._status.state,
-                    "active": bool(self._status.active),
-                    "reason": abort_reason,
-                }
+                event_payload = _xrun_event_payload(
+                    reason=abort_reason,
+                    restarts_count=len(self._xrun_auto_restart_times),
+                    state=self._status.state,
+                    active=bool(self._status.active),
+                )
                 logger.info(
                     "StreamService: xrun auto-restart aborted, "
                     "reason=%s cid=%s intent_id=%s",
@@ -372,15 +499,12 @@ class StreamService:
                     if self._xrun_restart_intent_id == intent_id:
                         self._xrun_restart_intent_id = None
                     event_name = "stream_xrun_auto_restart_failed"
-                    event_payload = {
-                        "correlation_id": correlation_id,
-                        "xruns_in_window": xruns_in_window,
-                        "total_xruns": current_xrun,
-                        "restarts_this_hour": len(self._xrun_auto_restart_times),
-                        "state": self._status.state,
-                        "active": bool(self._status.active),
-                        "reason": "start_receiver_failed",
-                    }
+                    event_payload = _xrun_event_payload(
+                        reason="start_receiver_failed",
+                        restarts_count=len(self._xrun_auto_restart_times),
+                        state=self._status.state,
+                        active=bool(self._status.active),
+                    )
                 else:
                     restart_at = time.monotonic()
                     self._xrun_auto_restart_times.append(restart_at)
@@ -389,20 +513,17 @@ class StreamService:
                         restart_at + XRUN_AUTO_RESTART_COOLDOWN_SECONDS
                     )
                     event_name = "stream_xrun_auto_restart"
-                    event_payload = {
-                        "correlation_id": correlation_id,
-                        "xruns_in_window": xruns_in_window,
-                        "total_xruns": current_xrun,
-                        "restarts_this_hour": len(self._xrun_auto_restart_times),
-                        "state": self._status.state,
-                        "active": bool(self._status.active),
-                        "reason": "threshold_exceeded",
-                    }
+                    event_payload = _xrun_event_payload(
+                        reason="threshold_exceeded",
+                        restarts_count=len(self._xrun_auto_restart_times),
+                        state=self._status.state,
+                        active=bool(self._status.active),
+                    )
                     logger.warning(
                         "StreamService: xrun auto-restart executed "
                         "(xruns_in_window=%d threshold=%d cid=%s intent_id=%s)",
                         xruns_in_window,
-                        XRUN_RESTART_THRESHOLD,
+                        threshold,
                         correlation_id,
                         intent_id,
                     )

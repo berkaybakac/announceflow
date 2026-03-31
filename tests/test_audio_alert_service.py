@@ -81,6 +81,27 @@ def test_audio_alerts_warn_when_xrun_threshold_reached(tmp_path: Path):
     assert result["last_event_ts"] == _iso_utc(now - timedelta(minutes=1))
 
 
+def test_audio_alerts_warn_when_xrun_dry_run_alarm_seen(tmp_path: Path):
+    now = datetime(2026, 3, 25, 12, 0, tzinfo=timezone.utc)
+    events_file = tmp_path / "events.jsonl"
+    _write_jsonl(
+        events_file,
+        [
+            _event(
+                now - timedelta(minutes=1),
+                "stream_xrun_auto_restart_dry_run",
+                {"correlation_id": "cid-1"},
+            ),
+        ],
+    )
+
+    result = get_audio_alerts(window_minutes=10, events_file=str(events_file), now_utc=now)
+
+    assert result["level"] == "warn"
+    assert any("dry-run" in reason for reason in result["reasons"])
+    assert result["counts"]["stream_xrun_auto_restart_dry_run"] == 1
+
+
 def test_audio_alerts_critical_has_priority_over_warn(tmp_path: Path):
     now = datetime(2026, 3, 25, 12, 0, tzinfo=timezone.utc)
     events_file = tmp_path / "events.jsonl"
@@ -133,4 +154,3 @@ def test_audio_alerts_skip_malformed_json_lines(tmp_path: Path):
     assert result["level"] == "critical"
     assert any("beklenmedik şekilde durdu" in reason for reason in result["reasons"])
     assert result["counts"]["stream_receiver_died"] == 1
-

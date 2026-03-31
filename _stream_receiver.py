@@ -20,6 +20,7 @@ import sys
 import tempfile
 import threading
 import time
+from collections import deque
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
@@ -176,16 +177,126 @@ _XRUN_STATUS_DIR = os.environ.get("ANNOUNCEFLOW_LOG_DIR", "").strip() or os.path
     os.path.dirname(os.path.abspath(__file__)), "logs"
 )
 XRUN_STATUS_FILE = os.path.join(_XRUN_STATUS_DIR, "receiver_xrun_status.json")
+_last_xrun_status_write_mono: float = 0.0
+_XRUN_STATUS_WRITE_INTERVAL: float = 1.0
 
 
-def _write_xrun_status(counters: Dict[str, Any], correlation_id: str) -> None:
-    """Atomically write xrun count to a status file for StreamManager to read."""
+def _parse_utc_ts(raw: Any) -> Optional[datetime]:
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
     try:
+        dt = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _ensure_xrun_telemetry_state(counters: Dict[str, Any]) -> None:
+    if not isinstance(counters.get("xrun_events_last_1s"), deque):
+        counters["xrun_events_last_1s"] = deque()
+    if not isinstance(counters.get("xrun_events_last_60s"), deque):
+        counters["xrun_events_last_60s"] = deque()
+    counters["xrun_peak_1s"] = int(counters.get("xrun_peak_1s") or 0)
+    counters["xrun_peak_60s"] = int(counters.get("xrun_peak_60s") or 0)
+    counters["xrun_current_consecutive"] = int(counters.get("xrun_current_consecutive") or 0)
+    counters["xrun_max_consecutive"] = int(counters.get("xrun_max_consecutive") or 0)
+
+
+def _record_xrun_hits(counters: Dict[str, Any], hit_count: int, event_ts: str) -> None:
+    if hit_count <= 0:
+        return
+    _ensure_xrun_telemetry_state(counters)
+    counters["alsa_xrun"] = int(counters.get("alsa_xrun") or 0) + int(hit_count)
+    counters["last_xrun_at"] = event_ts
+    if counters.get("first_xrun_at") is None:
+        counters["first_xrun_at"] = event_ts
+    counters["repeat_context"] = "alsa_xrun"
+
+    now_mono = time.monotonic()
+    hits_1s = counters["xrun_events_last_1s"]
+    hits_60s = counters["xrun_events_last_60s"]
+    if hit_count == 1:
+        hits_1s.append(now_mono)
+        hits_60s.append(now_mono)
+    else:
+        stamp = [now_mono] * hit_count
+        hits_1s.extend(stamp)
+        hits_60s.extend(stamp)
+
+    cutoff_1s = now_mono - 1.0
+    while hits_1s and hits_1s[0] < cutoff_1s:
+        hits_1s.popleft()
+    cutoff_60s = now_mono - 60.0
+    while hits_60s and hits_60s[0] < cutoff_60s:
+        hits_60s.popleft()
+
+    current_1s = len(hits_1s)
+    current_60s = len(hits_60s)
+    counters["xrun_peak_1s"] = max(int(counters.get("xrun_peak_1s") or 0), current_1s)
+    counters["xrun_peak_60s"] = max(int(counters.get("xrun_peak_60s") or 0), current_60s)
+
+    consecutive = int(counters.get("xrun_current_consecutive") or 0) + int(hit_count)
+    counters["xrun_current_consecutive"] = consecutive
+    counters["xrun_max_consecutive"] = max(
+        int(counters.get("xrun_max_consecutive") or 0),
+        consecutive,
+    )
+
+
+def _calc_xrun_burst_rate_per_sec(counters: Dict[str, Any]) -> float:
+    xrun_count = int(counters.get("alsa_xrun") or 0)
+    if xrun_count <= 0:
+        return 0.0
+    first_xrun_at = _parse_utc_ts(counters.get("first_xrun_at"))
+    last_xrun_at = _parse_utc_ts(counters.get("last_xrun_at"))
+    if first_xrun_at and last_xrun_at:
+        burst_seconds = (last_xrun_at - first_xrun_at).total_seconds()
+        if burst_seconds > 0:
+            return round(xrun_count / burst_seconds, 3)
+    return float(xrun_count)
+
+
+def _write_xrun_status(
+    counters: Dict[str, Any],
+    correlation_id: str,
+    *,
+    force: bool = False,
+) -> None:
+    """Atomically write xrun count to a status file for StreamManager to read."""
+    global _last_xrun_status_write_mono
+    now_mono = time.monotonic()
+    if not force and (now_mono - _last_xrun_status_write_mono) < _XRUN_STATUS_WRITE_INTERVAL:
+        return
+    _last_xrun_status_write_mono = now_mono
+
+    _ensure_xrun_telemetry_state(counters)
+    try:
+        os.makedirs(_XRUN_STATUS_DIR, exist_ok=True)
+        elapsed = 0.0
+        started_mono = float(counters.get("started_mono") or 0.0)
+        if started_mono > 0:
+            elapsed = max(0.0, now_mono - started_mono)
+        session_rate = (
+            round((int(counters.get("alsa_xrun") or 0) / elapsed), 3)
+            if elapsed > 0
+            else 0.0
+        )
         data = {
             "alsa_xrun": counters.get("alsa_xrun", 0),
             "udp_overrun": counters.get("udp_overrun", 0),
             "mono_ts": time.monotonic(),
             "correlation_id": correlation_id,
+            "xrun_peak_1s": counters.get("xrun_peak_1s", 0),
+            "xrun_peak_60s": counters.get("xrun_peak_60s", 0),
+            "xrun_max_consecutive": counters.get("xrun_max_consecutive", 0),
+            "xrun_current_consecutive": counters.get("xrun_current_consecutive", 0),
+            "xrun_session_rate_per_sec": session_rate,
+            "xrun_burst_rate_per_sec": _calc_xrun_burst_rate_per_sec(counters),
         }
         tmp_fd, tmp_path = tempfile.mkstemp(
             dir=_XRUN_STATUS_DIR, prefix=".xrun_status_", suffix=".tmp"
@@ -435,11 +546,13 @@ def _process_ffmpeg_line(
     if not text:
         return
 
+    _ensure_xrun_telemetry_state(counters)
     event_ts = _utc_iso_ms()
     log_file.write(f"{_local_log_ts()} {text}\n")
     log_file.flush()
 
     lower = text.lower()
+    line_has_xrun = False
     repeat_match = re.search(r"last message repeated\s+(\d+)\s+times", lower)
     if repeat_match:
         repeated_count = int(repeat_match.group(1))
@@ -447,9 +560,15 @@ def _process_ffmpeg_line(
         if repeat_context == "udp_overrun":
             counters["udp_overrun"] += repeated_count
             counters["last_overrun_at"] = event_ts
+            counters["xrun_current_consecutive"] = 0
         elif repeat_context == "alsa_xrun":
-            counters["alsa_xrun"] += repeated_count
-            counters["last_xrun_at"] = event_ts
+            _record_xrun_hits(counters, repeated_count, event_ts)
+            line_has_xrun = True
+            _log_xrun_snapshot(counters, correlation_id)
+        else:
+            counters["xrun_current_consecutive"] = 0
+        if correlation_id:
+            _write_xrun_status(counters, correlation_id)
         return
 
     counters["repeat_context"] = None
@@ -485,13 +604,11 @@ def _process_ffmpeg_line(
         if counters.get("first_overrun_at") is None:
             counters["first_overrun_at"] = event_ts
         counters["repeat_context"] = "udp_overrun"
+        counters["xrun_current_consecutive"] = 0
         _log_jitter_anomaly(counters, correlation_id, "udp_overrun")
     if "alsa buffer xrun" in lower:
-        counters["alsa_xrun"] += 1
-        counters["last_xrun_at"] = event_ts
-        if counters.get("first_xrun_at") is None:
-            counters["first_xrun_at"] = event_ts
-        counters["repeat_context"] = "alsa_xrun"
+        _record_xrun_hits(counters, 1, event_ts)
+        line_has_xrun = True
         _log_xrun_snapshot(counters, correlation_id)
     if "error during demuxing" in lower:
         counters["demux_errors"] += 1
@@ -501,6 +618,10 @@ def _process_ffmpeg_line(
         counters["audio_device_errors"] += 1
     if "connection refused" in lower or "timed out" in lower or "network is unreachable" in lower:
         counters["connection_errors"] += 1
+    if not line_has_xrun:
+        counters["xrun_current_consecutive"] = 0
+    if correlation_id:
+        _write_xrun_status(counters, correlation_id)
 
 
 def _drain_ffmpeg_stderr(
@@ -646,6 +767,13 @@ def main():
         "last_overrun_at": None,
         "first_xrun_at": None,
         "last_xrun_at": None,
+        "xrun_peak_1s": 0,
+        "xrun_peak_60s": 0,
+        "xrun_current_consecutive": 0,
+        "xrun_max_consecutive": 0,
+        "xrun_events_last_1s": deque(),
+        "xrun_events_last_60s": deque(),
+        "started_mono": started_mono,
         "repeat_context": None,
     }
 
@@ -739,12 +867,23 @@ def main():
 
         duration_seconds = round(time.monotonic() - started_mono, 3)
         exit_class = _classify_receiver_exit(return_code, shutdown_signal_name)
+        xrun_session_rate = (
+            round((int(counters.get("alsa_xrun") or 0) / duration_seconds), 3)
+            if duration_seconds > 0
+            else 0.0
+        )
+        xrun_burst_rate = _calc_xrun_burst_rate_per_sec(counters)
         summary = {
             "correlation_id": correlation_id,
             "port": port,
             "alsa_device": alsa_device,
             "udp_overrun": counters["udp_overrun"],
             "alsa_xrun": counters["alsa_xrun"],
+            "xrun_peak_1s": counters["xrun_peak_1s"],
+            "xrun_peak_60s": counters["xrun_peak_60s"],
+            "xrun_max_consecutive": counters["xrun_max_consecutive"],
+            "xrun_session_rate_per_sec": xrun_session_rate,
+            "xrun_burst_rate_per_sec": xrun_burst_rate,
             "demux_errors": counters["demux_errors"],
             "immediate_exit": counters["immediate_exit"],
             "audio_device_errors": counters["audio_device_errors"],
@@ -770,6 +909,9 @@ def main():
             f"return_code={return_code} duration_seconds={duration_seconds} "
             f"exit_class={exit_class} shutdown_signal={shutdown_signal_name} "
             f"udp_overrun={counters['udp_overrun']} alsa_xrun={counters['alsa_xrun']} "
+            f"xrun_peak_1s={counters['xrun_peak_1s']} "
+            f"xrun_peak_60s={counters['xrun_peak_60s']} "
+            f"xrun_max_consecutive={counters['xrun_max_consecutive']} "
             f"demux_errors={counters['demux_errors']} "
             f"immediate_exit={counters['immediate_exit']} "
             f"audio_device_errors={counters['audio_device_errors']} "
@@ -778,6 +920,7 @@ def main():
         )
         stderr_log.flush()
 
+        _write_xrun_status(counters, correlation_id, force=True)
         _safe_log_system("stream_receiver_summary", summary)
 
         if stderr_drain_timeout:
