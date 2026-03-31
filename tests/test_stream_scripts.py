@@ -116,6 +116,40 @@ def test_stream_telemetry_report_prints_latency_columns(tmp_path):
     assert "rows= 1" in proc.stdout
 
 
+def test_stream_telemetry_report_compact_mode_has_narrow_output(tmp_path):
+    events_file = tmp_path / "events.jsonl"
+    rows = [
+        {
+            "ts": "2026-03-05T20:30:01.000Z",
+            "cat": "SYSTEM",
+            "event": "stream_receiver_summary",
+            "data": {
+                "correlation_id": "cid-compact",
+                "alsa_xrun": 4,
+                "xrun_peak_1s": 2,
+                "xrun_peak_60s": 9,
+                "xrun_max_consecutive": 6,
+                "xrun_session_rate_per_sec": 0.5,
+                "xrun_burst_rate_per_sec": 1.25,
+                "duration_seconds": 8.0,
+                "return_code": 0,
+            },
+        },
+    ]
+    events_file.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+
+    proc = _run_script(
+        "scripts/stream_telemetry_report.py",
+        "--file",
+        str(events_file),
+        "--compact",
+    )
+    assert proc.returncode == 0
+    assert "correlation_id | alsa_xrun | xrun_peak_1s" in proc.stdout
+    assert "start->rx_start_ms" not in proc.stdout
+    assert "cid-compact | 4 | 2 | 9 | 6 | 0.500 | 1.250 | 8.000 | 0" in proc.stdout
+
+
 def test_stream_telemetry_report_uses_first_input_output_events_without_summary(tmp_path):
     events_file = tmp_path / "events.jsonl"
     rows = [

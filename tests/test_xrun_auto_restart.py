@@ -247,6 +247,40 @@ class TestXrunAutoRestart:
         assert payload["threshold"] == XRUN_RESTART_THRESHOLD
         assert payload["window_seconds"] == XRUN_RESTART_WINDOW_SECONDS
 
+    def test_env_change_applies_even_with_policy_cache(
+        self, mock_manager, mock_player, monkeypatch
+    ):
+        events = _capture_xrun_events(monkeypatch)
+        svc = _make_live_service(mock_manager, mock_player)
+
+        # First call with normal restart mode.
+        monkeypatch.setenv("ANNOUNCEFLOW_XRUN_AUTO_RECOVERY_DRY_RUN", "false")
+        monkeypatch.setenv("ANNOUNCEFLOW_XRUN_RESTART_THRESHOLD", "100")
+        mock_manager.read_xrun_status.return_value = {
+            "alsa_xrun": 10,
+            "udp_overrun": 0,
+            "mono_ts": time.monotonic(),
+            "correlation_id": "test-cid",
+        }
+        assert svc._check_xrun_auto_restart() is False
+
+        # Change env immediately: must switch to dry-run behavior without waiting.
+        monkeypatch.setenv("ANNOUNCEFLOW_XRUN_AUTO_RECOVERY_DRY_RUN", "true")
+        monkeypatch.setenv("ANNOUNCEFLOW_XRUN_RESTART_THRESHOLD", "5")
+        mock_manager.read_xrun_status.return_value = {
+            "alsa_xrun": 15,
+            "udp_overrun": 0,
+            "mono_ts": time.monotonic(),
+            "correlation_id": "test-cid",
+        }
+        assert svc._check_xrun_auto_restart() is False
+        mock_manager.stop_receiver.assert_not_called()
+        mock_manager.start_receiver.assert_not_called()
+        assert [name for name, _ in events][-1] == "stream_xrun_auto_restart_dry_run"
+        payload = events[-1][1]
+        assert payload["dry_run"] is True
+        assert payload["threshold"] == 5
+
     def test_no_restart_when_stream_not_live(self, mock_manager, mock_player):
         """Should not check xrun when stream is not active/live."""
         svc = StreamService(

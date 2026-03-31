@@ -3,6 +3,7 @@
 import io
 import json
 import time
+from collections import deque
 
 import _stream_receiver as receiver
 
@@ -25,8 +26,8 @@ def _new_counters():
         "xrun_peak_60s": 0,
         "xrun_current_consecutive": 0,
         "xrun_max_consecutive": 0,
-        "xrun_events_last_1s": [],
-        "xrun_events_last_60s": [],
+        "xrun_events_last_1s": deque(),
+        "xrun_events_last_60s": deque(),
         "started_mono": time.monotonic(),
         "repeat_context": None,
     }
