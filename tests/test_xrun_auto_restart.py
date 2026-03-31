@@ -33,6 +33,12 @@ def mock_manager():
     return mgr
 
 
+@pytest.fixture(autouse=True)
+def _disable_xrun_dry_run(monkeypatch):
+    """Keep legacy restart tests stable unless test explicitly enables dry-run."""
+    monkeypatch.setenv("ANNOUNCEFLOW_XRUN_AUTO_RECOVERY_DRY_RUN", "false")
+
+
 @pytest.fixture
 def mock_player():
     player = MagicMock()
@@ -84,6 +90,15 @@ def _assert_xrun_event_payload_shape(payload):
         "state",
         "active",
         "reason",
+        "dry_run",
+        "threshold",
+        "window_seconds",
+        "xrun_peak_1s",
+        "xrun_peak_60s",
+        "xrun_max_consecutive",
+        "xrun_current_consecutive",
+        "xrun_session_rate_per_sec",
+        "xrun_burst_rate_per_sec",
     }
     assert required.issubset(set(payload.keys()))
 
@@ -148,6 +163,89 @@ class TestXrunAutoRestart:
         _assert_xrun_event_payload_shape(payload)
         assert payload["reason"] == "threshold_exceeded"
         assert payload["restarts_this_hour"] == 1
+
+    def test_dry_run_emits_alarm_without_restart(
+        self, mock_manager, mock_player, monkeypatch
+    ):
+        monkeypatch.setenv("ANNOUNCEFLOW_XRUN_AUTO_RECOVERY_DRY_RUN", "true")
+        monkeypatch.setenv("ANNOUNCEFLOW_XRUN_RESTART_THRESHOLD", "5")
+        events = _capture_xrun_events(monkeypatch)
+        svc = _make_live_service(mock_manager, mock_player)
+
+        mock_manager.read_xrun_status.return_value = {
+            "alsa_xrun": 10,
+            "udp_overrun": 0,
+            "mono_ts": time.monotonic(),
+            "correlation_id": "test-cid",
+            "xrun_peak_1s": 4,
+            "xrun_peak_60s": 12,
+            "xrun_max_consecutive": 8,
+            "xrun_current_consecutive": 3,
+            "xrun_session_rate_per_sec": 1.25,
+            "xrun_burst_rate_per_sec": 9.5,
+        }
+        assert svc._check_xrun_auto_restart() is False
+
+        mock_manager.read_xrun_status.return_value = {
+            "alsa_xrun": 15,
+            "udp_overrun": 0,
+            "mono_ts": time.monotonic(),
+            "correlation_id": "test-cid",
+            "xrun_peak_1s": 7,
+            "xrun_peak_60s": 21,
+            "xrun_max_consecutive": 10,
+            "xrun_current_consecutive": 5,
+            "xrun_session_rate_per_sec": 2.0,
+            "xrun_burst_rate_per_sec": 11.2,
+        }
+        result = svc._check_xrun_auto_restart()
+        assert result is False
+        mock_manager.stop_receiver.assert_not_called()
+        mock_manager.start_receiver.assert_not_called()
+        mock_manager.wait_for_stop_complete.assert_not_called()
+        assert [name for name, _ in events] == ["stream_xrun_auto_restart_dry_run"]
+        payload = events[0][1]
+        _assert_xrun_event_payload_shape(payload)
+        assert payload["reason"] == "threshold_exceeded_dry_run"
+        assert payload["dry_run"] is True
+        assert payload["threshold"] == 5
+        assert payload["xrun_peak_1s"] == 7
+        assert payload["xrun_peak_60s"] == 21
+        assert payload["xrun_max_consecutive"] == 10
+        assert payload["xrun_current_consecutive"] == 5
+        assert payload["xrun_session_rate_per_sec"] == 2.0
+        assert payload["xrun_burst_rate_per_sec"] == 11.2
+
+    def test_invalid_env_values_fall_back_to_safe_defaults(
+        self, mock_manager, mock_player, monkeypatch
+    ):
+        monkeypatch.setenv("ANNOUNCEFLOW_XRUN_AUTO_RECOVERY_DRY_RUN", "false")
+        monkeypatch.setenv("ANNOUNCEFLOW_XRUN_RESTART_THRESHOLD", "bad")
+        monkeypatch.setenv("ANNOUNCEFLOW_XRUN_RESTART_WINDOW_SECONDS", "-5")
+        events = _capture_xrun_events(monkeypatch)
+        svc = _make_live_service(mock_manager, mock_player)
+
+        mock_manager.read_xrun_status.return_value = {
+            "alsa_xrun": 10,
+            "udp_overrun": 0,
+            "mono_ts": time.monotonic(),
+            "correlation_id": "test-cid",
+        }
+        assert svc._check_xrun_auto_restart() is False
+
+        mock_manager.read_xrun_status.return_value = {
+            "alsa_xrun": 10 + XRUN_RESTART_THRESHOLD,
+            "udp_overrun": 0,
+            "mono_ts": time.monotonic(),
+            "correlation_id": "test-cid",
+        }
+        assert svc._check_xrun_auto_restart() is True
+        assert [name for name, _ in events] == ["stream_xrun_auto_restart"]
+        payload = events[0][1]
+        _assert_xrun_event_payload_shape(payload)
+        assert payload["dry_run"] is False
+        assert payload["threshold"] == XRUN_RESTART_THRESHOLD
+        assert payload["window_seconds"] == XRUN_RESTART_WINDOW_SECONDS
 
     def test_no_restart_when_stream_not_live(self, mock_manager, mock_player):
         """Should not check xrun when stream is not active/live."""

@@ -64,6 +64,7 @@ SSH multiplexing is used to avoid repeated password prompts.
 
 Expected event names:
 
+- `stream_xrun_auto_restart_dry_run` (default mode, no real restart)
 - `stream_xrun_auto_restart` (success only)
 - `stream_xrun_auto_restart_aborted`
 - `stream_xrun_auto_restart_skipped_cooldown`
@@ -74,6 +75,14 @@ Expected payload keys (all events above):
 
 - `correlation_id`, `xruns_in_window`, `total_xruns`
 - `restarts_this_hour`, `state`, `active`, `reason`
+- `dry_run`, `threshold`, `window_seconds`
+- `xrun_peak_1s`, `xrun_peak_60s`, `xrun_max_consecutive`, `xrun_current_consecutive`
+
+XRUN runtime tuning (.env / environment):
+
+- `ANNOUNCEFLOW_XRUN_AUTO_RECOVERY_DRY_RUN=true` (default)
+- `ANNOUNCEFLOW_XRUN_RESTART_THRESHOLD=100` (default)
+- `ANNOUNCEFLOW_XRUN_RESTART_WINDOW_SECONDS=300` (default)
 
 Manual race scenario (critical):
 
@@ -91,3 +100,10 @@ Manual cooldown scenario:
 2. Within 60 seconds, increase `alsa_xrun` above threshold again for the same active `correlation_id`.
 3. Verify `stream_xrun_auto_restart_skipped_cooldown` is logged and no new restart occurs.
 4. After 60 seconds, repeat threshold crossing and verify restart is allowed again.
+
+Dry-run scenario (default safe mode):
+
+1. Keep `ANNOUNCEFLOW_XRUN_AUTO_RECOVERY_DRY_RUN=true`.
+2. Cross XRUN threshold for active `correlation_id`.
+3. Verify `stream_xrun_auto_restart_dry_run` is logged.
+4. Verify receiver process is not restarted (no stop/start cycle).

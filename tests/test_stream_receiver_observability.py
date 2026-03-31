@@ -1,6 +1,8 @@
 """Tests for stream receiver observability helpers."""
 
 import io
+import json
+import time
 
 import _stream_receiver as receiver
 
@@ -19,6 +21,13 @@ def _new_counters():
         "last_overrun_at": None,
         "first_xrun_at": None,
         "last_xrun_at": None,
+        "xrun_peak_1s": 0,
+        "xrun_peak_60s": 0,
+        "xrun_current_consecutive": 0,
+        "xrun_max_consecutive": 0,
+        "xrun_events_last_1s": [],
+        "xrun_events_last_60s": [],
+        "started_mono": time.monotonic(),
         "repeat_context": None,
     }
 
@@ -98,6 +107,49 @@ def test_process_ffmpeg_line_updates_counters():
     assert counters["last_overrun_at"] is not None
     assert counters["first_xrun_at"] is not None
     assert counters["last_xrun_at"] is not None
+    assert counters["xrun_peak_1s"] >= 3
+    assert counters["xrun_peak_60s"] >= 3
+    assert counters["xrun_max_consecutive"] >= 3
+
+
+def test_process_ffmpeg_line_resets_consecutive_on_non_xrun():
+    counters = _new_counters()
+    buf = io.StringIO()
+
+    receiver._process_ffmpeg_line("[alsa @ 0x1] ALSA buffer xrun.", buf, counters)
+    receiver._process_ffmpeg_line("Last message repeated 2 times", buf, counters)
+    assert counters["xrun_current_consecutive"] >= 3
+
+    receiver._process_ffmpeg_line("connection refused", buf, counters)
+    assert counters["xrun_current_consecutive"] == 0
+    assert counters["xrun_max_consecutive"] >= 3
+
+
+def test_write_xrun_status_includes_live_telemetry(tmp_path, monkeypatch):
+    status_file = tmp_path / "receiver_xrun_status.json"
+    monkeypatch.setattr(receiver, "_XRUN_STATUS_DIR", str(tmp_path))
+    monkeypatch.setattr(receiver, "XRUN_STATUS_FILE", str(status_file))
+
+    counters = _new_counters()
+    counters["alsa_xrun"] = 6
+    counters["xrun_peak_1s"] = 4
+    counters["xrun_peak_60s"] = 6
+    counters["xrun_max_consecutive"] = 5
+    counters["xrun_current_consecutive"] = 2
+    counters["first_xrun_at"] = "2026-03-31T10:00:00.000Z"
+    counters["last_xrun_at"] = "2026-03-31T10:00:03.000Z"
+    counters["started_mono"] = time.monotonic() - 2.0
+
+    receiver._write_xrun_status(counters, "cid-telemetry", force=True)
+    payload = json.loads(status_file.read_text(encoding="utf-8"))
+
+    assert payload["correlation_id"] == "cid-telemetry"
+    assert payload["xrun_peak_1s"] == 4
+    assert payload["xrun_peak_60s"] == 6
+    assert payload["xrun_max_consecutive"] == 5
+    assert payload["xrun_current_consecutive"] == 2
+    assert payload["xrun_session_rate_per_sec"] > 0
+    assert payload["xrun_burst_rate_per_sec"] == 2.0
 
 
 def test_process_ffmpeg_line_emits_first_input_output_events(monkeypatch):
