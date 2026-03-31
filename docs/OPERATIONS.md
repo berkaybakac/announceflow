@@ -66,6 +66,7 @@ Expected event names:
 
 - `stream_xrun_auto_restart` (success only)
 - `stream_xrun_auto_restart_aborted`
+- `stream_xrun_auto_restart_skipped_cooldown`
 - `stream_xrun_auto_restart_skipped_throttled`
 - `stream_xrun_auto_restart_failed`
 
@@ -83,3 +84,10 @@ Manual race scenario (critical):
    - terminal event should be `...aborted` or `...failed`
    - no `stream_xrun_auto_restart` for that intent
    - stream stays stopped (no unintended restart).
+
+Manual cooldown scenario:
+
+1. Trigger one successful auto-restart (`stream_xrun_auto_restart`).
+2. Within 60 seconds, increase `alsa_xrun` above threshold again for the same active `correlation_id`.
+3. Verify `stream_xrun_auto_restart_skipped_cooldown` is logged and no new restart occurs.
+4. After 60 seconds, repeat threshold crossing and verify restart is allowed again.

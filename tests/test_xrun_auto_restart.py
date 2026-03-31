@@ -14,6 +14,7 @@ from services.stream_service import (
     XRUN_RESTART_THRESHOLD,
     XRUN_RESTART_WINDOW_SECONDS,
     XRUN_MAX_RESTARTS_PER_HOUR,
+    XRUN_AUTO_RESTART_COOLDOWN_SECONDS,
 )
 from stream_manager import StreamManager
 
@@ -200,6 +201,146 @@ class TestXrunAutoRestart:
         _assert_xrun_event_payload_shape(payload)
         assert payload["reason"] == "restart_budget_exhausted"
 
+    def test_skips_restart_when_cooldown_active(
+        self, mock_manager, mock_player, monkeypatch
+    ):
+        """After a successful restart, cooldown should suppress new attempts."""
+        events = _capture_xrun_events(monkeypatch)
+        svc = _make_live_service(mock_manager, mock_player)
+
+        # First successful auto-restart.
+        mock_manager.read_xrun_status.return_value = {
+            "alsa_xrun": 10,
+            "udp_overrun": 0,
+            "mono_ts": time.monotonic(),
+            "correlation_id": "test-cid",
+        }
+        assert svc._check_xrun_auto_restart() is False
+        mock_manager.read_xrun_status.return_value = {
+            "alsa_xrun": 10 + XRUN_RESTART_THRESHOLD,
+            "udp_overrun": 0,
+            "mono_ts": time.monotonic(),
+            "correlation_id": "test-cid",
+        }
+        assert svc._check_xrun_auto_restart() is True
+        baseline_restarts = len(svc._xrun_auto_restart_times)
+        assert baseline_restarts == 1
+
+        mock_manager.stop_receiver.reset_mock()
+        mock_manager.start_receiver.reset_mock()
+        mock_manager.wait_for_stop_complete.reset_mock()
+
+        # New threshold crossing while cooldown is still active.
+        mock_manager.read_xrun_status.return_value = {
+            "alsa_xrun": 200,
+            "udp_overrun": 0,
+            "mono_ts": time.monotonic(),
+            "correlation_id": "test-cid",
+        }
+        assert svc._check_xrun_auto_restart() is False
+        mock_manager.read_xrun_status.return_value = {
+            "alsa_xrun": 200 + XRUN_RESTART_THRESHOLD,
+            "udp_overrun": 0,
+            "mono_ts": time.monotonic(),
+            "correlation_id": "test-cid",
+        }
+        assert svc._check_xrun_auto_restart() is False
+
+        mock_manager.stop_receiver.assert_not_called()
+        mock_manager.start_receiver.assert_not_called()
+        mock_manager.wait_for_stop_complete.assert_not_called()
+        assert len(svc._xrun_auto_restart_times) == baseline_restarts
+        assert events[-1][0] == "stream_xrun_auto_restart_skipped_cooldown"
+        _assert_xrun_event_payload_shape(events[-1][1])
+        assert events[-1][1]["reason"] == "cooldown_active"
+
+    def test_restart_allowed_after_cooldown_expires(
+        self, mock_manager, mock_player, monkeypatch
+    ):
+        """Cooldown expiry should allow a new restart attempt."""
+        events = _capture_xrun_events(monkeypatch)
+        svc = _make_live_service(mock_manager, mock_player)
+
+        # First successful auto-restart.
+        mock_manager.read_xrun_status.return_value = {
+            "alsa_xrun": 10,
+            "udp_overrun": 0,
+            "mono_ts": time.monotonic(),
+            "correlation_id": "test-cid",
+        }
+        assert svc._check_xrun_auto_restart() is False
+        mock_manager.read_xrun_status.return_value = {
+            "alsa_xrun": 10 + XRUN_RESTART_THRESHOLD,
+            "udp_overrun": 0,
+            "mono_ts": time.monotonic(),
+            "correlation_id": "test-cid",
+        }
+        assert svc._check_xrun_auto_restart() is True
+        assert len(svc._xrun_auto_restart_times) == 1
+
+        # Force cooldown expiry and trigger again.
+        svc._xrun_restart_cooldown_until_mono = (
+            time.monotonic() - XRUN_AUTO_RESTART_COOLDOWN_SECONDS
+        )
+        mock_manager.stop_receiver.reset_mock()
+        mock_manager.start_receiver.reset_mock()
+        mock_manager.wait_for_stop_complete.reset_mock()
+        mock_manager.read_xrun_status.return_value = {
+            "alsa_xrun": 400,
+            "udp_overrun": 0,
+            "mono_ts": time.monotonic(),
+            "correlation_id": "test-cid",
+        }
+        assert svc._check_xrun_auto_restart() is False
+        mock_manager.read_xrun_status.return_value = {
+            "alsa_xrun": 400 + XRUN_RESTART_THRESHOLD,
+            "udp_overrun": 0,
+            "mono_ts": time.monotonic(),
+            "correlation_id": "test-cid",
+        }
+        assert svc._check_xrun_auto_restart() is True
+
+        mock_manager.stop_receiver.assert_called_once()
+        mock_manager.start_receiver.assert_called_once()
+        mock_manager.wait_for_stop_complete.assert_called_once()
+        assert len(svc._xrun_auto_restart_times) == 2
+        assert [name for name, _ in events].count("stream_xrun_auto_restart") == 2
+
+    def test_cooldown_skip_does_not_consume_restart_budget(
+        self, mock_manager, mock_player, monkeypatch
+    ):
+        """Cooldown skip should keep restart budget unchanged."""
+        events = _capture_xrun_events(monkeypatch)
+        svc = _make_live_service(mock_manager, mock_player)
+
+        # Prime window and set an active cooldown while budget is still available.
+        mock_manager.read_xrun_status.return_value = {
+            "alsa_xrun": 10,
+            "udp_overrun": 0,
+            "mono_ts": time.monotonic(),
+            "correlation_id": "test-cid",
+        }
+        assert svc._check_xrun_auto_restart() is False
+        svc._xrun_auto_restart_times = [
+            time.monotonic() - 60 * i for i in range(XRUN_MAX_RESTARTS_PER_HOUR - 1)
+        ]
+        svc._xrun_restart_cooldown_until_mono = time.monotonic() + 30.0
+        baseline_restarts = len(svc._xrun_auto_restart_times)
+
+        mock_manager.read_xrun_status.return_value = {
+            "alsa_xrun": 10 + XRUN_RESTART_THRESHOLD,
+            "udp_overrun": 0,
+            "mono_ts": time.monotonic(),
+            "correlation_id": "test-cid",
+        }
+        assert svc._check_xrun_auto_restart() is False
+
+        assert len(svc._xrun_auto_restart_times) == baseline_restarts
+        assert events[-1][0] == "stream_xrun_auto_restart_skipped_cooldown"
+        assert events[-1][1]["reason"] == "cooldown_active"
+        mock_manager.stop_receiver.assert_not_called()
+        mock_manager.start_receiver.assert_not_called()
+
     def test_window_slides_after_expiry(self, mock_manager, mock_player, monkeypatch):
         """After window expires, a new window starts with current count."""
         _capture_xrun_events(monkeypatch)
@@ -237,12 +378,14 @@ class TestXrunAutoRestart:
         svc._xrun_window_start_mono = 123.0
         svc._xrun_window_start_count = 50
         svc._xrun_last_known_count = 75
+        svc._xrun_restart_cooldown_until_mono = time.monotonic() + 30.0
 
         svc.stop()
 
         assert svc._xrun_window_start_mono == 0.0
         assert svc._xrun_window_start_count == 0
         assert svc._xrun_last_known_count == 0
+        assert svc._xrun_restart_cooldown_until_mono == 0.0
 
     def test_no_restart_when_no_status_file(self, mock_manager, mock_player):
         """Should gracefully handle missing xrun status file."""
@@ -315,6 +458,7 @@ class TestXrunAutoRestart:
         svc._xrun_window_start_mono = 100.0
         svc._xrun_window_start_count = 50
         svc._xrun_last_known_count = 75
+        svc._xrun_restart_cooldown_until_mono = time.monotonic() + 30.0
 
         mock_manager.is_alive.return_value = False
         svc.start(device_id="dev1")
@@ -322,6 +466,7 @@ class TestXrunAutoRestart:
         assert svc._xrun_window_start_mono == 0.0
         assert svc._xrun_window_start_count == 0
         assert svc._xrun_last_known_count == 0
+        assert svc._xrun_restart_cooldown_until_mono == 0.0
 
     def test_abort_when_intent_superseded(self, mock_manager, mock_player, monkeypatch):
         """If intent changes before restart phase, restart must abort."""
@@ -427,6 +572,7 @@ class TestXrunAutoRestart:
         svc._xrun_window_start_mono = 99.0
         svc._xrun_window_start_count = 7
         svc._xrun_last_known_count = 11
+        svc._xrun_restart_cooldown_until_mono = time.monotonic() + 30.0
 
         result = svc.start(device_id="dev-2")
         assert result["success"] is True
@@ -434,6 +580,7 @@ class TestXrunAutoRestart:
         assert svc._xrun_window_start_mono == 0.0
         assert svc._xrun_window_start_count == 0
         assert svc._xrun_last_known_count == 0
+        assert svc._xrun_restart_cooldown_until_mono == 0.0
 
     def test_reset_on_resume_after_announcement(
         self, mock_manager, mock_player, monkeypatch
@@ -445,12 +592,14 @@ class TestXrunAutoRestart:
         svc._xrun_window_start_mono = 77.0
         svc._xrun_window_start_count = 8
         svc._xrun_last_known_count = 13
+        svc._xrun_restart_cooldown_until_mono = time.monotonic() + 30.0
 
         result = svc.resume_after_announcement()
         assert result["success"] is True
         assert svc._xrun_window_start_mono == 0.0
         assert svc._xrun_window_start_count == 0
         assert svc._xrun_last_known_count == 0
+        assert svc._xrun_restart_cooldown_until_mono == 0.0
 
     def test_reset_on_resume_after_policy(self, mock_manager, mock_player, monkeypatch):
         """P2: tracking resets on resume_after_policy success."""
@@ -460,12 +609,14 @@ class TestXrunAutoRestart:
         svc._xrun_window_start_mono = 55.0
         svc._xrun_window_start_count = 3
         svc._xrun_last_known_count = 9
+        svc._xrun_restart_cooldown_until_mono = time.monotonic() + 30.0
 
         result = svc.resume_after_policy()
         assert result["success"] is True
         assert svc._xrun_window_start_mono == 0.0
         assert svc._xrun_window_start_count == 0
         assert svc._xrun_last_known_count == 0
+        assert svc._xrun_restart_cooldown_until_mono == 0.0
 
 
 class TestXrunStatusFile:

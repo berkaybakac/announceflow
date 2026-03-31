@@ -36,6 +36,8 @@ XRUN_RESTART_THRESHOLD = 100
 XRUN_RESTART_WINDOW_SECONDS = 300.0
 # Max auto-restarts per hour to prevent restart loops.
 XRUN_MAX_RESTARTS_PER_HOUR = 3
+# Cooldown after a successful auto-restart to avoid burst restart loops.
+XRUN_AUTO_RESTART_COOLDOWN_SECONDS = 60.0
 
 
 def _new_correlation_id() -> str:
@@ -124,6 +126,7 @@ class StreamService:
         self._xrun_auto_restart_times: list[float] = []
         self._xrun_restart_intent_seq: int = 0
         self._xrun_restart_intent_id: Optional[str] = None
+        self._xrun_restart_cooldown_until_mono: float = 0.0
         self._start_heartbeat_monitor()
 
     # ------------------------------------------------------------------
@@ -263,6 +266,17 @@ class StreamService:
                     "active": bool(self._status.active),
                     "reason": "restart_budget_exhausted",
                 }
+            elif now < self._xrun_restart_cooldown_until_mono:
+                event_name = "stream_xrun_auto_restart_skipped_cooldown"
+                event_payload = {
+                    "correlation_id": correlation_id,
+                    "xruns_in_window": xruns_in_window,
+                    "total_xruns": current_xrun,
+                    "restarts_this_hour": restarts_this_hour,
+                    "state": self._status.state,
+                    "active": bool(self._status.active),
+                    "reason": "cooldown_active",
+                }
             else:
                 self._xrun_restart_intent_seq += 1
                 intent_id = (
@@ -271,12 +285,20 @@ class StreamService:
                 self._xrun_restart_intent_id = intent_id
 
         if event_name and event_payload:
-            logger.warning(
-                "StreamService: xrun auto-restart skipped, throttle exhausted "
-                "(xruns_in_window=%d, cid=%s)",
-                xruns_in_window,
-                correlation_id,
-            )
+            if event_name == "stream_xrun_auto_restart_skipped_throttled":
+                logger.warning(
+                    "StreamService: xrun auto-restart skipped, throttle exhausted "
+                    "(xruns_in_window=%d, cid=%s)",
+                    xruns_in_window,
+                    correlation_id,
+                )
+            elif event_name == "stream_xrun_auto_restart_skipped_cooldown":
+                logger.info(
+                    "StreamService: xrun auto-restart skipped, cooldown active "
+                    "(xruns_in_window=%d, cid=%s)",
+                    xruns_in_window,
+                    correlation_id,
+                )
             log_system(event_name, event_payload)
             return False
 
@@ -360,8 +382,12 @@ class StreamService:
                         "reason": "start_receiver_failed",
                     }
                 else:
-                    self._xrun_auto_restart_times.append(time.monotonic())
+                    restart_at = time.monotonic()
+                    self._xrun_auto_restart_times.append(restart_at)
                     self._reset_xrun_tracking()
+                    self._xrun_restart_cooldown_until_mono = (
+                        restart_at + XRUN_AUTO_RESTART_COOLDOWN_SECONDS
+                    )
                     event_name = "stream_xrun_auto_restart"
                     event_payload = {
                         "correlation_id": correlation_id,
@@ -391,6 +417,7 @@ class StreamService:
         self._xrun_window_start_mono = 0.0
         self._xrun_window_start_count = 0
         self._xrun_restart_intent_id = None
+        self._xrun_restart_cooldown_until_mono = 0.0
 
     # ------------------------------------------------------------------
     # Internal helpers
