@@ -13,6 +13,7 @@ import webbrowser
 import logging
 import math
 import time
+import psutil
 import uuid
 import ipaddress
 import tkinter as tk
@@ -44,6 +45,9 @@ CONFIG_FILE = "agent_config.json"
 DEFAULT_TIMEOUT = (2, 5)
 LOGIN_TIMEOUT = (2, 10)
 UPLOAD_TIMEOUT = (3, 30)
+
+# Constants for subprocess window creation on Windows
+_CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 
 logger = logging.getLogger(__name__)
 stream_logger = logging.getLogger("agent.stream")
@@ -2625,68 +2629,23 @@ class AgentGUI:
         return parsed
 
     def _read_sender_cpu_memory_snapshot(self) -> Dict[str, Any]:
-        """Collect sender CPU/RAM metrics on Windows using PowerShell."""
-        if os.name != "nt":
-            return {}
-
-        command = [
-            "powershell",
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            (
-                "$cpu=(Get-CimInstance Win32_Processor | "
-                "Measure-Object -Property LoadPercentage -Average).Average;"
-                "$os=Get-CimInstance Win32_OperatingSystem;"
-                "$free=[double]$os.FreePhysicalMemory/1024;"
-                "$total=[double]$os.TotalVisibleMemorySize/1024;"
-                "$usedPct=if($total -gt 0){(($total-$free)/$total)*100}else{$null};"
-                "$obj=[pscustomobject]@{cpu=$cpu;mem_used_pct=$usedPct;"
-                "mem_available_mb=[math]::Round($free)};"
-                "$obj | ConvertTo-Json -Compress"
-            ),
-        ]
+        """Collect sender CPU/RAM metrics natively using psutil."""
         try:
-            completed = subprocess.run(
-                command,
-                capture_output=True,
-                text=True,
-                timeout=3,
-            )
+            # CPU usage: non-blocking call (interval=None)
+            # First call might be 0, subsequent calls give average since last call.
+            cpu_pct = psutil.cpu_percent(interval=None)
+            
+            # Memory usage
+            mem = psutil.virtual_memory()
+            
+            return {
+                "sender_cpu_pct": cpu_pct,
+                "sender_mem_used_pct": mem.percent,
+                "sender_mem_available_mb": int(mem.available / (1024 * 1024))
+            }
         except Exception as exc:
-            stream_logger.debug("sender health powershell invocation failed: %s", exc)
+            stream_logger.debug("psutil health collection failed: %s", exc)
             return {}
-
-        if completed.returncode != 0:
-            stderr = (completed.stderr or "").strip()
-            if stderr:
-                stream_logger.debug("sender health powershell stderr: %s", stderr)
-            return {}
-
-        raw = (completed.stdout or "").strip()
-        if not raw:
-            return {}
-
-        try:
-            payload = json.loads(raw)
-        except ValueError:
-            stream_logger.debug("sender health powershell returned non-JSON payload")
-            return {}
-
-        if not isinstance(payload, dict):
-            return {}
-
-        snapshot: Dict[str, Any] = {}
-        cpu_pct = self._sanitize_sender_percent(payload.get("cpu"))
-        if cpu_pct is not None:
-            snapshot["sender_cpu_pct"] = cpu_pct
-        mem_used_pct = self._sanitize_sender_percent(payload.get("mem_used_pct"))
-        if mem_used_pct is not None:
-            snapshot["sender_mem_used_pct"] = mem_used_pct
-        mem_available_mb = self._sanitize_non_negative_int(payload.get("mem_available_mb"))
-        if mem_available_mb is not None:
-            snapshot["sender_mem_available_mb"] = mem_available_mb
-        return snapshot
 
     def _read_sender_wifi_snapshot(self) -> Dict[str, Any]:
         """Collect sender Wi-Fi signal and SSID via netsh on Windows."""
@@ -2699,6 +2658,7 @@ class AgentGUI:
                 capture_output=True,
                 text=True,
                 timeout=3,
+                creationflags=_CREATE_NO_WINDOW,
             )
         except Exception as exc:
             stream_logger.debug("sender health netsh invocation failed: %s", exc)
