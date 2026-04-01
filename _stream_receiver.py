@@ -14,7 +14,7 @@ import json
 import os
 import re
 import shlex
-import signal
+import socket
 import subprocess
 import sys
 import tempfile
@@ -901,6 +901,30 @@ def _classify_receiver_exit(
         return "controlled"
     return "unexpected"
 
+def _health_receiver_loop(port: int, stop_event: threading.Event) -> None:
+    """Listen for sender hardware health on a sidechannel port and log it."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sock.bind(("0.0.0.0", port))
+        sock.settimeout(1.0)
+        while not stop_event.is_set():
+            try:
+                data, _ = sock.recvfrom(4096)
+                if not data:
+                    continue
+                payload = json.loads(data.decode("utf-8"))
+                if payload.get("event") == "sender_health":
+                    _safe_log_system("stream_sender_health", payload)
+            except (socket.timeout, UnicodeDecodeError, json.JSONDecodeError):
+                continue
+            except Exception as exc:
+                _emit_internal_diag("health_receiver_recv_failed", f"error={exc}")
+                break
+    except Exception as exc:
+        _emit_internal_diag("health_receiver_bind_failed", f"port={port} error={exc}")
+    finally:
+        sock.close()
+
 def main():
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 5800
     ffmpeg_bin = _find_ffmpeg()
@@ -1021,6 +1045,15 @@ def main():
     )
     drain_thread.start()
 
+    # Start health sidechannel receiver
+    health_stop_event = threading.Event()
+    health_thread = threading.Thread(
+        target=_health_receiver_loop,
+        args=(port + 1, health_stop_event),
+        daemon=True,
+    )
+    health_thread.start()
+
     cleanup_reason: Optional[str] = None
     cleanup_started = False
     shutdown_signal_num: Optional[int] = None
@@ -1058,6 +1091,10 @@ def main():
         proc.wait()
         return_code = proc.returncode
     finally:
+        # Stop health receiver
+        health_stop_event.set()
+        health_thread.join(timeout=0.5)
+
         # Keep this short to avoid manager-side forced kill before summary logging.
         drain_thread.join(timeout=0.5)
         stderr_drain_timeout = drain_thread.is_alive()
