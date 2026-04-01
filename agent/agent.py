@@ -454,22 +454,16 @@ class ModernSlider(tk.Frame):
         )
         self.mute_button.pack(side="left", padx=(0, 8))
 
-        # Slider canvas — thin track design, fixed 32px height
-        self.canvas = tk.Canvas(
-            container, height=32, bg=bg,
-            highlightthickness=0, cursor="hand2",
-        )
-        self.canvas.pack(side="left", fill="x", expand=True)
-
-        # Right side: percentage
+        # Right side: percentage and state labels (Pack these first on the right)
         right_frame = tk.Frame(container, bg=bg)
-        right_frame.pack(side="left", padx=(8, 0))
+        right_frame.pack(side="right", padx=(8, 0))
 
         self.percent_label = tk.Label(
             right_frame, text=f"{int(value)}%",
             font=("Segoe UI", 10, "bold"), bg=bg, fg=_GREEN, width=4,
         )
         self.percent_label.pack(side="left")
+        
         self.state_label = tk.Label(
             right_frame,
             text="Açık" if int(round(value)) > int(from_) else "Sessiz",
@@ -478,6 +472,13 @@ class ModernSlider(tk.Frame):
             fg=_MUTE_ICON_NORMAL,
         )
         self.state_label.pack(side="left", padx=(6, 0))
+
+        # Slider canvas — thin track design, fills the middle
+        self.canvas = tk.Canvas(
+            container, height=32, bg=bg,
+            highlightthickness=0, cursor="hand2",
+        )
+        self.canvas.pack(side="left", fill="x", expand=True)
 
         self.canvas.bind("<Button-1>", self._on_click)
         self.canvas.bind("<B1-Motion>", self._on_click)
