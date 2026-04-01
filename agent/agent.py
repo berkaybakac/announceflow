@@ -4,11 +4,14 @@ System tray application for quick access and management.
 """
 import os
 import json
+import re
 import socket
+import subprocess
 import sys
 import tempfile
 import webbrowser
 import logging
+import math
 import time
 import uuid
 import ipaddress
@@ -942,6 +945,11 @@ class AnnounceFlowAgent:
         last_command_result: Optional[str] = None,
         last_command_error: Optional[str] = None,
         sender_running: Optional[bool] = None,
+        sender_cpu_pct: Optional[float] = None,
+        sender_mem_used_pct: Optional[float] = None,
+        sender_mem_available_mb: Optional[int] = None,
+        sender_wifi_signal_pct: Optional[int] = None,
+        sender_wifi_ssid: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Send stream heartbeat and return structured result."""
         device_id = getattr(self, "device_id", None)
@@ -961,6 +969,18 @@ class AnnounceFlowAgent:
             headers["X-Stream-Last-Command-Error"] = last_command_error.strip()
         if isinstance(sender_running, bool):
             headers["X-Stream-Sender-Running"] = "true" if sender_running else "false"
+        if isinstance(sender_cpu_pct, (int, float)):
+            headers["X-Stream-Sender-CPU-Pct"] = f"{float(sender_cpu_pct):.3f}".rstrip("0").rstrip(".")
+        if isinstance(sender_mem_used_pct, (int, float)):
+            headers["X-Stream-Sender-Mem-Used-Pct"] = (
+                f"{float(sender_mem_used_pct):.3f}".rstrip("0").rstrip(".")
+            )
+        if isinstance(sender_mem_available_mb, int):
+            headers["X-Stream-Sender-Mem-Available-Mb"] = str(sender_mem_available_mb)
+        if isinstance(sender_wifi_signal_pct, int):
+            headers["X-Stream-Sender-Wifi-Signal-Pct"] = str(sender_wifi_signal_pct)
+        if isinstance(sender_wifi_ssid, str) and sender_wifi_ssid.strip():
+            headers["X-Stream-Sender-Wifi-Ssid"] = sender_wifi_ssid.strip()[:128]
 
         response = self._request(
             "POST",
@@ -1126,6 +1146,8 @@ class AgentGUI:
         self._volume_last_applied_revision = -1
         self._volume_last_nonzero = 80
         self._advanced_visible = False
+        self._sender_health_last_sample_mono = 0.0
+        self._sender_health_last_sample: Dict[str, Any] = {}
 
     def run(self):
         """Run the GUI application."""
@@ -2501,6 +2523,171 @@ class AgentGUI:
             error=f"unsupported_action:{action}",
         )
 
+    @staticmethod
+    def _sanitize_sender_percent(value: Any) -> Optional[float]:
+        """Normalize percentage telemetry into [0, 100] range."""
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(parsed) or parsed < 0.0 or parsed > 100.0:
+            return None
+        return round(parsed, 3)
+
+    @staticmethod
+    def _sanitize_non_negative_int(value: Any) -> Optional[int]:
+        """Normalize integral telemetry values that cannot be negative."""
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError):
+            return None
+        if parsed < 0:
+            return None
+        return parsed
+
+    def _read_sender_cpu_memory_snapshot(self) -> Dict[str, Any]:
+        """Collect sender CPU/RAM metrics on Windows using PowerShell."""
+        if os.name != "nt":
+            return {}
+
+        command = [
+            "powershell",
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            (
+                "$cpu=(Get-CimInstance Win32_Processor | "
+                "Measure-Object -Property LoadPercentage -Average).Average;"
+                "$os=Get-CimInstance Win32_OperatingSystem;"
+                "$free=[double]$os.FreePhysicalMemory/1024;"
+                "$total=[double]$os.TotalVisibleMemorySize/1024;"
+                "$usedPct=if($total -gt 0){(($total-$free)/$total)*100}else{$null};"
+                "$obj=[pscustomobject]@{cpu=$cpu;mem_used_pct=$usedPct;"
+                "mem_available_mb=[math]::Round($free)};"
+                "$obj | ConvertTo-Json -Compress"
+            ),
+        ]
+        try:
+            completed = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                timeout=3,
+            )
+        except Exception as exc:
+            stream_logger.debug("sender health powershell invocation failed: %s", exc)
+            return {}
+
+        if completed.returncode != 0:
+            stderr = (completed.stderr or "").strip()
+            if stderr:
+                stream_logger.debug("sender health powershell stderr: %s", stderr)
+            return {}
+
+        raw = (completed.stdout or "").strip()
+        if not raw:
+            return {}
+
+        try:
+            payload = json.loads(raw)
+        except ValueError:
+            stream_logger.debug("sender health powershell returned non-JSON payload")
+            return {}
+
+        if not isinstance(payload, dict):
+            return {}
+
+        snapshot: Dict[str, Any] = {}
+        cpu_pct = self._sanitize_sender_percent(payload.get("cpu"))
+        if cpu_pct is not None:
+            snapshot["sender_cpu_pct"] = cpu_pct
+        mem_used_pct = self._sanitize_sender_percent(payload.get("mem_used_pct"))
+        if mem_used_pct is not None:
+            snapshot["sender_mem_used_pct"] = mem_used_pct
+        mem_available_mb = self._sanitize_non_negative_int(payload.get("mem_available_mb"))
+        if mem_available_mb is not None:
+            snapshot["sender_mem_available_mb"] = mem_available_mb
+        return snapshot
+
+    def _read_sender_wifi_snapshot(self) -> Dict[str, Any]:
+        """Collect sender Wi-Fi signal and SSID via netsh on Windows."""
+        if os.name != "nt":
+            return {}
+
+        try:
+            completed = subprocess.run(
+                ["netsh", "wlan", "show", "interfaces"],
+                capture_output=True,
+                text=True,
+                timeout=3,
+            )
+        except Exception as exc:
+            stream_logger.debug("sender health netsh invocation failed: %s", exc)
+            return {}
+
+        if completed.returncode != 0:
+            return {}
+
+        output = completed.stdout or ""
+        if not output.strip():
+            return {}
+
+        ssid: Optional[str] = None
+        signal_pct: Optional[int] = None
+        for raw_line in output.splitlines():
+            line = raw_line.strip()
+            if not line or ":" not in line:
+                continue
+            key_raw, value_raw = line.split(":", 1)
+            key = key_raw.strip().lower()
+            value = value_raw.strip()
+            if key == "ssid":
+                candidate = value.strip()
+                if candidate and candidate.lower() not in {"n/a", "not connected"}:
+                    ssid = candidate[:128]
+            elif key in {"signal", "sinyal"}:
+                match = re.search(r"(\d{1,3})", value)
+                if match:
+                    candidate = self._sanitize_non_negative_int(match.group(1))
+                    if candidate is not None and candidate <= 100:
+                        signal_pct = candidate
+
+        snapshot: Dict[str, Any] = {}
+        if signal_pct is not None:
+            snapshot["sender_wifi_signal_pct"] = signal_pct
+        if ssid:
+            snapshot["sender_wifi_ssid"] = ssid
+        return snapshot
+
+    def _collect_sender_health_snapshot(self) -> Dict[str, Any]:
+        """Collect sender health with short cache to avoid high sampling overhead."""
+        now_mono = time.monotonic()
+        sample_interval_seconds = 15.0
+        last_sample_mono = float(
+            getattr(self, "_sender_health_last_sample_mono", 0.0) or 0.0
+        )
+        last_sample = getattr(self, "_sender_health_last_sample", None)
+        if (
+            isinstance(last_sample, dict)
+            and last_sample
+            and last_sample_mono > 0.0
+            and (now_mono - last_sample_mono) < sample_interval_seconds
+        ):
+            return dict(last_sample)
+
+        snapshot: Dict[str, Any] = {
+            "sender_cpu_pct": None,
+            "sender_mem_used_pct": None,
+            "sender_mem_available_mb": None,
+            "sender_wifi_signal_pct": None,
+            "sender_wifi_ssid": None,
+        }
+        snapshot.update(self._read_sender_cpu_memory_snapshot())
+        snapshot.update(self._read_sender_wifi_snapshot())
+        self._sender_health_last_sample = dict(snapshot)
+        self._sender_health_last_sample_mono = now_mono
+        return dict(snapshot)
+
     def _run_heartbeat(self):
         """Send control heartbeat (always-on while logged in)."""
         self._heartbeat_job = None
@@ -2513,12 +2700,18 @@ class AgentGUI:
 
         def _job():
             sender_running = bool(self._stream_active and self._stream_client.is_alive())
+            sender_health = self._collect_sender_health_snapshot()
             return self.agent.send_heartbeat_with_details(
                 last_applied_generation=self._last_applied_generation,
                 last_command_id=self._last_command_id,
                 last_command_result=self._last_command_result,
                 last_command_error=self._last_command_error,
                 sender_running=sender_running,
+                sender_cpu_pct=sender_health.get("sender_cpu_pct"),
+                sender_mem_used_pct=sender_health.get("sender_mem_used_pct"),
+                sender_mem_available_mb=sender_health.get("sender_mem_available_mb"),
+                sender_wifi_signal_pct=sender_health.get("sender_wifi_signal_pct"),
+                sender_wifi_ssid=sender_health.get("sender_wifi_ssid"),
             )
 
         def _finalize(delay_ms: int = 4500):

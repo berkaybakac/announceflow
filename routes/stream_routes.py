@@ -14,6 +14,8 @@ V1 API contract (PI4_STREAM_V1_SCOPE.md section 4):
     POST /api/stream/heartbeat
 """
 import logging
+import math
+from typing import Optional
 
 from flask import Blueprint, jsonify, request
 
@@ -187,6 +189,71 @@ def stream_heartbeat():
     elif sender_running_raw in {"0", "false", "no", "off"}:
         sender_running = False
 
+    def _parse_float_header(
+        name: str,
+        *,
+        min_value: Optional[float] = None,
+        max_value: Optional[float] = None,
+    ) -> Optional[float]:
+        raw = request.headers.get(name, "").strip()
+        if not raw:
+            return None
+        try:
+            parsed = float(raw)
+        except ValueError:
+            return None
+        if not math.isfinite(parsed):
+            return None
+        if min_value is not None and parsed < min_value:
+            return None
+        if max_value is not None and parsed > max_value:
+            return None
+        return round(parsed, 3)
+
+    def _parse_int_header(
+        name: str,
+        *,
+        min_value: Optional[int] = None,
+        max_value: Optional[int] = None,
+    ) -> Optional[int]:
+        raw = request.headers.get(name, "").strip()
+        if not raw:
+            return None
+        try:
+            parsed = int(raw)
+        except ValueError:
+            return None
+        if min_value is not None and parsed < min_value:
+            return None
+        if max_value is not None and parsed > max_value:
+            return None
+        return parsed
+
+    sender_cpu_pct = _parse_float_header(
+        "X-Stream-Sender-CPU-Pct",
+        min_value=0.0,
+        max_value=100.0,
+    )
+    sender_mem_used_pct = _parse_float_header(
+        "X-Stream-Sender-Mem-Used-Pct",
+        min_value=0.0,
+        max_value=100.0,
+    )
+    sender_mem_available_mb = _parse_int_header(
+        "X-Stream-Sender-Mem-Available-Mb",
+        min_value=0,
+    )
+    sender_wifi_signal_pct = _parse_int_header(
+        "X-Stream-Sender-Wifi-Signal-Pct",
+        min_value=0,
+        max_value=100,
+    )
+    sender_wifi_ssid = (
+        request.headers.get("X-Stream-Sender-Wifi-Ssid", "").strip() or None
+    )
+    if sender_wifi_ssid and len(sender_wifi_ssid) > 128:
+        sender_wifi_ssid = sender_wifi_ssid[:128]
+
     result = _stream_service.heartbeat(
         device_id=device_id,
         device_name=device_name,
@@ -195,6 +262,11 @@ def stream_heartbeat():
         last_command_result=last_command_result,
         last_command_error=last_command_error,
         sender_running=sender_running,
+        sender_cpu_pct=sender_cpu_pct,
+        sender_mem_used_pct=sender_mem_used_pct,
+        sender_mem_available_mb=sender_mem_available_mb,
+        sender_wifi_signal_pct=sender_wifi_signal_pct,
+        sender_wifi_ssid=sender_wifi_ssid,
     )
     return _json_success(
         status=result.get("status"),

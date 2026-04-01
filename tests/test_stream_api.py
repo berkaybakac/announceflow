@@ -342,6 +342,11 @@ class TestStreamServiceStatus:
             "owner_device_name",
             "owner_sender_running",
             "owner_last_seen_age_seconds",
+            "owner_sender_cpu_pct",
+            "owner_sender_mem_used_pct",
+            "owner_sender_mem_available_mb",
+            "owner_sender_wifi_signal_pct",
+            "owner_sender_wifi_ssid",
             "preferred_device_id",
             "preferred_device_name",
             "command_status",
@@ -369,10 +374,23 @@ class TestStreamServiceStatus:
         mock_manager.is_alive.return_value = True
         svc = _make_service(mock_manager, mock_player)
         svc.start(device_id="dev-42")
-        svc.heartbeat(device_id="dev-42", sender_running=True)
+        svc.heartbeat(
+            device_id="dev-42",
+            sender_running=True,
+            sender_cpu_pct=22.5,
+            sender_mem_used_pct=61.2,
+            sender_mem_available_mb=2048,
+            sender_wifi_signal_pct=74,
+            sender_wifi_ssid="Office-WiFi",
+        )
         st = svc.status()
         assert st["owner_sender_running"] is True
         assert st["owner_last_seen_age_seconds"] is not None
+        assert st["owner_sender_cpu_pct"] == 22.5
+        assert st["owner_sender_mem_used_pct"] == 61.2
+        assert st["owner_sender_mem_available_mb"] == 2048
+        assert st["owner_sender_wifi_signal_pct"] == 74
+        assert st["owner_sender_wifi_ssid"] == "Office-WiFi"
 
 
 # --------------- Takeover tests ---------------
@@ -972,6 +990,11 @@ class TestHeartbeatRoute:
             last_command_result=None,
             last_command_error=None,
             sender_running=None,
+            sender_cpu_pct=None,
+            sender_mem_used_pct=None,
+            sender_mem_available_mb=None,
+            sender_wifi_signal_pct=None,
+            sender_wifi_ssid=None,
         )
 
     @patch("routes.stream_routes._stream_service")
@@ -1035,6 +1058,11 @@ class TestHeartbeatRoute:
             last_command_result=None,
             last_command_error=None,
             sender_running=None,
+            sender_cpu_pct=None,
+            sender_mem_used_pct=None,
+            sender_mem_available_mb=None,
+            sender_wifi_signal_pct=None,
+            sender_wifi_ssid=None,
         )
 
     @patch("routes.stream_routes._stream_service")
@@ -1054,6 +1082,11 @@ class TestHeartbeatRoute:
             last_command_result=None,
             last_command_error=None,
             sender_running=None,
+            sender_cpu_pct=None,
+            sender_mem_used_pct=None,
+            sender_mem_available_mb=None,
+            sender_wifi_signal_pct=None,
+            sender_wifi_ssid=None,
         )
 
     @patch("routes.stream_routes._stream_service")
@@ -1079,6 +1112,45 @@ class TestHeartbeatRoute:
             last_command_result=None,
             last_command_error=None,
             sender_running=None,
+            sender_cpu_pct=None,
+            sender_mem_used_pct=None,
+            sender_mem_available_mb=None,
+            sender_wifi_signal_pct=None,
+            sender_wifi_ssid=None,
+        )
+
+    @patch("routes.stream_routes._stream_service")
+    def test_heartbeat_forwards_sender_health_headers(self, mock_svc, client):
+        mock_svc.heartbeat.return_value = {
+            "accepted": True,
+            "reason": None,
+            "status": StreamStatus(active=True, state="live").to_dict(),
+            "control": {"command": None},
+        }
+        client.post(
+            "/api/stream/heartbeat",
+            headers={
+                "X-Stream-Device-Id": "dev-1",
+                "X-Stream-Sender-CPU-Pct": "33.5",
+                "X-Stream-Sender-Mem-Used-Pct": "71.2",
+                "X-Stream-Sender-Mem-Available-Mb": "1536",
+                "X-Stream-Sender-Wifi-Signal-Pct": "64",
+                "X-Stream-Sender-Wifi-Ssid": "Store-WLAN",
+            },
+        )
+        mock_svc.heartbeat.assert_called_once_with(
+            device_id="dev-1",
+            device_name=None,
+            last_applied_generation=None,
+            last_command_id=None,
+            last_command_result=None,
+            last_command_error=None,
+            sender_running=None,
+            sender_cpu_pct=33.5,
+            sender_mem_used_pct=71.2,
+            sender_mem_available_mb=1536,
+            sender_wifi_signal_pct=64,
+            sender_wifi_ssid="Store-WLAN",
         )
 
 
