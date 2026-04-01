@@ -41,6 +41,21 @@ def _env_int(name: str, default: int, minimum: int, maximum: int) -> int:
     return value
 
 
+def _env_float(name: str, default: float, minimum: float, maximum: float) -> float:
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        return default
+    if value < minimum:
+        return minimum
+    if value > maximum:
+        return maximum
+    return value
+
+
 def _parse_capture_rates() -> tuple[int, ...]:
     raw = os.environ.get("ANNOUNCEFLOW_STREAM_CAPTURE_RATES", "").strip()
     if not raw:
@@ -70,7 +85,14 @@ _BLOCK_SIZE = _env_int(
 _CAPTURE_RATE_CANDIDATES = _parse_capture_rates()
 # Prefer stereo first: some Windows/WASAPI setups produce noise on mono-only open.
 _CHANNEL_CANDIDATES = (2, 1)
-_TELEMETRY_INTERVAL_SEC = 10.0
+# Per-attempt capture telemetry can be noisy on long sessions.
+# Keep it bounded and configurable so support can increase granularity temporarily.
+_TELEMETRY_INTERVAL_SEC = _env_float(
+    "ANNOUNCEFLOW_STREAM_TELEMETRY_INTERVAL_SEC",
+    30.0,
+    5.0,
+    3600.0,
+)
 
 
 def _utc_now() -> str:

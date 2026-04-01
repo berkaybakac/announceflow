@@ -134,6 +134,25 @@ def login():
             log_web("login", {"username": username})
             return redirect(url_for("index"))
         else:
+            attempted_username = (username or "").strip()
+            forwarded_for = request.headers.get("X-Forwarded-For", "")
+            remote_addr = (
+                forwarded_for.split(",")[0].strip()
+                if forwarded_for
+                else (request.remote_addr or "-")
+            )
+            log_web(
+                "login_failed",
+                {
+                    "username": attempted_username,
+                    "remote_addr": remote_addr,
+                },
+            )
+            logger.warning(
+                "Login failed for username=%r remote_addr=%s",
+                attempted_username,
+                remote_addr,
+            )
             flash("Hatalı kullanıcı adı veya şifre!", "error")
 
     return render_template("login.html")

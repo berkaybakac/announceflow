@@ -230,8 +230,8 @@ class StreamManager:
                 )
                 self._consecutive_start_failures = 0
                 return True
-            except (OSError, subprocess.SubprocessError) as exc:
-                logger.error("StreamManager: failed to start receiver: %s", exc)
+            except (OSError, subprocess.SubprocessError):
+                logger.exception("StreamManager: failed to start receiver")
                 self._process = None
                 self._record_start_failure_unlocked(correlation_id=correlation_id)
                 return False
@@ -317,7 +317,7 @@ class StreamManager:
                 t.start()
             return True
         except Exception as exc:
-            logger.error("StreamManager: error stopping receiver: %s", exc)
+            logger.exception("StreamManager: error stopping receiver")
             self._log_stop_reason(
                 "error",
                 proc=proc,
