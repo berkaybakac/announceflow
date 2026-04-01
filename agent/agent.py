@@ -1676,6 +1676,31 @@ class AgentGUI:
         content = tk.Frame(self.root, bg=_BG, padx=16, pady=6)
         content.pack(fill="both", expand=True)
 
+        # ── Ezan Silence Banner (Hidden by default) ──
+        self._ezan_banner_frame = tk.Frame(content, bg=_AMBER, padx=12, pady=10)
+        # We don't pack it yet; visibility is managed by _update_ezan_banner()
+        
+        banner_content = tk.Frame(self._ezan_banner_frame, bg=_AMBER)
+        banner_content.pack(expand=True)
+        
+        try:
+            ezan_img = get_tinted_icon("vol_mute", "white", size=(20, 20))
+            if ezan_img:
+                el = tk.Label(banner_content, image=ezan_img, bg=_AMBER)
+                el.image = ezan_img
+                el.pack(side="left", padx=(0, 10))
+        except Exception:
+            pass
+            
+        self._ezan_banner_label = tk.Label(
+            banner_content, 
+            text="SİSTEM ŞU AN SESSİZ (EZAN)",
+            font=("Segoe UI", 11, "bold"), 
+            bg=_AMBER, 
+            fg="white"
+        )
+        self._ezan_banner_label.pack(side="left")
+
         # ── Music Section ──
         music_section = tk.Frame(content, bg=_BG_CARD, padx=12, pady=10)
         music_section.pack(fill="x", pady=(0, 8))
@@ -1786,6 +1811,7 @@ class AgentGUI:
             if not hasattr(self, "volume_slider"):
                 return
             self._apply_volume_state(state, force=True)
+            self._update_silence_banner(state)
             playlist = state.get("playlist", {}) if isinstance(state, dict) else {}
             is_playlist_active = bool(playlist.get("active")) if isinstance(playlist, dict) else False
             if self._music_active != is_playlist_active:
@@ -2123,6 +2149,59 @@ class AgentGUI:
 
         if hasattr(self, "volume_slider"):
             self.volume_slider.set_value(normalized["effective_volume"])
+        
+        self._update_silence_banner(raw_state)
+
+    def _update_silence_banner(self, state: Optional[Dict[str, Any]]):
+        """Show or hide the silence banner based on server policy (Ezan or Working Hours)."""
+        if not hasattr(self, "_ezan_banner_frame") or not hasattr(self, "_ezan_banner_label"):
+            return
+            
+        try:
+            if not self._ezan_banner_frame.winfo_exists():
+                return
+        except tk.TclError:
+            return
+
+        silence_policy = {}
+        if isinstance(state, dict):
+            silence_policy = state.get("silence_policy")
+            if not isinstance(silence_policy, dict):
+                silence_policy = {}
+
+        policy_type = silence_policy.get("policy")
+        silence_active = silence_policy.get("silence_active") is True
+        
+        # Decide banner text and visibility
+        banner_text = ""
+        is_visible = False
+        
+        if silence_active:
+            if policy_type == "prayer":
+                banner_text = "SİSTEM ŞU AN SESSİZ (EZAN)"
+                is_visible = True
+            elif policy_type == "working_hours":
+                banner_text = "MESAİ SAATLERİ DIŞINDA (SESSİZ)"
+                is_visible = True
+
+        if is_visible:
+            self._ezan_banner_label.config(text=banner_text)
+            # Only pack if not already visible
+            if not self._ezan_banner_frame.winfo_viewable() or not self._ezan_banner_frame.pack_info():
+                first_sibling = None
+                for child in self._ezan_banner_frame.master.winfo_children():
+                    if child != self._ezan_banner_frame:
+                        first_sibling = child
+                        break
+                if first_sibling:
+                    self._ezan_banner_frame.pack(fill="x", pady=(0, 8), before=first_sibling)
+                else:
+                    self._ezan_banner_frame.pack(fill="x", pady=(0, 8), side="top")
+        else:
+            try:
+                self._ezan_banner_frame.pack_forget()
+            except tk.TclError:
+                pass
 
     def _flush_pending_volume(self):
         self._volume_update_job = None
