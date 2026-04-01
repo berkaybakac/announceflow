@@ -42,6 +42,7 @@ XRUN_AUTO_RECOVERY_DRY_RUN_DEFAULT = True
 XRUN_MAX_RESTARTS_PER_HOUR = 3
 # Cooldown after a successful auto-restart to avoid burst restart loops.
 XRUN_AUTO_RESTART_COOLDOWN_SECONDS = 60.0
+SENDER_HEALTH_LOG_INTERVAL_SECONDS = 60.0
 
 _XRUN_DRY_RUN_ENV = "ANNOUNCEFLOW_XRUN_AUTO_RECOVERY_DRY_RUN"
 _XRUN_THRESHOLD_ENV = "ANNOUNCEFLOW_XRUN_RESTART_THRESHOLD"
@@ -77,6 +78,42 @@ def _coerce_optional_bool(value: Any) -> Optional[bool]:
     if isinstance(value, bool):
         return value
     return None
+
+
+def _coerce_optional_float(
+    value: Any,
+    *,
+    min_value: Optional[float] = None,
+    max_value: Optional[float] = None,
+) -> Optional[float]:
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not math.isfinite(parsed):
+        return None
+    if min_value is not None and parsed < min_value:
+        return None
+    if max_value is not None and parsed > max_value:
+        return None
+    return round(parsed, 3)
+
+
+def _coerce_optional_int(
+    value: Any,
+    *,
+    min_value: Optional[int] = None,
+    max_value: Optional[int] = None,
+) -> Optional[int]:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    if min_value is not None and parsed < min_value:
+        return None
+    if max_value is not None and parsed > max_value:
+        return None
+    return parsed
 
 
 def _coerce_xrun_type(value: Any, default: str = "unknown") -> str:
@@ -658,11 +695,37 @@ class StreamService:
         result["owner_device_name"] = self._active_device_name
         owner_sender_running: Optional[bool] = None
         owner_last_seen_age_seconds: Optional[float] = None
+        owner_sender_cpu_pct: Optional[float] = None
+        owner_sender_mem_used_pct: Optional[float] = None
+        owner_sender_mem_available_mb: Optional[int] = None
+        owner_sender_wifi_signal_pct: Optional[int] = None
+        owner_sender_wifi_ssid: Optional[str] = None
         if self._active_device_id:
             owner_meta = self._agent_registry.get(self._active_device_id) or {}
             owner_sender_running = _coerce_optional_bool(
                 owner_meta.get("sender_running")
             )
+            owner_sender_cpu_pct = _coerce_optional_float(
+                owner_meta.get("sender_cpu_pct"),
+                min_value=0.0,
+                max_value=100.0,
+            )
+            owner_sender_mem_used_pct = _coerce_optional_float(
+                owner_meta.get("sender_mem_used_pct"),
+                min_value=0.0,
+                max_value=100.0,
+            )
+            owner_sender_mem_available_mb = _coerce_optional_int(
+                owner_meta.get("sender_mem_available_mb"),
+                min_value=0,
+            )
+            owner_sender_wifi_signal_pct = _coerce_optional_int(
+                owner_meta.get("sender_wifi_signal_pct"),
+                min_value=0,
+                max_value=100,
+            )
+            raw_ssid = str(owner_meta.get("sender_wifi_ssid") or "").strip()
+            owner_sender_wifi_ssid = raw_ssid or None
             owner_last_seen = _coerce_non_negative_float(
                 owner_meta.get("last_seen_at"),
                 default=0.0,
@@ -674,6 +737,11 @@ class StreamService:
                 )
         result["owner_sender_running"] = owner_sender_running
         result["owner_last_seen_age_seconds"] = owner_last_seen_age_seconds
+        result["owner_sender_cpu_pct"] = owner_sender_cpu_pct
+        result["owner_sender_mem_used_pct"] = owner_sender_mem_used_pct
+        result["owner_sender_mem_available_mb"] = owner_sender_mem_available_mb
+        result["owner_sender_wifi_signal_pct"] = owner_sender_wifi_signal_pct
+        result["owner_sender_wifi_ssid"] = owner_sender_wifi_ssid
         result["preferred_device_id"] = self._preferred_device_id
         result["preferred_device_name"] = self._preferred_device_name
         result["command_status"] = self._command_status
@@ -1219,10 +1287,37 @@ class StreamService:
                 stop_error = None
                 owner_sender_running = None
                 owner_last_seen_age_seconds = None
+                owner_sender_cpu_pct = None
+                owner_sender_mem_used_pct = None
+                owner_sender_mem_available_mb = None
+                owner_sender_wifi_signal_pct = None
+                owner_sender_wifi_ssid = None
                 if self._active_device_id:
                     owner_meta = self._agent_registry.get(self._active_device_id) or {}
                     owner_sender_running = _coerce_optional_bool(
                         owner_meta.get("sender_running")
+                    )
+                    owner_sender_cpu_pct = _coerce_optional_float(
+                        owner_meta.get("sender_cpu_pct"),
+                        min_value=0.0,
+                        max_value=100.0,
+                    )
+                    owner_sender_mem_used_pct = _coerce_optional_float(
+                        owner_meta.get("sender_mem_used_pct"),
+                        min_value=0.0,
+                        max_value=100.0,
+                    )
+                    owner_sender_mem_available_mb = _coerce_optional_int(
+                        owner_meta.get("sender_mem_available_mb"),
+                        min_value=0,
+                    )
+                    owner_sender_wifi_signal_pct = _coerce_optional_int(
+                        owner_meta.get("sender_wifi_signal_pct"),
+                        min_value=0,
+                        max_value=100,
+                    )
+                    owner_sender_wifi_ssid = (
+                        str(owner_meta.get("sender_wifi_ssid") or "").strip() or None
                     )
                     owner_last_seen = _coerce_non_negative_float(
                         owner_meta.get("last_seen_at"),
@@ -1271,6 +1366,11 @@ class StreamService:
                         "device_name": self._active_device_name,
                         "owner_sender_running": owner_sender_running,
                         "owner_last_seen_age_seconds": owner_last_seen_age_seconds,
+                        "owner_sender_cpu_pct": owner_sender_cpu_pct,
+                        "owner_sender_mem_used_pct": owner_sender_mem_used_pct,
+                        "owner_sender_mem_available_mb": owner_sender_mem_available_mb,
+                        "owner_sender_wifi_signal_pct": owner_sender_wifi_signal_pct,
+                        "owner_sender_wifi_ssid": owner_sender_wifi_ssid,
                         "stop_caller": caller,
                         "stop_request_reason": reason,
                     },
@@ -1286,6 +1386,11 @@ class StreamService:
                         "device_name": self._active_device_name,
                         "owner_sender_running": owner_sender_running,
                         "owner_last_seen_age_seconds": owner_last_seen_age_seconds,
+                        "owner_sender_cpu_pct": owner_sender_cpu_pct,
+                        "owner_sender_mem_used_pct": owner_sender_mem_used_pct,
+                        "owner_sender_mem_available_mb": owner_sender_mem_available_mb,
+                        "owner_sender_wifi_signal_pct": owner_sender_wifi_signal_pct,
+                        "owner_sender_wifi_ssid": owner_sender_wifi_ssid,
                         "stop_caller": caller,
                         "stop_request_reason": reason,
                     },
@@ -1367,6 +1472,11 @@ class StreamService:
         last_command_result: Optional[str] = None,
         last_command_error: Optional[str] = None,
         sender_running: Optional[bool] = None,
+        sender_cpu_pct: Optional[float] = None,
+        sender_mem_used_pct: Optional[float] = None,
+        sender_mem_available_mb: Optional[int] = None,
+        sender_wifi_signal_pct: Optional[int] = None,
+        sender_wifi_ssid: Optional[str] = None,
     ) -> dict:
         """Process agent heartbeat and return control-plane envelope.
 
@@ -1383,6 +1493,28 @@ class StreamService:
                 device_name.strip() if isinstance(device_name, str) else None
             )
             now_epoch = time.time()
+            sender_cpu_pct_normalized = _coerce_optional_float(
+                sender_cpu_pct,
+                min_value=0.0,
+                max_value=100.0,
+            )
+            sender_mem_used_pct_normalized = _coerce_optional_float(
+                sender_mem_used_pct,
+                min_value=0.0,
+                max_value=100.0,
+            )
+            sender_mem_available_mb_normalized = _coerce_optional_int(
+                sender_mem_available_mb,
+                min_value=0,
+            )
+            sender_wifi_signal_pct_normalized = _coerce_optional_int(
+                sender_wifi_signal_pct,
+                min_value=0,
+                max_value=100,
+            )
+            sender_wifi_ssid_normalized = (
+                str(sender_wifi_ssid).strip() if isinstance(sender_wifi_ssid, str) else ""
+            ) or None
 
             if request_device_id:
                 meta = self._agent_registry.get(request_device_id)
@@ -1396,6 +1528,12 @@ class StreamService:
                         "last_command_result": None,
                         "last_command_error": None,
                         "sender_running": None,
+                        "sender_cpu_pct": None,
+                        "sender_mem_used_pct": None,
+                        "sender_mem_available_mb": None,
+                        "sender_wifi_signal_pct": None,
+                        "sender_wifi_ssid": None,
+                        "last_sender_health_log_mono": 0.0,
                     }
                     self._agent_registry[request_device_id] = meta
                 meta["last_seen_at"] = now_epoch
@@ -1437,6 +1575,71 @@ class StreamService:
                                 "state": self._status.state,
                                 "active": bool(self._status.active),
                                 "correlation_id": self._active_correlation_id,
+                            },
+                        )
+                if sender_cpu_pct_normalized is not None:
+                    meta["sender_cpu_pct"] = sender_cpu_pct_normalized
+                if sender_mem_used_pct_normalized is not None:
+                    meta["sender_mem_used_pct"] = sender_mem_used_pct_normalized
+                if sender_mem_available_mb_normalized is not None:
+                    meta["sender_mem_available_mb"] = sender_mem_available_mb_normalized
+                if sender_wifi_signal_pct_normalized is not None:
+                    meta["sender_wifi_signal_pct"] = sender_wifi_signal_pct_normalized
+                if sender_wifi_ssid_normalized is not None:
+                    meta["sender_wifi_ssid"] = sender_wifi_ssid_normalized[:128]
+
+                sender_health_present = any(
+                    value is not None
+                    for value in (
+                        sender_cpu_pct_normalized,
+                        sender_mem_used_pct_normalized,
+                        sender_mem_available_mb_normalized,
+                        sender_wifi_signal_pct_normalized,
+                        sender_wifi_ssid_normalized,
+                    )
+                )
+                if sender_health_present and request_device_id == self._active_device_id:
+                    now_mono = time.monotonic()
+                    last_health_log_mono = _coerce_non_negative_float(
+                        meta.get("last_sender_health_log_mono"),
+                        default=0.0,
+                    )
+                    if (
+                        last_health_log_mono == 0.0
+                        or (now_mono - last_health_log_mono) >= SENDER_HEALTH_LOG_INTERVAL_SECONDS
+                    ):
+                        meta["last_sender_health_log_mono"] = now_mono
+                        log_system(
+                            "stream_sender_health",
+                            {
+                                "device_id": request_device_id,
+                                "device_name": meta.get("device_name"),
+                                "correlation_id": self._active_correlation_id,
+                                "sender_running": _coerce_optional_bool(
+                                    meta.get("sender_running")
+                                ),
+                                "sender_cpu_pct": _coerce_optional_float(
+                                    meta.get("sender_cpu_pct"),
+                                    min_value=0.0,
+                                    max_value=100.0,
+                                ),
+                                "sender_mem_used_pct": _coerce_optional_float(
+                                    meta.get("sender_mem_used_pct"),
+                                    min_value=0.0,
+                                    max_value=100.0,
+                                ),
+                                "sender_mem_available_mb": _coerce_optional_int(
+                                    meta.get("sender_mem_available_mb"),
+                                    min_value=0,
+                                ),
+                                "sender_wifi_signal_pct": _coerce_optional_int(
+                                    meta.get("sender_wifi_signal_pct"),
+                                    min_value=0,
+                                    max_value=100,
+                                ),
+                                "sender_wifi_ssid": (
+                                    str(meta.get("sender_wifi_ssid") or "").strip() or None
+                                ),
                             },
                         )
 
