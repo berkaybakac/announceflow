@@ -400,11 +400,14 @@ def api_now_playing():
         _volume_runtime.get_effective_state(canonical_volume, runtime_player_volume)
     )
 
-    # Get duration from database if file is playing
-    if state.get("filename"):
-        media = db.get_media_by_filename(state["filename"])
-        if media:
-            state["duration_seconds"] = media.get("duration_seconds", 0)
+    # Silence policy metadata (Ezan / Working Hours)
+    config = load_config()
+    silence_decision = resolve_silence_policy(
+        config,
+        allow_network=False,
+        fail_safe_on_unknown=True,
+    )
+    state["silence_policy"] = silence_decision
 
     return jsonify(state)
 
