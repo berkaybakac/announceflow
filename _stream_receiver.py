@@ -205,13 +205,59 @@ def _ensure_xrun_telemetry_state(counters: Dict[str, Any]) -> None:
     counters["xrun_peak_60s"] = int(counters.get("xrun_peak_60s") or 0)
     counters["xrun_current_consecutive"] = int(counters.get("xrun_current_consecutive") or 0)
     counters["xrun_max_consecutive"] = int(counters.get("xrun_max_consecutive") or 0)
+    counters["xrun_underrun_count"] = int(counters.get("xrun_underrun_count") or 0)
+    counters["xrun_overrun_count"] = int(counters.get("xrun_overrun_count") or 0)
+    counters["xrun_unknown_count"] = int(counters.get("xrun_unknown_count") or 0)
+    counters["last_xrun_type"] = _normalize_xrun_type(counters.get("last_xrun_type"))
+    last_type_source = str(counters.get("last_xrun_type_source") or "").strip()
+    counters["last_xrun_type_source"] = last_type_source or "unknown"
 
 
-def _record_xrun_hits(counters: Dict[str, Any], hit_count: int, event_ts: str) -> None:
+def _normalize_xrun_type(raw: Any) -> str:
+    text = str(raw or "").strip().lower()
+    if text in {"underrun", "overrun"}:
+        return text
+    return "unknown"
+
+
+def _classify_alsa_xrun_type(line: str) -> tuple[str, str]:
+    lower = (line or "").lower()
+    if "underrun" in lower:
+        return "underrun", "ffmpeg_log"
+    if "overrun" in lower:
+        return "overrun", "ffmpeg_log"
+    # This receiver only uses ALSA as an output sink, so generic xrun means
+    # playback starvation (underrun) unless ffmpeg explicitly says otherwise.
+    return "underrun", "inferred_playback_pipeline"
+
+
+def _record_xrun_type_hits(counters: Dict[str, Any], xrun_type: str, hit_count: int) -> None:
+    normalized = _normalize_xrun_type(xrun_type)
+    key = "xrun_unknown_count"
+    if normalized == "underrun":
+        key = "xrun_underrun_count"
+    elif normalized == "overrun":
+        key = "xrun_overrun_count"
+    counters[key] = int(counters.get(key) or 0) + int(hit_count)
+
+
+def _record_xrun_hits(
+    counters: Dict[str, Any],
+    hit_count: int,
+    event_ts: str,
+    *,
+    xrun_type: str = "unknown",
+    xrun_type_source: str = "unknown",
+) -> None:
     if hit_count <= 0:
         return
     _ensure_xrun_telemetry_state(counters)
     counters["alsa_xrun"] = int(counters.get("alsa_xrun") or 0) + int(hit_count)
+    normalized_type = _normalize_xrun_type(xrun_type)
+    _record_xrun_type_hits(counters, normalized_type, hit_count)
+    counters["last_xrun_type"] = normalized_type
+    source = str(xrun_type_source or "").strip()
+    counters["last_xrun_type_source"] = source or "unknown"
     counters["last_xrun_at"] = event_ts
     if counters.get("first_xrun_at") is None:
         counters["first_xrun_at"] = event_ts
@@ -297,6 +343,11 @@ def _write_xrun_status(
             "xrun_current_consecutive": counters.get("xrun_current_consecutive", 0),
             "xrun_session_rate_per_sec": session_rate,
             "xrun_burst_rate_per_sec": _calc_xrun_burst_rate_per_sec(counters),
+            "xrun_underrun_count": counters.get("xrun_underrun_count", 0),
+            "xrun_overrun_count": counters.get("xrun_overrun_count", 0),
+            "xrun_unknown_count": counters.get("xrun_unknown_count", 0),
+            "last_xrun_type": counters.get("last_xrun_type", "unknown"),
+            "last_xrun_type_source": counters.get("last_xrun_type_source", "unknown"),
         }
         tmp_fd, tmp_path = tempfile.mkstemp(
             dir=_XRUN_STATUS_DIR, prefix=".xrun_status_", suffix=".tmp"
@@ -362,6 +413,11 @@ def _log_xrun_snapshot(counters: Dict[str, Any], correlation_id: str) -> None:
     snap["correlation_id"] = correlation_id
     snap["xrun_count_so_far"] = counters.get("alsa_xrun", 0)
     snap["udp_overrun_so_far"] = counters.get("udp_overrun", 0)
+    snap["xrun_underrun_so_far"] = counters.get("xrun_underrun_count", 0)
+    snap["xrun_overrun_so_far"] = counters.get("xrun_overrun_count", 0)
+    snap["xrun_unknown_so_far"] = counters.get("xrun_unknown_count", 0)
+    snap["last_xrun_type"] = counters.get("last_xrun_type", "unknown")
+    snap["last_xrun_type_source"] = counters.get("last_xrun_type_source", "unknown")
     _safe_log_error("xrun_snapshot", snap)
     _write_xrun_status(counters, correlation_id)
 
@@ -562,7 +618,14 @@ def _process_ffmpeg_line(
             counters["last_overrun_at"] = event_ts
             counters["xrun_current_consecutive"] = 0
         elif repeat_context == "alsa_xrun":
-            _record_xrun_hits(counters, repeated_count, event_ts)
+            repeated_xrun_type = counters.get("last_xrun_type", "unknown")
+            _record_xrun_hits(
+                counters,
+                repeated_count,
+                event_ts,
+                xrun_type=str(repeated_xrun_type),
+                xrun_type_source="repeat_context",
+            )
             line_has_xrun = True
             _log_xrun_snapshot(counters, correlation_id)
         else:
@@ -607,7 +670,14 @@ def _process_ffmpeg_line(
         counters["xrun_current_consecutive"] = 0
         _log_jitter_anomaly(counters, correlation_id, "udp_overrun")
     if "alsa buffer xrun" in lower:
-        _record_xrun_hits(counters, 1, event_ts)
+        xrun_type, xrun_type_source = _classify_alsa_xrun_type(text)
+        _record_xrun_hits(
+            counters,
+            1,
+            event_ts,
+            xrun_type=xrun_type,
+            xrun_type_source=xrun_type_source,
+        )
         line_has_xrun = True
         _log_xrun_snapshot(counters, correlation_id)
     if "error during demuxing" in lower:
@@ -771,6 +841,11 @@ def main():
         "xrun_peak_60s": 0,
         "xrun_current_consecutive": 0,
         "xrun_max_consecutive": 0,
+        "xrun_underrun_count": 0,
+        "xrun_overrun_count": 0,
+        "xrun_unknown_count": 0,
+        "last_xrun_type": "unknown",
+        "last_xrun_type_source": "unknown",
         "xrun_events_last_1s": deque(),
         "xrun_events_last_60s": deque(),
         "started_mono": started_mono,
@@ -884,6 +959,11 @@ def main():
             "xrun_max_consecutive": counters["xrun_max_consecutive"],
             "xrun_session_rate_per_sec": xrun_session_rate,
             "xrun_burst_rate_per_sec": xrun_burst_rate,
+            "xrun_underrun_count": counters["xrun_underrun_count"],
+            "xrun_overrun_count": counters["xrun_overrun_count"],
+            "xrun_unknown_count": counters["xrun_unknown_count"],
+            "last_xrun_type": counters["last_xrun_type"],
+            "last_xrun_type_source": counters["last_xrun_type_source"],
             "demux_errors": counters["demux_errors"],
             "immediate_exit": counters["immediate_exit"],
             "audio_device_errors": counters["audio_device_errors"],
@@ -912,6 +992,10 @@ def main():
             f"xrun_peak_1s={counters['xrun_peak_1s']} "
             f"xrun_peak_60s={counters['xrun_peak_60s']} "
             f"xrun_max_consecutive={counters['xrun_max_consecutive']} "
+            f"xrun_underrun={counters['xrun_underrun_count']} "
+            f"xrun_overrun={counters['xrun_overrun_count']} "
+            f"xrun_unknown={counters['xrun_unknown_count']} "
+            f"last_xrun_type={counters['last_xrun_type']} "
             f"demux_errors={counters['demux_errors']} "
             f"immediate_exit={counters['immediate_exit']} "
             f"audio_device_errors={counters['audio_device_errors']} "
@@ -948,6 +1032,11 @@ def main():
                 {
                     "correlation_id": correlation_id,
                     "xrun_count": counters["alsa_xrun"],
+                    "xrun_underrun_count": counters["xrun_underrun_count"],
+                    "xrun_overrun_count": counters["xrun_overrun_count"],
+                    "xrun_unknown_count": counters["xrun_unknown_count"],
+                    "last_xrun_type": counters["last_xrun_type"],
+                    "last_xrun_type_source": counters["last_xrun_type_source"],
                     "duration_seconds": duration_seconds,
                 },
             )

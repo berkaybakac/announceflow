@@ -438,7 +438,9 @@ class StreamManager:
         """Read xrun status written by the receiver subprocess.
 
         Returns dict with keys alsa_xrun, udp_overrun, mono_ts,
-        correlation_id — or None if unavailable.
+        correlation_id, and xrun type fields (last_xrun_type,
+        xrun_underrun_count/xrun_overrun_count/xrun_unknown_count) —
+        or None if unavailable.
         """
         from _stream_receiver import XRUN_STATUS_FILE
 
