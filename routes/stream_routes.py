@@ -40,6 +40,17 @@ def stream_start():
     device_id = request.headers.get("X-Stream-Device-Id", "").strip() or None
     device_name = request.headers.get("X-Stream-Device-Name", "").strip() or None
     if correlation_id or device_id:
+        log_system(
+            "stream_start_api_request",
+            {
+                "source": "agent_direct_start",
+                "correlation_id": correlation_id,
+                "device_id": device_id,
+                "device_name": device_name,
+                "remote_addr": request.remote_addr,
+                "user_agent": request.headers.get("User-Agent", ""),
+            },
+        )
         result = _stream_service.start(
             correlation_id=correlation_id,
             device_id=device_id,

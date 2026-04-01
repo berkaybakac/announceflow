@@ -75,6 +75,62 @@ def _fmt_int_or_dash(value: Optional[object]) -> str:
     return str(int(value))
 
 
+def _diagnose_row(row: dict) -> dict:
+    """Heuristic root-cause hint for a single stream session."""
+    udp_overrun = int(row.get("udp_overrun") or 0)
+    alsa_xrun = int(row.get("alsa_xrun") or 0)
+    demux_errors = int(row.get("demux_errors") or 0)
+    immediate_exit = int(row.get("immediate_exit") or 0)
+    return_code = row.get("return_code")
+    exit_class = str(row.get("exit_class") or "").strip().lower()
+    first_input_at = row.get("first_input_at")
+    receiver_started_ts = row.get("receiver_started_ts")
+
+    if exit_class == "unexpected" or (
+        return_code not in (None, 0) and exit_class != "controlled"
+    ):
+        return {
+            "cause": "receiver_runtime_failure",
+            "owner": "platform_pi_runtime",
+            "confidence": 0.85,
+        }
+    if demux_errors > 0 or immediate_exit > 0:
+        return {
+            "cause": "sender_or_network_interrupt",
+            "owner": "customer_sender_or_network",
+            "confidence": 0.75,
+        }
+    if udp_overrun > 0 and alsa_xrun == 0:
+        return {
+            "cause": "network_jitter_burst",
+            "owner": "customer_network",
+            "confidence": 0.78,
+        }
+    if alsa_xrun > 0 and udp_overrun == 0:
+        return {
+            "cause": "pi_audio_cpu_or_scheduling_pressure",
+            "owner": "platform_pi_runtime",
+            "confidence": 0.68,
+        }
+    if alsa_xrun > 0 and udp_overrun > 0:
+        return {
+            "cause": "mixed_network_and_receiver_pressure",
+            "owner": "shared",
+            "confidence": 0.60,
+        }
+    if receiver_started_ts is not None and first_input_at is None:
+        return {
+            "cause": "sender_not_reaching_receiver",
+            "owner": "customer_sender_or_network",
+            "confidence": 0.70,
+        }
+    return {
+        "cause": "stable_or_no_signal",
+        "owner": "no_issue_detected",
+        "confidence": 0.55,
+    }
+
+
 def _iter_jsonl(path: str):
     with open(path, "r", encoding="utf-8", errors="replace") as f:
         for line in f:
@@ -99,6 +155,11 @@ def main() -> int:
         "--compact",
         action="store_true",
         help="print compact columns for narrow terminals",
+    )
+    parser.add_argument(
+        "--diagnose",
+        action="store_true",
+        help="print heuristic root-cause hints per correlation_id",
     )
     args = parser.parse_args()
 
@@ -279,6 +340,17 @@ def main() -> int:
     )
     print("controlled_exit_sessions=", controlled_exits)
     print("unexpected_exit_sessions=", unexpected_exits)
+
+    if args.diagnose and ordered:
+        print("\n=== DIAGNOSE ===")
+        print("correlation_id | likely_cause | likely_owner | confidence")
+        print("-" * 120)
+        for r in ordered:
+            diag = _diagnose_row(r)
+            print(
+                f"{r['correlation_id']} | {diag['cause']} | "
+                f"{diag['owner']} | {diag['confidence']:.2f}"
+            )
     return 0
 
 

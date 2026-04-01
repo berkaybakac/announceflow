@@ -93,12 +93,19 @@ def _assert_xrun_event_payload_shape(payload):
         "dry_run",
         "threshold",
         "window_seconds",
+        "udp_overrun_total",
+        "xrun_status_age_seconds",
         "xrun_peak_1s",
         "xrun_peak_60s",
         "xrun_max_consecutive",
         "xrun_current_consecutive",
         "xrun_session_rate_per_sec",
         "xrun_burst_rate_per_sec",
+        "xrun_underrun_count",
+        "xrun_overrun_count",
+        "xrun_unknown_count",
+        "last_xrun_type",
+        "last_xrun_type_source",
     }
     assert required.issubset(set(payload.keys()))
 
