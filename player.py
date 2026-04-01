@@ -9,6 +9,7 @@ import logging
 import subprocess
 import threading
 import time
+from datetime import datetime
 from typing import Optional, Callable
 
 import database as db
@@ -78,6 +79,10 @@ class AudioPlayer:
         self._session_tracks_skipped: int = 0
         self._session_play_started_at: float = 0.0
         self._session_play_seconds: float = 0.0
+        self._daily_summary_date: str = datetime.now().strftime("%Y-%m-%d")
+        self._daily_tracks_played: int = 0
+        self._daily_tracks_skipped: int = 0
+        self._daily_play_seconds: float = 0.0
 
         # Playlist support
         self._playlist: list = []  # List of file paths
@@ -409,6 +414,7 @@ class AudioPlayer:
                     {"file": track_name, "index": next_index + 1, "total": total_tracks},
                 )
                 self._session_tracks_played += 1
+                self._daily_tracks_played += 1
                 self._session_play_started_at = time.monotonic()
                 return True
 
@@ -418,6 +424,7 @@ class AudioPlayer:
                 {"file": track_name, "index": next_index + 1},
             )
             self._session_tracks_skipped += 1
+            self._daily_tracks_skipped += 1
             cursor = next_index
             checked += 1
 
@@ -647,6 +654,7 @@ class AudioPlayer:
     def _stop_playback_only(self) -> None:
         """Stop playback without touching playlist state."""
         with self._lock:
+            self._flush_active_play_time()
             self._playback_session += 1
             self.is_playing = False
             self.is_paused = False
@@ -693,6 +701,7 @@ class AudioPlayer:
         """Stop playback safely."""
         # 1. Update state FIRST to prevent UI race conditions
         with self._lock:
+            self._flush_active_play_time()
             was_playing = self.is_playing or bool(self._process)
             self._playback_session += 1
             self.is_playing = False
@@ -851,6 +860,48 @@ class AudioPlayer:
         self._session_play_seconds = 0.0
         self._session_play_started_at = 0.0
 
+    def _flush_active_play_time(self, *, continue_from_now: bool = False) -> None:
+        """Accumulate in-progress track elapsed time into counters."""
+        if self._session_play_started_at <= 0:
+            return
+        now_mono = time.monotonic()
+        elapsed = max(0.0, now_mono - self._session_play_started_at)
+        if elapsed > 0:
+            self._session_play_seconds += elapsed
+            self._daily_play_seconds += elapsed
+        if continue_from_now and self.is_playing:
+            self._session_play_started_at = now_mono
+        else:
+            self._session_play_started_at = 0.0
+
+    def get_daily_playlist_summary(self, *, reset: bool = False) -> dict:
+        """Return daily playlist totals; optionally reset counters."""
+        with self._lock:
+            if reset:
+                self._flush_active_play_time(continue_from_now=True)
+                play_seconds = self._daily_play_seconds
+            else:
+                play_seconds = self._daily_play_seconds
+                if self._session_play_started_at > 0:
+                    play_seconds += max(
+                        0.0,
+                        time.monotonic() - self._session_play_started_at,
+                    )
+            summary = {
+                "date": self._daily_summary_date,
+                "tracks_played": int(self._daily_tracks_played),
+                "tracks_skipped": int(self._daily_tracks_skipped),
+                "play_seconds": round(play_seconds, 1),
+                "play_minutes": round(play_seconds / 60.0, 1),
+                "play_hours": round(play_seconds / 3600.0, 3),
+            }
+            if reset:
+                self._daily_summary_date = datetime.now().strftime("%Y-%m-%d")
+                self._daily_tracks_played = 0
+                self._daily_tracks_skipped = 0
+                self._daily_play_seconds = 0.0
+            return summary
+
     def _start_monitor_mpg123(
         self, process: Optional[subprocess.Popen], playback_session: int
     ):
@@ -879,9 +930,7 @@ class AudioPlayer:
 
                     logger.info("Track ended (mpg123)")
                     log_play("track_end", {"backend": "mpg123"})
-                    if self._session_play_started_at > 0:
-                        self._session_play_seconds += time.monotonic() - self._session_play_started_at
-                        self._session_play_started_at = 0.0
+                    self._flush_active_play_time()
 
                     if self.on_track_end:
                         self.on_track_end()
@@ -917,9 +966,7 @@ class AudioPlayer:
 
                     logger.info("Track ended (pygame)")
                     log_play("track_end", {"backend": "pygame"})
-                    if self._session_play_started_at > 0:
-                        self._session_play_seconds += time.monotonic() - self._session_play_started_at
-                        self._session_play_started_at = 0.0
+                    self._flush_active_play_time()
 
                     if self.on_track_end:
                         self.on_track_end()

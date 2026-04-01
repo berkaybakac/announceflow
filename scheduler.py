@@ -712,6 +712,29 @@ class Scheduler:
                 "web_events": get_and_reset_web_event_count(),
             },
         )
+        playlist_daily = {
+            "tracks_played": 0,
+            "tracks_skipped": 0,
+            "play_seconds": 0.0,
+            "play_minutes": 0.0,
+            "play_hours": 0.0,
+        }
+        try:
+            player = get_player()
+            playlist_daily = player.get_daily_playlist_summary(reset=True)
+        except Exception as exc:
+            logger.debug("daily playlist summary unavailable: %s", exc)
+        log_system(
+            "playlist_daily_summary",
+            {
+                "date": self._daily_current_date,
+                "tracks_played": int(playlist_daily.get("tracks_played", 0)),
+                "tracks_skipped": int(playlist_daily.get("tracks_skipped", 0)),
+                "play_seconds": float(playlist_daily.get("play_seconds", 0.0)),
+                "play_minutes": float(playlist_daily.get("play_minutes", 0.0)),
+                "play_hours": float(playlist_daily.get("play_hours", 0.0)),
+            },
+        )
         self._daily_current_date = today
         self._daily_triggers_one_time = 0
         self._daily_triggers_recurring = 0
@@ -1365,8 +1388,8 @@ class Scheduler:
             sender_alive = stream_service.policy_sender_alive()
             if should_resume_stream(True, sender_alive):
                 stream_service.resume_after_announcement()
-        except Exception as e:
-            logger.error(f"Announcement stream resume worker error: {e}")
+        except Exception:
+            logger.exception("Announcement stream resume worker error")
         finally:
             with self._stream_resume_worker_lock:
                 self._stream_resume_worker_in_progress = False
@@ -2008,8 +2031,8 @@ class Scheduler:
 
                 if not self._restore_worker_once(player, state):
                     break
-        except Exception as e:
-            logger.error(f"Restore playlist thread error: {e}")
+        except Exception:
+            logger.exception("Restore playlist thread error")
         finally:
             current_thread = threading.current_thread()
             with self._restore_lock:

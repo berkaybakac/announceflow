@@ -183,6 +183,24 @@ def test_process_ffmpeg_line_xrun_type_overrun_when_explicit():
     assert counters["last_xrun_type_source"] == "ffmpeg_log"
 
 
+def test_calc_stream_quality_summary_penalizes_xrun_and_overrun():
+    counters = _new_counters()
+    counters["alsa_xrun"] = 15
+    counters["udp_overrun"] = 3
+
+    summary = receiver._calc_stream_quality_summary(
+        counters,
+        duration_seconds=120 * 60,
+    )
+
+    assert summary["duration_minutes"] == 120.0
+    assert summary["xrun_rate_per_min"] == 0.125
+    assert summary["udp_overrun_rate_per_min"] == 0.025
+    assert summary["quality_pct"] < 100.0
+    assert summary["quality_pct"] > 90.0
+    assert summary["quality_formula_version"] == "v1_rate_penalty"
+
+
 def test_process_ffmpeg_line_emits_first_input_output_events(monkeypatch):
     counters = _new_counters()
     buf = io.StringIO()
