@@ -662,6 +662,17 @@ class AudioPlayer:
             self._position = 0.0
             self._started_at = 0.0
             self._stop_event.set()
+            
+            # Usage Audit on Stop
+            if self.current_file and self._session_play_started_at > 0:
+                duration = time.monotonic() - self._session_play_started_at
+                log_play("playback_usage_audit", {
+                    "file": os.path.basename(self.current_file),
+                    "duration_seconds": round(duration, 2),
+                    "status": "interrupted",
+                    "source": "local"
+                })
+                self._session_play_started_at = 0.0
 
         if AUDIO_BACKEND == "mpg123" and self._process:
             try:
@@ -710,6 +721,17 @@ class AudioPlayer:
             self._position = 0.0
             self._started_at = 0.0  # Reset start time
             self._stop_event.set()
+
+            # Usage Audit on Stop
+            if self.current_file and self._session_play_started_at > 0:
+                duration = time.monotonic() - self._session_play_started_at
+                log_play("playback_usage_audit", {
+                    "file": os.path.basename(self.current_file),
+                    "duration_seconds": round(duration, 2),
+                    "status": "stopped",
+                    "source": "local"
+                })
+                self._session_play_started_at = 0.0
             # CRITICAL: Disable playlist to prevent monitor thread from calling play_next()
             self._playlist_active = False
 

@@ -692,7 +692,7 @@ class Scheduler:
             },
         )
 
-    def _check_daily_usage_summary(self) -> None:
+    def _check_daily_usage_summary(self, config: dict[str, Any]) -> None:
         """Emit a daily_usage_summary at midnight boundary and reset counters."""
         today = datetime.now().strftime("%Y-%m-%d")
         if self._daily_current_date is None:
@@ -740,6 +740,35 @@ class Scheduler:
         self._daily_triggers_recurring = 0
         self._daily_prayer_silences = 0
         self._daily_working_hours_blocks = 0
+
+        # DB Health Stats (Daily)
+        try:
+            db_path = os.path.join(os.path.dirname(__file__), "announceflow.db")
+            db_size_kb = os.path.getsize(db_path) // 1024 if os.path.exists(db_path) else 0
+            
+            # Rough row count estimate
+            conn = db.get_db_connection()
+            cur = conn.cursor()
+            cur.execute("SELECT count(*) FROM media_files")
+            media_count = cur.fetchone()[0]
+            cur.execute("SELECT count(*) FROM schedules_one_time")
+            one_time_count = cur.fetchone()[0]
+            cur.execute("SELECT count(*) FROM schedules_recurring")
+            recurring_count = cur.fetchone()[0]
+            conn.close()
+
+            log_system(
+                "db_daily_health_stats",
+                {
+                    "date": self._daily_current_date,
+                    "db_size_kb": db_size_kb,
+                    "rows_media": media_count,
+                    "rows_one_time": one_time_count,
+                    "rows_recurring": recurring_count,
+                },
+            )
+        except Exception as exc:
+            logger.debug("DB health stats collection failed: %s", exc)
 
     def _queue_announcement(
         self,
@@ -1456,7 +1485,7 @@ class Scheduler:
                 )
                 self._log_announcement_queue_health()
                 self._log_system_health()
-                self._check_daily_usage_summary()
+                self._check_daily_usage_summary(config)
 
                 self._run_reconcile_watchdog(config, player, silence_decision)
 
@@ -1594,6 +1623,17 @@ class Scheduler:
                     # Time to play!
                     logger.info(
                         f"Triggering one-time schedule: {filename} (diff: {time_diff:.0f}s)"
+                    )
+                    log_trigger(
+                        "scheduler_task_success",
+                        {
+                            "task_type": "one_time",
+                            "schedule_id": schedule_id,
+                            "filename": filename,
+                            "scheduled_ts": scheduled_dt.isoformat(),
+                            "actual_ts": now.isoformat(),
+                            "diff_seconds": round(time_diff, 3),
+                        }
                     )
                     log_trigger(
                         "one_time",
