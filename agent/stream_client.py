@@ -23,16 +23,6 @@ from typing import Any, Dict, Optional
 import psutil
 import subprocess
 from typing import Any, Dict, Optional, Tuple
-from logger import (
-    log_error,
-    log_warn,
-    log_event,
-    log_trigger,
-    log_schedule,
-    log_prayer,
-    log_system,
-    get_and_reset_web_event_count,
-)
 
 logger = logging.getLogger(__name__)
 stream_logger = logging.getLogger("agent.stream")
@@ -760,13 +750,11 @@ class StreamClient:
                                 msg="Loopback capture active",
                             )
                             if capture_rate != _TARGET_SAMPLE_RATE:
-                                log_warn(
-                                    "sample_rate_mismatch",
-                                    {
-                                        "capture_rate": capture_rate,
-                                        "target_rate": _TARGET_SAMPLE_RATE,
-                                        "msg": "PC sound card rate differs from stream; resampling active",
-                                    },
+                                stream_logger.warning(
+                                    "sample_rate_mismatch capture_rate=%s target_rate=%s "
+                                    "PC sound card rate differs from stream; resampling active",
+                                    capture_rate,
+                                    _TARGET_SAMPLE_RATE,
                                 )
 
                             last_telemetry_mono = time.monotonic()
