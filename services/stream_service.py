@@ -277,12 +277,12 @@ class StreamService:
             time.sleep(5)
             try:
                 self._check_heartbeat()
-            except Exception as exc:
-                logger.error("StreamService: heartbeat monitor error: %s", exc)
+            except Exception:
+                logger.exception("StreamService: heartbeat monitor error")
             try:
                 self._check_xrun_auto_restart()
-            except Exception as exc:
-                logger.error("StreamService: xrun auto-restart check error: %s", exc)
+            except Exception:
+                logger.exception("StreamService: xrun auto-restart check error")
 
     def _check_heartbeat(self) -> bool:
         """Check heartbeat expiry; auto-stop if expired.
@@ -1165,7 +1165,7 @@ class StreamService:
                 return {"success": True, "status": self._status.to_dict()}
 
             except Exception as exc:
-                logger.error("StreamService: start failed: %s", exc)
+                logger.exception("StreamService: start failed")
                 self._status = StreamStatus(
                     active=False,
                     state="error",
@@ -1303,7 +1303,7 @@ class StreamService:
                 return {"success": True, "status": self._status.to_dict()}
 
             except Exception as exc:
-                logger.error("StreamService: stop failed: %s", exc)
+                logger.exception("StreamService: stop failed")
                 self._status = StreamStatus(
                     active=False,
                     state="error",
