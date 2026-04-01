@@ -35,6 +35,7 @@ class StreamManager:
     def __init__(self, port: int = STREAM_RECEIVER_PORT):
         self._process = None
         self._stopping_proc = None
+        self._stop_request_context: Optional[Dict[str, Optional[str]]] = None
         self._lock = threading.Lock()
         self._port = port
         self._consecutive_start_failures = 0
@@ -77,6 +78,10 @@ class StreamManager:
         proc: Optional[subprocess.Popen] = None,
         phase: Optional[str] = None,
         error: Optional[str] = None,
+        caller: Optional[str] = None,
+        request_reason: Optional[str] = None,
+        active_stop_caller: Optional[str] = None,
+        active_stop_reason: Optional[str] = None,
     ) -> None:
         """Emit structured stop telemetry for diagnostics."""
         data = {"reason": reason, "port": self._port}
@@ -86,6 +91,14 @@ class StreamManager:
             data["phase"] = phase
         if error:
             data["error"] = error
+        if caller:
+            data["caller"] = caller
+        if request_reason:
+            data["request_reason"] = request_reason
+        if active_stop_caller:
+            data["active_stop_caller"] = active_stop_caller
+        if active_stop_reason:
+            data["active_stop_reason"] = active_stop_reason
         try:
             log_system("stream_receiver_stop_reason", data)
         except Exception as exc:
@@ -150,6 +163,7 @@ class StreamManager:
                         )
                         return False
                 self._stopping_proc = None
+                self._stop_request_context = None
             if self._is_alive_unlocked():
                 return True
             try:
@@ -222,7 +236,12 @@ class StreamManager:
                 self._record_start_failure_unlocked(correlation_id=correlation_id)
                 return False
 
-    def stop_receiver(self) -> bool:
+    def stop_receiver(
+        self,
+        *,
+        caller: Optional[str] = None,
+        reason: Optional[str] = None,
+    ) -> bool:
         """Stop the stream receiver process.
 
         Sends SIGTERM and waits briefly. If the process hasn't exited yet,
@@ -235,18 +254,32 @@ class StreamManager:
         with self._lock:
             if not self._is_alive_unlocked():
                 if self._stopping_proc is not None and self._stopping_proc.poll() is None:
+                    active_context = self._stop_request_context or {}
                     self._log_stop_reason(
                         "already_stopping",
                         proc=self._stopping_proc,
+                        caller=caller,
+                        request_reason=reason,
+                        active_stop_caller=active_context.get("caller"),
+                        active_stop_reason=active_context.get("request_reason"),
                     )
                     return True
                 if self._stopping_proc is not None and self._stopping_proc.poll() is not None:
                     self._stopping_proc = None
-                self._log_stop_reason("already_stopped")
+                    self._stop_request_context = None
+                self._log_stop_reason(
+                    "already_stopped",
+                    caller=caller,
+                    request_reason=reason,
+                )
                 return True
             proc = self._process
             self._process = None
             self._stopping_proc = proc
+            self._stop_request_context = {
+                "caller": caller,
+                "request_reason": reason,
+            }
 
         try:
             # Close stdin first — receiver's signal handler sends 'q' to ffmpeg.
@@ -260,26 +293,42 @@ class StreamManager:
             try:
                 proc.wait(timeout=STOP_QUICK_WAIT)
                 logger.info("StreamManager: receiver stopped (quick)")
-                self._log_stop_reason("graceful", proc=proc, phase="quick")
+                self._log_stop_reason(
+                    "graceful",
+                    proc=proc,
+                    phase="quick",
+                    caller=caller,
+                    request_reason=reason,
+                )
                 with self._lock:
                     if self._stopping_proc is proc:
                         self._stopping_proc = None
+                        self._stop_request_context = None
             except subprocess.TimeoutExpired:
                 logger.info(
                     "StreamManager: receiver still alive after %.1fs, background cleanup started",
                     STOP_QUICK_WAIT,
                 )
                 t = threading.Thread(
-                    target=self._background_kill, args=(proc,), daemon=True
+                    target=self._background_kill,
+                    args=(proc,),
+                    daemon=True,
                 )
                 t.start()
             return True
         except Exception as exc:
             logger.error("StreamManager: error stopping receiver: %s", exc)
-            self._log_stop_reason("error", proc=proc, error=str(exc))
+            self._log_stop_reason(
+                "error",
+                proc=proc,
+                error=str(exc),
+                caller=caller,
+                request_reason=reason,
+            )
             with self._lock:
                 if self._stopping_proc is proc:
                     self._stopping_proc = None
+                    self._stop_request_context = None
             return False
 
     def wait_for_stop_complete(self, timeout: float = 1.3) -> None:
@@ -302,6 +351,7 @@ class StreamManager:
                     return
                 if self._stopping_proc.poll() is not None:
                     self._stopping_proc = None
+                    self._stop_request_context = None
                     return
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -320,13 +370,24 @@ class StreamManager:
                 except subprocess.TimeoutExpired:
                     pass
             self._stopping_proc = None
+            self._stop_request_context = None
 
     def _background_kill(self, proc: subprocess.Popen):
         """Wait for process to exit gracefully, then SIGKILL if needed."""
+        with self._lock:
+            context = dict(self._stop_request_context or {})
+        caller = context.get("caller")
+        request_reason = context.get("request_reason")
         try:
             proc.wait(timeout=STOP_BG_GRACE_SECONDS)
             logger.info("StreamManager: receiver stopped (background grace)")
-            self._log_stop_reason("graceful", proc=proc, phase="background")
+            self._log_stop_reason(
+                "graceful",
+                proc=proc,
+                phase="background",
+                caller=caller,
+                request_reason=request_reason,
+            )
         except subprocess.TimeoutExpired:
             logger.warning(
                 "StreamManager: receiver did not exit in %.1fs, forcing kill",
@@ -335,14 +396,25 @@ class StreamManager:
             proc.kill()
             try:
                 proc.wait(timeout=STOP_KILL_WAIT_SECONDS)
-                self._log_stop_reason("force_kill", proc=proc)
+                self._log_stop_reason(
+                    "force_kill",
+                    proc=proc,
+                    caller=caller,
+                    request_reason=request_reason,
+                )
             except subprocess.TimeoutExpired:
                 logger.error("StreamManager: receiver did not exit after SIGKILL")
-                self._log_stop_reason("force_kill_timeout", proc=proc)
+                self._log_stop_reason(
+                    "force_kill_timeout",
+                    proc=proc,
+                    caller=caller,
+                    request_reason=request_reason,
+                )
         finally:
             with self._lock:
                 if self._stopping_proc is proc:
                     self._stopping_proc = None
+                    self._stop_request_context = None
 
     def is_alive(self) -> bool:
         """Check if the receiver process is currently running.

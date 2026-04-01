@@ -17,6 +17,7 @@ import logging
 
 from flask import Blueprint, jsonify, request
 
+from logger import log_system
 from services.audio_alert_service import clamp_window_minutes, get_audio_alerts
 from services.stream_service import get_stream_service
 from utils.helpers import _json_error, _json_success, login_required
@@ -85,7 +86,22 @@ def stream_stop():
     """
     device_id = request.headers.get("X-Stream-Device-Id", "").strip() or None
     if device_id:
-        result = _stream_service.stop()
+        stop_origin = request.headers.get("X-Stream-Stop-Origin", "").strip() or None
+        log_system(
+            "stream_stop_api_request",
+            {
+                "source": "agent_direct_stop",
+                "device_id": device_id,
+                "device_name": request.headers.get("X-Stream-Device-Name", "").strip() or None,
+                "stop_origin": stop_origin,
+                "remote_addr": request.remote_addr,
+                "user_agent": request.headers.get("User-Agent", ""),
+            },
+        )
+        result = _stream_service.stop(
+            caller="routes.stream_stop",
+            reason=stop_origin or "api_stop_request",
+        )
     else:
         payload = request.get_json(silent=True) or {}
         target_device_id = None

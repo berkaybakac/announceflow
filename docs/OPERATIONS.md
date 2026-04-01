@@ -62,6 +62,73 @@ SSH multiplexing is used to avoid repeated password prompts.
 
 ## XRUN Auto-Restart Validation (Staging/Pi)
 
+### 288s Restart Isolation (Root Cause First)
+
+Use this before any broad code change when you observe periodic receiver
+restarts around ~288 seconds.
+
+Goal:
+- determine whether restarts are caused by stream logic, heartbeat/control path,
+  xrun policy, or external/runtime process behavior.
+- avoid large refactors until root cause is proven.
+
+Minimum evidence set (same time window):
+- `logs/events.jsonl` (Pi)
+- `logs/stream_receiver_ffmpeg.log` (Pi)
+- `%LOCALAPPDATA%\\AnnounceFlow\\logs\\agent_stream.log` + `stream_attempt_*.json` (Windows)
+
+Run matrix (at least 20 minutes each):
+1. Scenario A: stream only (no announcement, no policy boundary).
+2. Scenario B: stream + announcement interruption.
+3. Scenario C: stream + working-hours or prayer boundary.
+
+Quick collection commands:
+
+```bash
+TS_UTC="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+echo "$TS_UTC"
+```
+
+```bash
+python3 scripts/events_query.py \
+  --file logs/events.jsonl \
+  --since "$TS_UTC" \
+  --summary
+
+python3 scripts/stream_telemetry_report.py \
+  --file logs/events.jsonl \
+  --since "$TS_UTC" \
+  --compact \
+  --limit 400
+
+rg -n "stream_receiver_summary|stream_receiver_exit_nonzero|stream_receiver_exit_controlled|stream_receiver_stop_reason|stream_heartbeat_expired|stream_desired_command_expired|stream_xrun_auto_restart|stream_takeover_start|stream_takeover_complete" logs/events.jsonl -S
+
+rg -n "ALSA buffer xrun|Circular buffer overrun|Last message repeated|Exiting normally|Immediate exit requested" logs/stream_receiver_ffmpeg.log -S
+```
+
+```powershell
+scripts\preflight_windows_audio.cmd
+scripts\collect_windows_agent_logs.ps1 -LastMinutes 180
+```
+
+Pattern triage:
+1. `stream_xrun_auto_restart` near restart time:
+   xrun policy is actively restarting.
+2. `stream_heartbeat_expired` near restart time:
+   heartbeat flow gap (agent/UI/network cadence).
+3. `stream_desired_command_expired` or repeated desired-state updates:
+   panel-agent command reconciliation issue.
+4. Internal `stream_receiver_stop_reason` without explicit operator action:
+   stream lifecycle path is triggering stop/start.
+5. Nonzero ffmpeg exits without upstream stop reason:
+   receiver/runtime/ALSA path issue.
+
+Order of action:
+1. prove root cause with matrix + synchronized logs.
+2. if still ambiguous, add targeted telemetry (caller/context/correlation on stop/start).
+3. apply one focused fix.
+4. retest.
+
 Expected event names:
 
 - `stream_xrun_auto_restart_dry_run` (default mode, no real restart)

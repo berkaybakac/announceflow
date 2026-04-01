@@ -305,7 +305,10 @@ class StreamService:
                 "stream_heartbeat_expired",
                 {"device_id": evicted_device, "correlation_id": evicted_cid},
             )
-            self.stop()
+            self.stop(
+                caller="stream_service._check_heartbeat",
+                reason="heartbeat_timeout",
+            )
             return True
         return False
 
@@ -486,7 +489,10 @@ class StreamService:
             intent_id,
         )
 
-        if not self._manager.stop_receiver():
+        if not self._manager.stop_receiver(
+            caller="stream_service._check_xrun_auto_restart",
+            reason="xrun_auto_restart",
+        ):
             with self._lock:
                 if self._xrun_restart_intent_id == intent_id:
                     self._xrun_restart_intent_id = None
@@ -907,7 +913,10 @@ class StreamService:
                     },
                 )
                 if self._manager:
-                    self._manager.stop_receiver()
+                    self._manager.stop_receiver(
+                        caller="stream_service.start",
+                        reason="takeover_evict_previous_owner",
+                    )
                 self._mid_takeover = True
                 # Save what we need for phase 3; _status still reflects the old
                 # session so concurrent status() callers see a live response.
@@ -1105,7 +1114,12 @@ class StreamService:
                 )
                 return {"success": False, "status": self._status.to_dict()}
 
-    def stop(self) -> dict:
+    def stop(
+        self,
+        *,
+        caller: str = "stream_service.stop",
+        reason: str = "explicit_stop_request",
+    ) -> dict:
         """Stop the active stream session (idempotent).
 
         Returns:
@@ -1135,7 +1149,10 @@ class StreamService:
                 stop_error = None
 
                 if self._manager:
-                    if not self._manager.stop_receiver():
+                    if not self._manager.stop_receiver(
+                        caller=caller,
+                        reason=reason,
+                    ):
                         stop_error = "receiver_stop_failed"
                         logger.warning(
                             "StreamService: stop_receiver returned False, "
@@ -1162,6 +1179,8 @@ class StreamService:
                         "session_duration_seconds": session_duration,
                         "device_id": self._active_device_id,
                         "device_name": self._active_device_name,
+                        "stop_caller": caller,
+                        "stop_request_reason": reason,
                     },
                 )
                 self._session_started_at = 0.0
@@ -1346,7 +1365,10 @@ class StreamService:
             if not self._status.active or self._status.state != "live":
                 return {"success": True, "status": self._status.to_dict()}
 
-            if self._manager and not self._manager.stop_receiver():
+            if self._manager and not self._manager.stop_receiver(
+                caller="stream_service.pause_for_announcement",
+                reason="announcement_pause",
+            ):
                 logger.warning(
                     "StreamService: pause_for_announcement stop_receiver returned False"
                 )
@@ -1424,7 +1446,10 @@ class StreamService:
             if not self._status.active and self._status.state != "paused_for_announcement":
                 return {"success": True, "status": self._status.to_dict()}
 
-            if self._manager and not self._manager.stop_receiver():
+            if self._manager and not self._manager.stop_receiver(
+                caller="stream_service.force_stop_by_policy",
+                reason="policy_silence_window",
+            ):
                 logger.warning(
                     "StreamService: force_stop_by_policy stop_receiver returned False"
                 )

@@ -561,7 +561,7 @@ class TestXrunAutoRestart:
         }
         baseline_restarts = len(svc._xrun_auto_restart_times)
 
-        def _stop_and_flip_state():
+        def _stop_and_flip_state(*_args, **_kwargs):
             svc._status.active = False
             svc._status.state = "idle"
             svc._active_correlation_id = None
@@ -761,7 +761,8 @@ class TestXrunStatusFile:
         monkeypatch.setattr(recv_mod, "XRUN_STATUS_FILE", str(status_file))
 
         counters = {"alsa_xrun": 42, "udp_overrun": 3}
-        recv_mod._write_xrun_status(counters, "test-cid")
+        # Isolate from module-global write throttle used by other tests.
+        recv_mod._write_xrun_status(counters, "test-cid", force=True)
 
         assert status_file.exists()
 
@@ -857,7 +858,7 @@ class TestXrunAutoRestartSoak:
                 "correlation_id": "test-cid",
             }
 
-            def _stop_and_flip_state():
+            def _stop_and_flip_state(*_args, **_kwargs):
                 svc._status.active = False
                 svc._status.state = "idle"
                 svc._active_correlation_id = None
