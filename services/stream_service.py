@@ -73,6 +73,19 @@ def _coerce_non_negative_float(value: Any, default: float = 0.0) -> float:
     return max(0.0, parsed)
 
 
+def _coerce_optional_bool(value: Any) -> Optional[bool]:
+    if isinstance(value, bool):
+        return value
+    return None
+
+
+def _coerce_xrun_type(value: Any, default: str = "unknown") -> str:
+    text = str(value or "").strip().lower()
+    if text in {"underrun", "overrun", "unknown"}:
+        return text
+    return default
+
+
 def _read_env_int(
     name: str,
     default: int,
@@ -353,6 +366,38 @@ class StreamService:
             status.get("xrun_burst_rate_per_sec"),
             default=0.0,
         )
+        status_xrun_underrun = _coerce_non_negative_int(
+            status.get("xrun_underrun_count"),
+            default=0,
+        )
+        status_xrun_overrun = _coerce_non_negative_int(
+            status.get("xrun_overrun_count"),
+            default=0,
+        )
+        status_xrun_unknown = _coerce_non_negative_int(
+            status.get("xrun_unknown_count"),
+            default=0,
+        )
+        status_last_xrun_type = _coerce_xrun_type(
+            status.get("last_xrun_type"),
+            default="unknown",
+        )
+        status_last_xrun_type_source = (
+            str(status.get("last_xrun_type_source") or "").strip() or "unknown"
+        )
+        status_udp_overrun = _coerce_non_negative_int(
+            status.get("udp_overrun"),
+            default=0,
+        )
+        status_mono_ts = _coerce_non_negative_float(
+            status.get("mono_ts"),
+            default=0.0,
+        )
+        xrun_status_age_seconds = (
+            round(max(0.0, time.monotonic() - status_mono_ts), 3)
+            if status_mono_ts > 0
+            else None
+        )
         now = time.monotonic()
         intent_id: Optional[str] = None
         correlation_id: Optional[str] = None
@@ -373,12 +418,19 @@ class StreamService:
                 "dry_run": dry_run,
                 "threshold": threshold,
                 "window_seconds": window_seconds,
+                "udp_overrun_total": status_udp_overrun,
+                "xrun_status_age_seconds": xrun_status_age_seconds,
                 "xrun_peak_1s": status_peak_1s,
                 "xrun_peak_60s": status_peak_60s,
                 "xrun_max_consecutive": status_max_consecutive,
                 "xrun_current_consecutive": status_current_consecutive,
                 "xrun_session_rate_per_sec": status_session_rate,
                 "xrun_burst_rate_per_sec": status_burst_rate,
+                "xrun_underrun_count": status_xrun_underrun,
+                "xrun_overrun_count": status_xrun_overrun,
+                "xrun_unknown_count": status_xrun_unknown,
+                "last_xrun_type": status_last_xrun_type,
+                "last_xrun_type_source": status_last_xrun_type_source,
             }
 
         with self._lock:
@@ -604,6 +656,24 @@ class StreamService:
         result = self._status.to_dict()
         result["owner_device_id"] = self._active_device_id
         result["owner_device_name"] = self._active_device_name
+        owner_sender_running: Optional[bool] = None
+        owner_last_seen_age_seconds: Optional[float] = None
+        if self._active_device_id:
+            owner_meta = self._agent_registry.get(self._active_device_id) or {}
+            owner_sender_running = _coerce_optional_bool(
+                owner_meta.get("sender_running")
+            )
+            owner_last_seen = _coerce_non_negative_float(
+                owner_meta.get("last_seen_at"),
+                default=0.0,
+            )
+            if owner_last_seen > 0:
+                owner_last_seen_age_seconds = round(
+                    max(0.0, time.time() - owner_last_seen),
+                    3,
+                )
+        result["owner_sender_running"] = owner_sender_running
+        result["owner_last_seen_age_seconds"] = owner_last_seen_age_seconds
         result["preferred_device_id"] = self._preferred_device_id
         result["preferred_device_name"] = self._preferred_device_name
         result["command_status"] = self._command_status
@@ -1147,6 +1217,22 @@ class StreamService:
                 source_before = self._status.source_before_stream
                 correlation_id = self._active_correlation_id
                 stop_error = None
+                owner_sender_running = None
+                owner_last_seen_age_seconds = None
+                if self._active_device_id:
+                    owner_meta = self._agent_registry.get(self._active_device_id) or {}
+                    owner_sender_running = _coerce_optional_bool(
+                        owner_meta.get("sender_running")
+                    )
+                    owner_last_seen = _coerce_non_negative_float(
+                        owner_meta.get("last_seen_at"),
+                        default=0.0,
+                    )
+                    if owner_last_seen > 0:
+                        owner_last_seen_age_seconds = round(
+                            max(0.0, time.time() - owner_last_seen),
+                            3,
+                        )
 
                 if self._manager:
                     if not self._manager.stop_receiver(
@@ -1171,14 +1257,35 @@ class StreamService:
                 session_duration = round(
                     time.monotonic() - self._session_started_at, 1
                 ) if self._session_started_at > 0 else 0.0
+                session_duration_hours = round(session_duration / 3600.0, 6)
+                session_local_date = datetime.now().astimezone().strftime("%Y-%m-%d")
                 log_system(
                     "stream_stopped",
                     {
                         "restored_source": source_before,
                         "correlation_id": correlation_id,
                         "session_duration_seconds": session_duration,
+                        "session_duration_hours": session_duration_hours,
+                        "session_local_date": session_local_date,
                         "device_id": self._active_device_id,
                         "device_name": self._active_device_name,
+                        "owner_sender_running": owner_sender_running,
+                        "owner_last_seen_age_seconds": owner_last_seen_age_seconds,
+                        "stop_caller": caller,
+                        "stop_request_reason": reason,
+                    },
+                )
+                log_system(
+                    "stream_usage_session",
+                    {
+                        "date_local": session_local_date,
+                        "session_duration_seconds": session_duration,
+                        "session_duration_hours": session_duration_hours,
+                        "correlation_id": correlation_id,
+                        "device_id": self._active_device_id,
+                        "device_name": self._active_device_name,
+                        "owner_sender_running": owner_sender_running,
+                        "owner_last_seen_age_seconds": owner_last_seen_age_seconds,
                         "stop_caller": caller,
                         "stop_request_reason": reason,
                     },
@@ -1308,7 +1415,30 @@ class StreamService:
                 if isinstance(last_command_error, str) and last_command_error.strip():
                     meta["last_command_error"] = last_command_error.strip()
                 if isinstance(sender_running, bool):
+                    previous_sender_running = _coerce_optional_bool(
+                        meta.get("sender_running")
+                    )
                     meta["sender_running"] = sender_running
+                    sender_state_changed = (
+                        previous_sender_running is None
+                        or previous_sender_running != sender_running
+                    )
+                    if (
+                        sender_state_changed
+                        and request_device_id == self._active_device_id
+                    ):
+                        log_system(
+                            "stream_sender_running_changed",
+                            {
+                                "device_id": request_device_id,
+                                "device_name": meta.get("device_name"),
+                                "sender_running": sender_running,
+                                "previous_sender_running": previous_sender_running,
+                                "state": self._status.state,
+                                "active": bool(self._status.active),
+                                "correlation_id": self._active_correlation_id,
+                            },
+                        )
 
                 if (
                     self._active_command_id

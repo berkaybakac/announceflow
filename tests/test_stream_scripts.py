@@ -236,3 +236,31 @@ def test_stream_telemetry_report_summarizes_controlled_vs_unexpected_exits(tmp_p
     assert "sessions_with_xrun= 1" in proc.stdout
     assert "controlled_exit_sessions= 1" in proc.stdout
     assert "unexpected_exit_sessions= 1" in proc.stdout
+
+
+def test_stream_telemetry_report_diagnose_prints_likely_owner(tmp_path):
+    events_file = tmp_path / "events.jsonl"
+    rows = [
+        {
+            "ts": "2026-03-05T20:30:00.000Z",
+            "cat": "SYSTEM",
+            "event": "stream_receiver_summary",
+            "data": {
+                "correlation_id": "cid-diag",
+                "udp_overrun": 4,
+                "alsa_xrun": 0,
+                "return_code": 0,
+            },
+        },
+    ]
+    events_file.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+
+    proc = _run_script(
+        "scripts/stream_telemetry_report.py",
+        "--file",
+        str(events_file),
+        "--diagnose",
+    )
+    assert proc.returncode == 0
+    assert "=== DIAGNOSE ===" in proc.stdout
+    assert "cid-diag | network_jitter_burst | customer_network" in proc.stdout

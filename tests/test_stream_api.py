@@ -212,6 +212,35 @@ class TestStreamServiceStop:
         assert r1["success"] is True
         assert r2["success"] is True
 
+    @patch("services.stream_service.log_system")
+    def test_stop_logs_stream_usage_session(
+        self, mock_log_system, mock_manager, mock_player
+    ):
+        svc = _make_service(mock_manager, mock_player)
+        svc.start(correlation_id="cid-usage", device_id="dev-1", device_name="Desk")
+        svc.heartbeat(device_id="dev-1", sender_running=True)
+        svc._session_started_at = time.monotonic() - 65.2
+
+        svc.stop(caller="test_stop", reason="unit_test")
+
+        usage_calls = [
+            call
+            for call in mock_log_system.call_args_list
+            if call.args and call.args[0] == "stream_usage_session"
+        ]
+        assert len(usage_calls) == 1
+        payload = usage_calls[0].args[1]
+        assert payload["date_local"]
+        assert payload["session_duration_seconds"] >= 65.0
+        assert payload["session_duration_hours"] > 0.0
+        assert payload["correlation_id"] == "cid-usage"
+        assert payload["device_id"] == "dev-1"
+        assert payload["device_name"] == "Desk"
+        assert payload["owner_sender_running"] is True
+        assert payload["owner_last_seen_age_seconds"] is not None
+        assert payload["stop_caller"] == "test_stop"
+        assert payload["stop_request_reason"] == "unit_test"
+
     def test_stop_calls_stop_receiver(self, mock_manager, mock_player):
         svc = _make_service(mock_manager, mock_player)
         svc.start()
@@ -311,6 +340,8 @@ class TestStreamServiceStatus:
             "last_error",
             "owner_device_id",
             "owner_device_name",
+            "owner_sender_running",
+            "owner_last_seen_age_seconds",
             "preferred_device_id",
             "preferred_device_name",
             "command_status",
@@ -331,6 +362,17 @@ class TestStreamServiceStatus:
         svc.start(device_id="dev-42")
         st = svc.status()
         assert st["owner_device_id"] == "dev-42"
+
+    def test_status_owner_sender_running_reflects_owner_heartbeat(
+        self, mock_manager, mock_player
+    ):
+        mock_manager.is_alive.return_value = True
+        svc = _make_service(mock_manager, mock_player)
+        svc.start(device_id="dev-42")
+        svc.heartbeat(device_id="dev-42", sender_running=True)
+        st = svc.status()
+        assert st["owner_sender_running"] is True
+        assert st["owner_last_seen_age_seconds"] is not None
 
 
 # --------------- Takeover tests ---------------
@@ -635,6 +677,33 @@ class TestStreamServicePreferredTargeting:
 
 
 class TestStreamRoutes:
+    @patch("routes.stream_routes.log_system")
+    @patch("routes.stream_routes._stream_service")
+    def test_start_endpoint_logs_agent_direct_start_request(
+        self, mock_svc, mock_log_system, client
+    ):
+        mock_svc.start.return_value = {
+            "success": True,
+            "status": StreamStatus(active=True, state="live").to_dict(),
+        }
+        resp = client.post(
+            "/api/stream/start",
+            headers={
+                "X-Stream-Correlation-Id": "cid-route-telemetry",
+                "X-Stream-Device-Id": "dev-route-telemetry",
+                "X-Stream-Device-Name": "Kasa-Route",
+                "User-Agent": "pytest-agent/1.0",
+            },
+        )
+        assert resp.status_code == 200
+        mock_log_system.assert_called_once()
+        event_name, payload = mock_log_system.call_args.args
+        assert event_name == "stream_start_api_request"
+        assert payload["source"] == "agent_direct_start"
+        assert payload["correlation_id"] == "cid-route-telemetry"
+        assert payload["device_id"] == "dev-route-telemetry"
+        assert payload["device_name"] == "Kasa-Route"
+
     @patch("routes.stream_routes._stream_service")
     def test_start_endpoint_200(self, mock_svc, client):
         mock_svc.request_remote_state.return_value = {

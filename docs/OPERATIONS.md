@@ -137,12 +137,14 @@ Expected event names:
 - `stream_xrun_auto_restart_skipped_cooldown`
 - `stream_xrun_auto_restart_skipped_throttled`
 - `stream_xrun_auto_restart_failed`
+- `stream_sender_running_changed`
 
-Expected payload keys (all events above):
+Expected payload keys (`stream_xrun_auto_restart*` events):
 
 - `correlation_id`, `xruns_in_window`, `total_xruns`
 - `restarts_this_hour`, `state`, `active`, `reason`
 - `dry_run`, `threshold`, `window_seconds`
+- `udp_overrun_total`, `xrun_status_age_seconds`
 - `xrun_peak_1s`, `xrun_peak_60s`, `xrun_max_consecutive`, `xrun_current_consecutive`
 
 XRUN runtime tuning (.env / environment):
