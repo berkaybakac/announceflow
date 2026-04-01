@@ -8,12 +8,16 @@ from routes.player_routes import player_bp
 def app():
     """Create a mock Flask app for testing diagnostics."""
     app = Flask(__name__)
+    app.secret_key = "test-secret"
     app.register_blueprint(player_bp)
     return app
 
 @pytest.fixture
 def client(app):
-    return app.test_client()
+    client = app.test_client()
+    with client.session_transaction() as sess:
+        sess["logged_in"] = True
+    return client
 
 def test_diagnose_api_returns_json(client, tmp_path, monkeypatch):
     """Verify that /api/diagnose returns a valid JSON structure."""

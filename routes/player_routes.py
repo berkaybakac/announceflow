@@ -6,6 +6,7 @@ import logging
 import os
 import threading
 import socket
+import time
 import uuid
 from typing import Optional
 from flask import Blueprint, jsonify, request
@@ -483,6 +484,7 @@ def api_resume():
     """Deprecated."""
     return _json_error("Not supported", 405)
 @player_bp.route("/api/diagnose", methods=["GET"])
+@login_required
 def get_diagnostic_report():
     """Return a JSON health report for the device."""
     minutes = request.args.get("minutes", default=60, type=int)

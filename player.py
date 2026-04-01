@@ -654,10 +654,13 @@ class AudioPlayer:
     def _stop_playback_only(self) -> None:
         """Stop playback without touching playlist state."""
         with self._lock:
+            was_playing = self.is_playing
+            stopped_file = self.current_file
+            play_started_at = self._session_play_started_at
             self._flush_active_play_time()
             self._playback_session += 1
             # Increment skipped count if stopped manually while playing
-            if self.is_playing:
+            if was_playing:
                 self._session_tracks_skipped += 1
                 self._daily_tracks_skipped += 1
 
@@ -667,12 +670,12 @@ class AudioPlayer:
             self._position = 0.0
             self._started_at = 0.0
             self._stop_event.set()
-            
+
             # Usage Audit on Stop
-            if self.current_file and self._session_play_started_at > 0:
-                duration = time.monotonic() - self._session_play_started_at
+            if stopped_file and play_started_at > 0 and was_playing:
+                duration = max(0.0, time.monotonic() - play_started_at)
                 log_play("playback_usage_audit", {
-                    "file": os.path.basename(self.current_file),
+                    "file": os.path.basename(stopped_file),
                     "duration_seconds": round(duration, 2),
                     "status": "interrupted",
                     "source": "local"
@@ -717,11 +720,14 @@ class AudioPlayer:
         """Stop playback safely."""
         # 1. Update state FIRST to prevent UI race conditions
         with self._lock:
+            was_playing = self.is_playing
+            was_playing_or_proc = self.is_playing or bool(self._process)
+            stopped_file = self.current_file
+            play_started_at = self._session_play_started_at
             self._flush_active_play_time()
-            was_playing = self.is_playing or bool(self._process)
             self._playback_session += 1
             # Increment skipped count if stopped manually while playing
-            if self.is_playing:
+            if was_playing:
                 self._session_tracks_skipped += 1
                 self._daily_tracks_skipped += 1
 
@@ -733,10 +739,10 @@ class AudioPlayer:
             self._stop_event.set()
 
             # Usage Audit on Stop
-            if self.current_file and self._session_play_started_at > 0:
-                duration = time.monotonic() - self._session_play_started_at
+            if stopped_file and play_started_at > 0 and was_playing:
+                duration = max(0.0, time.monotonic() - play_started_at)
                 log_play("playback_usage_audit", {
-                    "file": os.path.basename(self.current_file),
+                    "file": os.path.basename(stopped_file),
                     "duration_seconds": round(duration, 2),
                     "status": "stopped",
                     "source": "local"
@@ -765,7 +771,7 @@ class AudioPlayer:
             pygame.mixer.music.stop()
 
         logger.info("Playback stopped")
-        if was_playing:
+        if was_playing_or_proc:
             log_play("stop", {})
         return True
 

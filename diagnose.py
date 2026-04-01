@@ -78,12 +78,19 @@ def get_summary_data(minutes=60):
                             stats["temps"].append(data["temp_c"])
                         if data.get("load_1m", -1) >= 0:
                             stats["cpu_loads"].append(data["load_1m"])
-                        if data.get("wifi_signal_dbm", -1) < 0:
-                            stats["wifi_signals"].append(data["wifi_signal_dbm"])
+                        wifi_signal = data.get("wifi_signal_dbm", -1)
+                        if isinstance(wifi_signal, (int, float)) and wifi_signal != -1 and -100 <= wifi_signal <= 0:
+                            stats["wifi_signals"].append(wifi_signal)
                     elif event == "track_end":
                         stats["tracks_played"] += 1
                     elif event == "tracks_skipped":
                         stats["tracks_skipped"] += 1
+                    elif event in ("playlist_track_missing", "playlist_track_start_failed"):
+                        stats["tracks_skipped"] += 1
+                    elif event == "playback_usage_audit":
+                        status = str(data.get("status", "")).strip().lower()
+                        if status in {"interrupted", "stopped"}:
+                            stats["tracks_skipped"] += 1
 
                 except (json.JSONDecodeError, KeyError):
                     continue
