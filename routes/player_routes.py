@@ -25,6 +25,7 @@ from utils.helpers import (
     _reject_if_outside_working_hours,
 )
 from utils.time_utils import parse_storage_datetime_to_local
+from diagnose import get_summary_data
 
 
 player_bp = Blueprint("player", __name__)
@@ -481,3 +482,11 @@ def api_pause():
 def api_resume():
     """Deprecated."""
     return _json_error("Not supported", 405)
+@player_bp.route("/api/diagnose", methods=["GET"])
+def get_diagnostic_report():
+    """Return a JSON health report for the device."""
+    minutes = request.args.get("minutes", default=60, type=int)
+    report = get_summary_data(minutes=minutes)
+    if report is None:
+        return _json_error("Log file not found or unreadable", 404)
+    return jsonify(report)

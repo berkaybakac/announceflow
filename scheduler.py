@@ -609,7 +609,7 @@ class Scheduler:
                 "active": bool(self._announcement_current is not None),
                 "blocked_reason": self._announcement_last_block_reason or "none",
                 "dropped_stale": int(
-                    self._announcement_queue_counters.get("dropped_stale", 0)
+                self._announcement_queue_counters.get("dropped_stale", 0)
                 ),
                 "dropped_invalid": int(
                     self._announcement_queue_counters.get("dropped_invalid", 0)
@@ -621,78 +621,86 @@ class Scheduler:
         log_schedule("announcement_queue_health", snapshot)
 
     def _log_system_health(self) -> None:
+        """Periodic local system health audit (CPU, Memory, Temp, Disk, WiFi)."""
         now_mono = time.monotonic()
         if (
-            self._system_health_last_log_monotonic
+            self._system_health_last_log_monotonic > 0
             and (now_mono - self._system_health_last_log_monotonic)
             < self._system_health_log_interval_seconds
         ):
             return
         self._system_health_last_log_monotonic = now_mono
+
+        snap = {
+            "load_1m": -1.0,
+            "mem_total_mb": -1,
+            "mem_free_mb": -1,
+            "disk_used_pct": -1,
+            "temp_c": -1.0,
+            "wifi_signal_dbm": -1,
+            "wifi_link_quality": ""
+        }
+
+        # 1. Disk Usage
         try:
             import shutil
             disk = shutil.disk_usage("/")
-            disk_used_pct = round(disk.used / disk.total * 100, 1)
-            disk_free_mb = disk.free // (1024 * 1024)
+            snap["disk_used_pct"] = round(disk.used / disk.total * 100, 1)
         except Exception:
-            disk_used_pct = -1
-            disk_free_mb = -1
-        try:
-            with open("/proc/meminfo") as f:
-                meminfo = {}
-                for line in f:
-                    parts = line.split()
-                    if parts[0] in ("MemTotal:", "MemAvailable:"):
-                        meminfo[parts[0].rstrip(":")] = int(parts[1])
-                mem_total_mb = meminfo.get("MemTotal", 0) // 1024
-                mem_available_mb = meminfo.get("MemAvailable", 0) // 1024
-        except Exception:
-            mem_total_mb = -1
-            mem_available_mb = -1
+            pass
+
+        # 2. CPU Load
         try:
             with open("/proc/loadavg") as f:
-                load_1m = float(f.read().split()[0])
+                snap["load_1m"] = float(f.read().split()[0])
         except Exception:
-            load_1m = -1.0
-        # WiFi signal quality (Linux/Pi only)
-        wifi_signal_dbm = -1
-        wifi_link_quality = ""
+            pass
+
+        # 3. Memory
+        try:
+            with open("/proc/meminfo") as f:
+                for line in f:
+                    parts = line.split()
+                    if parts[0] == "MemTotal:":
+                        snap["mem_total_mb"] = int(parts[1]) // 1024
+                    elif parts[0] == "MemAvailable:":
+                        snap["mem_free_mb"] = int(parts[1]) // 1024
+        except Exception:
+            pass
+
+        # 4. Temperature (Pi specific)
+        try:
+            if os.path.exists("/sys/class/thermal/thermal_zone0/temp"):
+                with open("/sys/class/thermal/thermal_zone0/temp") as f:
+                    snap["temp_c"] = round(float(f.read().strip()) / 1000.0, 1)
+        except Exception:
+            pass
+
+        # 5. WiFi signal quality
         try:
             import subprocess as _sp
             iw_out = _sp.check_output(
-                ["iwconfig", "wlan0"], stderr=_sp.DEVNULL, timeout=3
+                ["iwconfig", "wlan0"], stderr=_sp.DEVNULL, timeout=2
             ).decode(errors="replace")
             for iw_line in iw_out.splitlines():
                 if "Signal level" in iw_line:
-                    m = __import__("re").search(r"Signal level[=:](-?\d+)", iw_line)
+                    import re
+                    m = re.search(r"Signal level[=:](-?\d+)", iw_line)
                     if m:
-                        wifi_signal_dbm = int(m.group(1))
+                        snap["wifi_signal_dbm"] = int(m.group(1))
                 if "Link Quality" in iw_line:
-                    m = __import__("re").search(r"Link Quality[=:](\S+)", iw_line)
+                    import re
+                    m = re.search(r"Link Quality[=:](\S+)", iw_line)
                     if m:
-                        wifi_link_quality = m.group(1)
+                        snap["wifi_link_quality"] = m.group(1)
         except Exception:
             pass
-        player = get_player()
-        player_state = player.get_state()
-        stream_svc = get_stream_service()
-        stream_status = stream_svc.status()
-        log_system(
-            "system_health",
-            {
-                "disk_used_pct": disk_used_pct,
-                "disk_free_mb": disk_free_mb,
-                "mem_total_mb": mem_total_mb,
-                "mem_available_mb": mem_available_mb,
-                "load_1m": load_1m,
-                "wifi_signal_dbm": wifi_signal_dbm,
-                "wifi_link_quality": wifi_link_quality,
-                "player_playing": player_state.get("is_playing", False),
-                "stream_active": stream_status.get("active", False),
-            },
-        )
 
-    def _check_daily_usage_summary(self, config: dict[str, Any]) -> None:
+        log_system("system_health", snap)
+
+    def _check_daily_usage_summary(
+        self, config: Optional[dict[str, Any]] = None
+    ) -> None:
         """Emit a daily_usage_summary at midnight boundary and reset counters."""
         today = datetime.now().strftime("%Y-%m-%d")
         if self._daily_current_date is None:

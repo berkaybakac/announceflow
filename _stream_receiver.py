@@ -158,6 +158,15 @@ _INTERNAL_DIAG_INTERVAL_SEC: float = 60.0
 _internal_diag_last_mono: Dict[str, float] = {}
 _internal_diag_lock = threading.Lock()
 
+# Final Observability State
+_last_sender_health: Dict[str, Any] = {}
+_last_ping_latency_ms: float = -1.0
+_health_state_lock = threading.Lock()
+_last_jitter_anomaly_mono: float = 0.0
+_last_xrun_snapshot_mono: float = 0.0
+_XRUN_SNAPSHOT_INTERVAL: float = 30.0
+_JITTER_ANOMALY_INTERVAL: float = 60.0
+
 
 def _emit_internal_diag(key: str, message: str) -> None:
     """Best-effort, rate-limited receiver diagnostics to stderr."""
@@ -220,16 +229,6 @@ def _read_proc_stat_snapshot() -> dict:
             f"proc_meminfo_read_failed error={exc.__class__.__name__}: {exc}",
         )
     return snapshot
-
-
-# Throttle xrun snapshots: at most one per 30 seconds to avoid log flood.
-_last_xrun_snapshot_mono: float = 0.0
-_XRUN_SNAPSHOT_INTERVAL: float = 30.0
-
-
-# Throttle jitter anomaly logs: at most one per 60 seconds.
-_last_jitter_anomaly_mono: float = 0.0
-_JITTER_ANOMALY_INTERVAL: float = 60.0
 
 
 # Xrun status file: receiver writes current count so StreamManager can read it.
@@ -507,7 +506,7 @@ def _log_jitter_anomaly(
     _last_jitter_anomaly_mono = now
 
     snap = _read_proc_stat_snapshot()
-    log_warn(
+    _safe_log_error(
         "stream_jitter_anomaly",
         {
             "correlation_id": correlation_id,
@@ -535,13 +534,17 @@ def _log_xrun_snapshot(counters: Dict[str, Any], correlation_id: str) -> None:
 
     snap = _read_proc_stat_snapshot()
     snap["correlation_id"] = correlation_id
+    
+    # Enrichment from sidechannel
+    with _health_state_lock:
+        snap["sender_health_last"] = dict(_last_sender_health)
+        snap["ping_latency_ms"] = _last_ping_latency_ms
+
     snap["xrun_count_so_far"] = counters.get("alsa_xrun", 0)
     snap["udp_overrun_so_far"] = counters.get("udp_overrun", 0)
-    snap["xrun_underrun_so_far"] = counters.get("xrun_underrun_count", 0)
-    snap["xrun_overrun_so_far"] = counters.get("xrun_overrun_count", 0)
-    snap["xrun_unknown_so_far"] = counters.get("xrun_unknown_count", 0)
+    snap["xrun_underrun_count"] = counters.get("xrun_underrun_count", 0)
+    snap["xrun_overrun_count"] = counters.get("xrun_overrun_count", 0)
     snap["last_xrun_type"] = counters.get("last_xrun_type", "unknown")
-    snap["last_xrun_type_source"] = counters.get("last_xrun_type_source", "unknown")
     _safe_log_error("xrun_snapshot", snap)
     _write_xrun_status(counters, correlation_id)
 
@@ -810,6 +813,8 @@ def _process_ffmpeg_line(
         counters["immediate_exit"] += 1
     if "cannot open audio device" in lower or "device or resource busy" in lower:
         counters["audio_device_errors"] += 1
+    if "connection refused" in lower:
+        counters["connection_errors"] += 1
     if "resyncing" in lower and "aresample" in lower:
         counters["clock_resync_count"] += 1
         log_warn("stream_clock_resync", {"correlation_id": correlation_id, "text": text})
@@ -914,29 +919,75 @@ def _classify_receiver_exit(
         return "controlled"
     return "unexpected"
 
+def _ping_sender_loop(sender_ip: str, stop_event: threading.Event) -> None:
+    """Periodically ping the sender to detect network lag or PC sleep."""
+    import subprocess
+    
+    _emit_internal_diag("ping_loop_start", f"Starting ping loop for {sender_ip}")
+    while not stop_event.is_set():
+        try:
+            # -c 1 (one packet), -W 1 (1 sec timeout)
+            t0 = time.monotonic()
+            proc = subprocess.run(
+                ["ping", "-c", "1", "-W", "1", sender_ip],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL
+            )
+            lat = (time.monotonic() - t0) * 1000
+            
+            with _health_state_lock:
+                global _last_ping_latency_ms
+                if proc.returncode == 0:
+                    _last_ping_latency_ms = round(lat, 2)
+                else:
+                    _last_ping_latency_ms = -2.0 # Timeout/Unreachable
+                
+            if _last_ping_latency_ms > 200:
+                log_warn("sender_ping_latency_high", {"ip": sender_ip, "latency_ms": _last_ping_latency_ms})
+                
+        except Exception as exc:
+            _emit_internal_diag("ping_failed", f"Ping to {sender_ip} failed: {exc}")
+            
+        time.sleep(10)
+
 def _health_receiver_loop(port: int, stop_event: threading.Event) -> None:
-    """Listen for sender hardware health on a sidechannel port and log it."""
+    """Listen for UDP health telemetry packets from the sender."""
+    import socket
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.setblocking(False)
     try:
         sock.bind(("0.0.0.0", port))
-        sock.settimeout(1.0)
-        while not stop_event.is_set():
-            try:
-                data, _ = sock.recvfrom(4096)
-                if not data:
-                    continue
-                payload = json.loads(data.decode("utf-8"))
-                if payload.get("event") == "sender_health":
-                    _safe_log_system("stream_sender_health", payload)
-            except (socket.timeout, UnicodeDecodeError, json.JSONDecodeError):
-                continue
-            except Exception as exc:
-                _emit_internal_diag("health_receiver_recv_failed", f"error={exc}")
-                break
+        _emit_internal_diag("health_listener_start", f"Listening for health on port {port}")
     except Exception as exc:
-        _emit_internal_diag("health_receiver_bind_failed", f"port={port} error={exc}")
-    finally:
+        _emit_internal_diag("health_listener_bind_failed", f"Failed to bind health port {port}: {exc}")
         sock.close()
+        return
+
+    while not stop_event.is_set():
+        try:
+            data, addr = sock.recvfrom(4096)
+            payload = json.loads(data.decode("utf-8", errors="replace"))
+            if not isinstance(payload, dict):
+                _emit_internal_diag(
+                    "health_payload_invalid_type",
+                    f"sender={addr[0]} type={type(payload).__name__}",
+                )
+                continue
+            
+            with _health_state_lock:
+                global _last_sender_health
+                _last_sender_health = dict(payload)
+                _last_sender_health["last_seen_at"] = datetime.now(timezone.utc).isoformat()
+                _last_sender_health["sender_ip"] = addr[0]
+
+        except (BlockingIOError, socket.timeout):
+            time.sleep(0.5)
+            continue
+        except Exception as exc:
+            _emit_internal_diag("health_receive_error", f"Health data error: {exc}")
+            time.sleep(1)
+            
+    sock.close()
 
 def main():
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 5800
@@ -1068,6 +1119,24 @@ def main():
         daemon=True,
     )
     health_thread.start()
+
+    # Start PC ping loop (PC sleep detection)
+    def _delayed_ping_start():
+        """Wait for first health packet to know sender_ip, then start pinging."""
+        time.sleep(5)
+        sender_ip = None
+        for _ in range(30): # Allow 30s for first packet
+            with _health_state_lock:
+                sender_ip = _last_sender_health.get("sender_ip")
+            if sender_ip or health_stop_event.is_set():
+                break
+            time.sleep(1)
+        
+        if sender_ip and not health_stop_event.is_set():
+            _ping_sender_loop(sender_ip, health_stop_event)
+
+    ping_thread = threading.Thread(target=_delayed_ping_start, daemon=True)
+    ping_thread.start()
 
     cleanup_reason: Optional[str] = None
     cleanup_started = False
