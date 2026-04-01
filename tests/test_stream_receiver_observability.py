@@ -26,6 +26,11 @@ def _new_counters():
         "xrun_peak_60s": 0,
         "xrun_current_consecutive": 0,
         "xrun_max_consecutive": 0,
+        "xrun_underrun_count": 0,
+        "xrun_overrun_count": 0,
+        "xrun_unknown_count": 0,
+        "last_xrun_type": "unknown",
+        "last_xrun_type_source": "unknown",
         "xrun_events_last_1s": deque(),
         "xrun_events_last_60s": deque(),
         "started_mono": time.monotonic(),
@@ -111,6 +116,10 @@ def test_process_ffmpeg_line_updates_counters():
     assert counters["xrun_peak_1s"] >= 3
     assert counters["xrun_peak_60s"] >= 3
     assert counters["xrun_max_consecutive"] >= 3
+    assert counters["xrun_underrun_count"] == 3
+    assert counters["xrun_overrun_count"] == 0
+    assert counters["xrun_unknown_count"] == 0
+    assert counters["last_xrun_type"] == "underrun"
 
 
 def test_process_ffmpeg_line_resets_consecutive_on_non_xrun():
@@ -137,6 +146,9 @@ def test_write_xrun_status_includes_live_telemetry(tmp_path, monkeypatch):
     counters["xrun_peak_60s"] = 6
     counters["xrun_max_consecutive"] = 5
     counters["xrun_current_consecutive"] = 2
+    counters["xrun_underrun_count"] = 6
+    counters["last_xrun_type"] = "underrun"
+    counters["last_xrun_type_source"] = "inferred_playback_pipeline"
     counters["first_xrun_at"] = "2026-03-31T10:00:00.000Z"
     counters["last_xrun_at"] = "2026-03-31T10:00:03.000Z"
     counters["started_mono"] = time.monotonic() - 2.0
@@ -151,6 +163,24 @@ def test_write_xrun_status_includes_live_telemetry(tmp_path, monkeypatch):
     assert payload["xrun_current_consecutive"] == 2
     assert payload["xrun_session_rate_per_sec"] > 0
     assert payload["xrun_burst_rate_per_sec"] == 2.0
+    assert payload["xrun_underrun_count"] == 6
+    assert payload["xrun_overrun_count"] == 0
+    assert payload["xrun_unknown_count"] == 0
+    assert payload["last_xrun_type"] == "underrun"
+    assert payload["last_xrun_type_source"] == "inferred_playback_pipeline"
+
+
+def test_process_ffmpeg_line_xrun_type_overrun_when_explicit():
+    counters = _new_counters()
+    buf = io.StringIO()
+
+    receiver._process_ffmpeg_line("[alsa @ 0x1] ALSA buffer xrun (overrun).", buf, counters)
+
+    assert counters["alsa_xrun"] == 1
+    assert counters["xrun_overrun_count"] == 1
+    assert counters["xrun_underrun_count"] == 0
+    assert counters["last_xrun_type"] == "overrun"
+    assert counters["last_xrun_type_source"] == "ffmpeg_log"
 
 
 def test_process_ffmpeg_line_emits_first_input_output_events(monkeypatch):
