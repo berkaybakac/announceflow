@@ -656,6 +656,11 @@ class AudioPlayer:
         with self._lock:
             self._flush_active_play_time()
             self._playback_session += 1
+            # Increment skipped count if stopped manually while playing
+            if self.is_playing:
+                self._session_tracks_skipped += 1
+                self._daily_tracks_skipped += 1
+
             self.is_playing = False
             self.is_paused = False
             self.current_file = None
@@ -715,6 +720,11 @@ class AudioPlayer:
             self._flush_active_play_time()
             was_playing = self.is_playing or bool(self._process)
             self._playback_session += 1
+            # Increment skipped count if stopped manually while playing
+            if self.is_playing:
+                self._session_tracks_skipped += 1
+                self._daily_tracks_skipped += 1
+
             self.is_playing = False
             self.is_paused = False
             self.current_file = None

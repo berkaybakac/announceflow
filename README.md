@@ -170,6 +170,16 @@ Covers both happy paths and field-observed failure modes across scheduling, stre
 
 ---
 
+### Field Diagnostics
+
+Quickly check the health and streaming quality of the device from the terminal or browser:
+
+- **Terminal:** `python3 diagnose.py` (Summarizes the last 60 minutes)
+- **Custom Duration:** `python3 diagnose.py 1440` (Analyzes the last 24 hours)
+- **Browser/API:** `http://<device-ip>:5001/api/diagnose` (Returns JSON report)
+
+---
+
 ## Engineering Under Constraints
 
 **Power loss and policy-safe recovery.**
