@@ -19,10 +19,17 @@ import time
 import traceback
 from typing import Any, Dict, Optional
 
+import psutil
+import subprocess
+from typing import Any, Dict, Optional, Tuple
+
 logger = logging.getLogger(__name__)
 stream_logger = logging.getLogger("agent.stream")
 
 STREAM_SENDER_PORT = 5800
+STREAM_TELEMETRY_PORT = 5801
+# Windows constants for the 'smart' no-window subprocess runs
+_CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 # Audio format must match _stream_receiver.py expectations
 _TARGET_SAMPLE_RATE = 44100
 
@@ -128,6 +135,7 @@ class StreamClient:
 
     def __init__(self):
         self._thread: Optional[threading.Thread] = None
+        self._health_thread: Optional[threading.Thread] = None
         self._lock = threading.Lock()
         self._running = False
         self.last_error: Optional[str] = None
@@ -547,6 +555,14 @@ class StreamClient:
             )
             self._thread.start()
 
+            # Start health telemetry thread (sidechannel)
+            self._health_thread = threading.Thread(
+                target=self._health_loop,
+                args=(resolved, STREAM_TELEMETRY_PORT, correlation_id),
+                daemon=True,
+            )
+            self._health_thread.start()
+
             # Brief health check: let thread start and catch immediate errors
             self._thread.join(timeout=0.35)
             if not self._running:
@@ -622,6 +638,11 @@ class StreamClient:
             if self.last_error is None:
                 self._mark_stage("stopped")
                 self._finalize_attempt(success=True)
+        
+        if self._health_thread is not None:
+            self._health_thread.join(timeout=1.0)
+            self._health_thread = None
+
         logger.info("StreamClient: sender stopped")
         return True
 
@@ -885,3 +906,52 @@ class StreamClient:
                     )
                 self._finalize_attempt(success=success)
             logger.info("StreamClient: capture loop ended")
+
+    def _health_loop(self, host: str, port: int, correlation_id: Optional[str]) -> None:
+        """Periodically poll and send agent hardware health to receiver sidechannel."""
+        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            while self._running:
+                health = self.get_sender_health()
+                payload = {
+                    "ts": _utc_now(),
+                    "correlation_id": correlation_id,
+                    "event": "sender_health",
+                    "data": health
+                }
+                try:
+                    msg = json.dumps(payload).encode("utf-8")
+                    sock.sendto(msg, (host, port))
+                except Exception:
+                    pass
+                # Poll every 20 seconds
+                for _ in range(40):
+                    if not self._running:
+                        break
+                    time.sleep(0.5)
+        finally:
+            sock.close()
+
+    def get_sender_health(self) -> Dict[str, Any]:
+        """Collect CPU, RAM and Power Scheme without opening CMD windows."""
+        health = {
+            "cpu_pct": psutil.cpu_percent(interval=None),
+            "mem_pct": psutil.virtual_memory().percent,
+            "power_scheme": "unknown",
+            "os": os.name
+        }
+        
+        if os.name == "nt":
+            try:
+                # Get active power scheme GUID and name (e.g. High Performance)
+                res = subprocess.run(
+                    ["powercfg", "/getactivescheme"],
+                    capture_output=True,
+                    text=True,
+                    creationflags=_CREATE_NO_WINDOW
+                )
+                if res.returncode == 0:
+                    health["power_scheme"] = res.stdout.strip()
+            except Exception:
+                pass
+        return health
