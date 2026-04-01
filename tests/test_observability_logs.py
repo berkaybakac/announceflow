@@ -1,4 +1,4 @@
-"""Tests for observability log additions: system_health, playlist_session_summary,
+"""Tests for observability log additions: system_health, playlist summaries,
 daily_usage_summary, xrun_snapshot, and jitter_anomaly."""
 import time
 from unittest.mock import MagicMock, patch
@@ -151,6 +151,29 @@ class TestPlaylistSessionSummary:
         assert data["play_seconds"] >= 149.0
         assert data["play_seconds"] <= 152.0
 
+    def test_daily_playlist_summary_snapshot_and_reset(self):
+        player = self._make_player()
+        player._daily_tracks_played = 4
+        player._daily_tracks_skipped = 1
+        player._daily_play_seconds = 180.0
+
+        snap = player.get_daily_playlist_summary(reset=False)
+        assert snap["tracks_played"] == 4
+        assert snap["tracks_skipped"] == 1
+        assert snap["play_seconds"] == 180.0
+        assert snap["play_minutes"] == 3.0
+        assert snap["play_hours"] == 0.05
+
+        reset_snap = player.get_daily_playlist_summary(reset=True)
+        assert reset_snap["tracks_played"] == 4
+        assert reset_snap["tracks_skipped"] == 1
+        assert reset_snap["play_seconds"] == 180.0
+
+        after = player.get_daily_playlist_summary(reset=False)
+        assert after["tracks_played"] == 0
+        assert after["tracks_skipped"] == 0
+        assert after["play_seconds"] == 0.0
+
 
 # ---------------------------------------------------------------------------
 # playlist_loop_restart
@@ -222,6 +245,15 @@ class TestDailyUsageSummary:
         sched = self._make_scheduler()
         calls = []
         monkeypatch.setattr("scheduler.log_system", lambda event, data: calls.append((event, data)))
+        fake_player = MagicMock()
+        fake_player.get_daily_playlist_summary.return_value = {
+            "tracks_played": 8,
+            "tracks_skipped": 2,
+            "play_seconds": 600.0,
+            "play_minutes": 10.0,
+            "play_hours": 0.167,
+        }
+        monkeypatch.setattr("scheduler.get_player", lambda: fake_player)
 
         sched._daily_current_date = "2026-03-30"
         sched._daily_triggers_one_time = 3
@@ -236,19 +268,34 @@ class TestDailyUsageSummary:
 
         sched._check_daily_usage_summary()
 
-        assert len(calls) == 1
-        event, data = calls[0]
-        assert event == "daily_usage_summary"
-        assert data["date"] == "2026-03-30"
-        assert data["triggers_one_time"] == 3
-        assert data["triggers_recurring"] == 7
-        assert data["prayer_silences"] == 5
-        assert data["working_hours_blocks"] == 1
+        assert len(calls) == 2
+        daily = [entry for entry in calls if entry[0] == "daily_usage_summary"][0][1]
+        playlist_daily = [
+            entry for entry in calls if entry[0] == "playlist_daily_summary"
+        ][0][1]
+        assert daily["date"] == "2026-03-30"
+        assert daily["triggers_one_time"] == 3
+        assert daily["triggers_recurring"] == 7
+        assert daily["prayer_silences"] == 5
+        assert daily["working_hours_blocks"] == 1
+        assert playlist_daily["date"] == "2026-03-30"
+        assert playlist_daily["tracks_played"] == 8
+        assert playlist_daily["tracks_skipped"] == 2
+        assert playlist_daily["play_seconds"] == 600.0
 
     def test_counters_reset_after_emit(self, monkeypatch):
         """Counters should be zeroed after the summary is emitted."""
         sched = self._make_scheduler()
         monkeypatch.setattr("scheduler.log_system", lambda event, data: None)
+        fake_player = MagicMock()
+        fake_player.get_daily_playlist_summary.return_value = {
+            "tracks_played": 0,
+            "tracks_skipped": 0,
+            "play_seconds": 0.0,
+            "play_minutes": 0.0,
+            "play_hours": 0.0,
+        }
+        monkeypatch.setattr("scheduler.get_player", lambda: fake_player)
 
         sched._daily_current_date = "2026-03-30"
         sched._daily_triggers_one_time = 5
@@ -367,6 +414,15 @@ class TestWebEventCount:
         calls = []
         monkeypatch.setattr("scheduler.log_system", lambda event, data: calls.append((event, data)))
         monkeypatch.setattr("scheduler.get_and_reset_web_event_count", lambda: 15)
+        fake_player = MagicMock()
+        fake_player.get_daily_playlist_summary.return_value = {
+            "tracks_played": 1,
+            "tracks_skipped": 0,
+            "play_seconds": 30.0,
+            "play_minutes": 0.5,
+            "play_hours": 0.008,
+        }
+        monkeypatch.setattr("scheduler.get_player", lambda: fake_player)
 
         sched._daily_current_date = "2026-03-30"
 
@@ -376,5 +432,10 @@ class TestWebEventCount:
 
         sched._check_daily_usage_summary()
 
-        assert len(calls) == 1
-        assert calls[0][1]["web_events"] == 15
+        assert len(calls) == 2
+        daily = [entry for entry in calls if entry[0] == "daily_usage_summary"][0][1]
+        playlist_daily = [
+            entry for entry in calls if entry[0] == "playlist_daily_summary"
+        ][0][1]
+        assert daily["web_events"] == 15
+        assert playlist_daily["tracks_played"] == 1

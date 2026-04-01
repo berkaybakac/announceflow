@@ -307,6 +307,48 @@ def _calc_xrun_burst_rate_per_sec(counters: Dict[str, Any]) -> float:
     return float(xrun_count)
 
 
+def _calc_stream_quality_summary(
+    counters: Dict[str, Any],
+    *,
+    duration_seconds: float,
+) -> Dict[str, Any]:
+    """Build a simple quality score from xrun/overrun rates.
+
+    Formula v1:
+    - xrun penalty: 10 points per xrun/minute
+    - udp overrun penalty: 15 points per overrun/minute
+    - quality_pct: clamp(100 - penalties, 0..100)
+    """
+    duration = max(0.0, float(duration_seconds or 0.0))
+    duration_minutes = duration / 60.0 if duration > 0 else 0.0
+    # Normalize by at least one minute to avoid pathological penalties
+    # for short startup/teardown sessions.
+    normalized_minutes = max(1.0, duration_minutes)
+
+    alsa_xrun_total = int(counters.get("alsa_xrun") or 0)
+    udp_overrun_total = int(counters.get("udp_overrun") or 0)
+    xrun_rate_per_min = round(alsa_xrun_total / normalized_minutes, 3)
+    udp_overrun_rate_per_min = round(udp_overrun_total / normalized_minutes, 3)
+
+    xrun_penalty = xrun_rate_per_min * 10.0
+    udp_overrun_penalty = udp_overrun_rate_per_min * 15.0
+    quality_pct = round(
+        max(0.0, min(100.0, 100.0 - xrun_penalty - udp_overrun_penalty)),
+        2,
+    )
+
+    return {
+        "duration_seconds": round(duration, 3),
+        "duration_minutes": round(duration_minutes, 3),
+        "alsa_xrun_total": alsa_xrun_total,
+        "udp_overrun_total": udp_overrun_total,
+        "xrun_rate_per_min": xrun_rate_per_min,
+        "udp_overrun_rate_per_min": udp_overrun_rate_per_min,
+        "quality_pct": quality_pct,
+        "quality_formula_version": "v1_rate_penalty",
+    }
+
+
 def _write_xrun_status(
     counters: Dict[str, Any],
     correlation_id: str,
@@ -1006,6 +1048,17 @@ def main():
 
         _write_xrun_status(counters, correlation_id, force=True)
         _safe_log_system("stream_receiver_summary", summary)
+        quality_summary = _calc_stream_quality_summary(
+            counters,
+            duration_seconds=duration_seconds,
+        )
+        quality_summary["correlation_id"] = correlation_id
+        quality_summary["xrun_underrun_count"] = counters["xrun_underrun_count"]
+        quality_summary["xrun_overrun_count"] = counters["xrun_overrun_count"]
+        quality_summary["xrun_unknown_count"] = counters["xrun_unknown_count"]
+        quality_summary["last_xrun_type"] = counters["last_xrun_type"]
+        quality_summary["last_xrun_type_source"] = counters["last_xrun_type_source"]
+        _safe_log_system("stream_session_quality_summary", quality_summary)
 
         if stderr_drain_timeout:
             _safe_log_error(
