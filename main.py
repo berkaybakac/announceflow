@@ -236,7 +236,10 @@ def main():
         # Stop stream receiver and playback
         try:
             from services.stream_service import get_stream_service
-            get_stream_service().stop()
+            get_stream_service().stop(
+                caller="main.graceful_exit",
+                reason=f"process_signal_{signal_name}",
+            )
         except Exception as exc:
             logger.debug("WebStream: shutdown error: %s", exc)
 

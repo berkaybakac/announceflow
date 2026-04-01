@@ -323,14 +323,24 @@ def test_start_rejected_while_previous_stop_in_progress(monkeypatch):
     with patch("stream_manager.log_system") as mock_log_system:
         mgr = StreamManager(port=5800)
         assert mgr.start_receiver() is True
-        assert mgr.stop_receiver() is True
-        assert mgr.stop_receiver() is True  # already stopping
+        assert mgr.stop_receiver(
+            caller="test.initial_stop",
+            reason="simulate_slow_stop",
+        ) is True
+        assert mgr.stop_receiver(
+            caller="test.second_stop",
+            reason="duplicate_stop_call",
+        ) is True  # already stopping
         assert mgr.start_receiver() is False
 
         assert any(
             c.args
             and c.args[0] == "stream_receiver_stop_reason"
             and c.args[1].get("reason") == "already_stopping"
+            and c.args[1].get("caller") == "test.second_stop"
+            and c.args[1].get("request_reason") == "duplicate_stop_call"
+            and c.args[1].get("active_stop_caller") == "test.initial_stop"
+            and c.args[1].get("active_stop_reason") == "simulate_slow_stop"
             for c in mock_log_system.call_args_list
         )
 
@@ -373,11 +383,16 @@ def test_stop_receiver_logs_graceful_quick_reason(monkeypatch, fake_popen):
     with patch("stream_manager.log_system") as mock_log_system:
         mgr = StreamManager(port=5800)
         assert mgr.start_receiver() is True
-        assert mgr.stop_receiver() is True
+        assert mgr.stop_receiver(
+            caller="test.stop_receiver_logs_graceful_quick_reason",
+            reason="unit_test_graceful",
+        ) is True
         assert any(
             c.args
             and c.args[0] == "stream_receiver_stop_reason"
             and c.args[1].get("reason") == "graceful"
             and c.args[1].get("phase") == "quick"
+            and c.args[1].get("caller") == "test.stop_receiver_logs_graceful_quick_reason"
+            and c.args[1].get("request_reason") == "unit_test_graceful"
             for c in mock_log_system.call_args_list
         )

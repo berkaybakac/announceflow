@@ -100,7 +100,10 @@ def test_graceful_exit_stops_stream_scheduler_and_player(monkeypatch):
         handler(signal_mod.SIGTERM, None)
 
     get_stream_service.assert_called_once_with()
-    stream_service.stop.assert_called_once_with()
+    stream_service.stop.assert_called_once_with(
+        caller="main.graceful_exit",
+        reason="process_signal_SIGTERM",
+    )
     state["scheduler"].stop.assert_called_once_with()
     state["player"].stop.assert_called_once_with()
     state["log_system"].assert_any_call("shutdown", {"signal": "SIGTERM"})
