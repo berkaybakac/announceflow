@@ -68,8 +68,14 @@ class _RotatingLineFile:
         if os.path.exists(oldest):
             try:
                 os.remove(oldest)
-            except OSError:
-                pass
+            except OSError as exc:
+                _emit_internal_diag(
+                    "ffmpeg_log_rotate_remove_oldest_failed",
+                    (
+                        "ffmpeg_log_rotate_remove_oldest_failed "
+                        f"path={oldest} error={exc.__class__.__name__}: {exc}"
+                    ),
+                )
 
         for idx in range(self.backup_count - 1, 0, -1):
             src = f"{self.path}.{idx}"
@@ -77,14 +83,27 @@ class _RotatingLineFile:
             if os.path.exists(src):
                 try:
                     os.replace(src, dst)
-                except OSError:
+                except OSError as exc:
+                    _emit_internal_diag(
+                        "ffmpeg_log_rotate_shift_failed",
+                        (
+                            "ffmpeg_log_rotate_shift_failed "
+                            f"src={src} dst={dst} error={exc.__class__.__name__}: {exc}"
+                        ),
+                    )
                     continue
 
         if os.path.exists(self.path):
             try:
                 os.replace(self.path, f"{self.path}.1")
-            except OSError:
-                pass
+            except OSError as exc:
+                _emit_internal_diag(
+                    "ffmpeg_log_rotate_active_failed",
+                    (
+                        "ffmpeg_log_rotate_active_failed "
+                        f"path={self.path} error={exc.__class__.__name__}: {exc}"
+                    ),
+                )
 
         self._open_stream()
 
@@ -125,13 +144,36 @@ def _local_log_ts() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
 
 
+_INTERNAL_DIAG_INTERVAL_SEC: float = 60.0
+_internal_diag_last_mono: Dict[str, float] = {}
+_internal_diag_lock = threading.Lock()
+
+
+def _emit_internal_diag(key: str, message: str) -> None:
+    """Best-effort, rate-limited receiver diagnostics to stderr."""
+    now = time.monotonic()
+    with _internal_diag_lock:
+        last = float(_internal_diag_last_mono.get(key) or 0.0)
+        if now - last < _INTERNAL_DIAG_INTERVAL_SEC:
+            return
+        _internal_diag_last_mono[key] = now
+    try:
+        sys.stderr.write(f"{_local_log_ts()} [receiver] {message}\n")
+        sys.stderr.flush()
+    except Exception:
+        return
+
+
 def _safe_log_system(event: str, data: dict) -> None:
     try:
         from logger import log_system
 
         log_system(event, data)
-    except Exception:
-        pass
+    except Exception as exc:
+        _emit_internal_diag(
+            "safe_log_system_failed",
+            f"log_system_failed event={event} error={exc.__class__.__name__}: {exc}",
+        )
 
 
 def _safe_log_error(event: str, data: dict) -> None:
@@ -139,8 +181,11 @@ def _safe_log_error(event: str, data: dict) -> None:
         from logger import log_error
 
         log_error(event, data)
-    except Exception:
-        pass
+    except Exception as exc:
+        _emit_internal_diag(
+            "safe_log_error_failed",
+            f"log_error_failed event={event} error={exc.__class__.__name__}: {exc}",
+        )
 
 
 def _read_proc_stat_snapshot() -> dict:
@@ -149,16 +194,23 @@ def _read_proc_stat_snapshot() -> dict:
     try:
         with open("/proc/loadavg") as f:
             snapshot["load_1m"] = float(f.read().split()[0])
-    except Exception:
+    except Exception as exc:
         snapshot["load_1m"] = -1.0
+        _emit_internal_diag(
+            "proc_loadavg_read_failed",
+            f"proc_loadavg_read_failed error={exc.__class__.__name__}: {exc}",
+        )
     try:
         with open("/proc/meminfo") as f:
             for line in f:
                 if line.startswith("MemAvailable:"):
                     snapshot["mem_available_mb"] = int(line.split()[1]) // 1024
                     break
-    except Exception:
-        pass
+    except Exception as exc:
+        _emit_internal_diag(
+            "proc_meminfo_read_failed",
+            f"proc_meminfo_read_failed error={exc.__class__.__name__}: {exc}",
+        )
     return snapshot
 
 
@@ -398,13 +450,35 @@ def _write_xrun_status(
             with os.fdopen(tmp_fd, "w") as f:
                 json.dump(data, f)
             os.replace(tmp_path, XRUN_STATUS_FILE)
-        except Exception:
+        except Exception as exc:
             try:
                 os.unlink(tmp_path)
-            except OSError:
-                pass
-    except Exception:
-        pass
+            except OSError as unlink_exc:
+                _emit_internal_diag(
+                    "xrun_status_tmp_cleanup_failed",
+                    (
+                        "xrun_status_tmp_cleanup_failed "
+                        f"path={tmp_path} "
+                        f"error={unlink_exc.__class__.__name__}: {unlink_exc}"
+                    ),
+                )
+            _emit_internal_diag(
+                "xrun_status_write_failed",
+                (
+                    "xrun_status_write_failed "
+                    f"correlation_id={correlation_id} "
+                    f"path={XRUN_STATUS_FILE} error={exc.__class__.__name__}: {exc}"
+                ),
+            )
+    except Exception as exc:
+        _emit_internal_diag(
+            "xrun_status_prepare_failed",
+            (
+                "xrun_status_prepare_failed "
+                f"correlation_id={correlation_id} "
+                f"dir={_XRUN_STATUS_DIR} error={exc.__class__.__name__}: {exc}"
+            ),
+        )
 
 
 def _log_jitter_anomaly(
@@ -787,16 +861,28 @@ def stop_process(proc: subprocess.Popen) -> None:
             proc.stdin.write("q")
             proc.stdin.flush()
             proc.stdin.close()
-    except (OSError, BrokenPipeError, ValueError):
-        pass
+    except (OSError, BrokenPipeError, ValueError) as exc:
+        _emit_internal_diag(
+            "stop_process_stdin_failed",
+            (
+                "stop_process_stdin_failed "
+                f"pid={getattr(proc, 'pid', '?')} error={exc.__class__.__name__}: {exc}"
+            ),
+        )
     try:
         proc.terminate()
         proc.wait(timeout=1.0)
     except (OSError, ProcessLookupError, subprocess.TimeoutExpired):
         try:
             proc.kill()
-        except Exception:
-            pass
+        except Exception as exc:
+            _emit_internal_diag(
+                "stop_process_kill_failed",
+                (
+                    "stop_process_kill_failed "
+                    f"pid={getattr(proc, 'pid', '?')} error={exc.__class__.__name__}: {exc}"
+                ),
+            )
 
 
 def _classify_receiver_exit(
@@ -1117,12 +1203,26 @@ def main():
         try:
             if proc.stderr:
                 proc.stderr.close()
-        except Exception:
-            pass
+        except Exception as exc:
+            _emit_internal_diag(
+                "receiver_stderr_close_failed",
+                (
+                    "receiver_stderr_close_failed "
+                    f"correlation_id={correlation_id} "
+                    f"error={exc.__class__.__name__}: {exc}"
+                ),
+            )
         try:
             stderr_log.close()
-        except Exception:
-            pass
+        except Exception as exc:
+            _emit_internal_diag(
+                "receiver_log_close_failed",
+                (
+                    "receiver_log_close_failed "
+                    f"correlation_id={correlation_id} "
+                    f"error={exc.__class__.__name__}: {exc}"
+                ),
+            )
 
 
 if __name__ == "__main__":

@@ -188,8 +188,12 @@ class StreamClient:
             try:
                 if bool(getattr(mic, "isloopback", False)):
                     return True
-            except Exception:
-                pass
+            except Exception as exc:
+                stream_logger.debug(
+                    "stream_loopback_flag_read_failed mic=%s err=%s",
+                    getattr(mic, "name", "unknown"),
+                    exc,
+                )
             mic_name = str(getattr(mic, "name", "") or "").strip()
             low_name = mic_name.lower()
             if "loopback" in low_name:

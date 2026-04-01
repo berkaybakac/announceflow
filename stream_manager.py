@@ -48,14 +48,19 @@ class StreamManager:
                 raw = proc.stderr.read(max_bytes)
                 if raw:
                     return raw.decode("utf-8", errors="replace").strip()[:500]
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug(
+                "StreamManager: failed to read stderr snippet (pid=%s): %s",
+                getattr(proc, "pid", "?"),
+                exc,
+            )
         return ""
 
     @staticmethod
     def _start_stderr_drain(proc: subprocess.Popen) -> None:
         """Drain stderr in a background thread to prevent pipe buffer deadlock."""
         def _drain():
+            decode_error_logged = False
             try:
                 if proc.stderr:
                     for line in iter(proc.stderr.readline, b""):
@@ -63,10 +68,20 @@ class StreamManager:
                             msg = line.decode("utf-8", errors="replace").strip()
                             if msg:
                                 logger.warning("StreamReceiver[%s]: %s", getattr(proc, "pid", "?"), msg)
-                        except Exception:
-                            pass
-            except Exception:
-                pass
+                        except Exception as exc:
+                            if not decode_error_logged:
+                                logger.debug(
+                                    "StreamManager: stderr decode failed (pid=%s): %s",
+                                    getattr(proc, "pid", "?"),
+                                    exc,
+                                )
+                                decode_error_logged = True
+            except Exception as exc:
+                logger.debug(
+                    "StreamManager: stderr drain stopped (pid=%s): %s",
+                    getattr(proc, "pid", "?"),
+                    exc,
+                )
         t = threading.Thread(target=_drain, daemon=True)
         t.name = "stream-stderr-drain"
         t.start()
@@ -155,7 +170,11 @@ class StreamManager:
                             try:
                                 self._stopping_proc.wait(timeout=0.3)
                             except subprocess.TimeoutExpired:
-                                pass
+                                logger.debug(
+                                    "StreamManager: stopping proc still alive after forced wait (pid=%s, correlation_id=%s)",
+                                    getattr(self._stopping_proc, "pid", "?"),
+                                    correlation_id or "-",
+                                )
                     else:
                         logger.warning(
                             "StreamManager: receiver stop still in progress, rejecting start (correlation_id=%s)",
@@ -288,7 +307,10 @@ class StreamManager:
                 if proc.stdin and not proc.stdin.closed:
                     proc.stdin.close()
             except (OSError, BrokenPipeError):
-                pass
+                logger.debug(
+                    "StreamManager: stdin close failed during stop (pid=%s)",
+                    getattr(proc, "pid", "?"),
+                )
             proc.terminate()
             try:
                 proc.wait(timeout=STOP_QUICK_WAIT)
@@ -368,7 +390,10 @@ class StreamManager:
                 try:
                     self._stopping_proc.wait(timeout=0.3)
                 except subprocess.TimeoutExpired:
-                    pass
+                    logger.debug(
+                        "StreamManager: kill wait timed out in wait_for_stop_complete (pid=%s)",
+                        getattr(self._stopping_proc, "pid", "?"),
+                    )
             self._stopping_proc = None
             self._stop_request_context = None
 
