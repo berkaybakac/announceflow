@@ -22,7 +22,17 @@ import threading
 import time
 from collections import deque
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Deque
+
+from logger import (
+    log_error,
+    log_warn,
+    log_event,
+    log_trigger,
+    log_schedule,
+    log_prayer,
+    log_system,
+)
 
 
 DEFAULT_FFMPEG_LOG_MAX_BYTES = 2_000_000
@@ -178,13 +188,11 @@ def _safe_log_system(event: str, data: dict) -> None:
 
 def _safe_log_error(event: str, data: dict) -> None:
     try:
-        from logger import log_error
-
         log_error(event, data)
     except Exception as exc:
         _emit_internal_diag(
             "safe_log_error_failed",
-            f"log_error_failed event={event} error={exc.__class__.__name__}: {exc}",
+            {"error": str(exc), "original_event": event},
         )
 
 
@@ -499,7 +507,7 @@ def _log_jitter_anomaly(
     _last_jitter_anomaly_mono = now
 
     snap = _read_proc_stat_snapshot()
-    _safe_log_error(
+    log_warn(
         "stream_jitter_anomaly",
         {
             "correlation_id": correlation_id,
@@ -802,8 +810,13 @@ def _process_ffmpeg_line(
         counters["immediate_exit"] += 1
     if "cannot open audio device" in lower or "device or resource busy" in lower:
         counters["audio_device_errors"] += 1
-    if "connection refused" in lower or "timed out" in lower or "network is unreachable" in lower:
-        counters["connection_errors"] += 1
+    if "resyncing" in lower and "aresample" in lower:
+        counters["clock_resync_count"] += 1
+        log_warn("stream_clock_resync", {"correlation_id": correlation_id, "text": text})
+    if "discontinuity" in lower or "dts mismatch" in lower:
+        counters["input_discontinuity_count"] += 1
+        log_warn("stream_input_discontinuity", {"correlation_id": correlation_id, "text": text})
+
     if not line_has_xrun:
         counters["xrun_current_consecutive"] = 0
     if correlation_id:
@@ -983,6 +996,8 @@ def main():
         "immediate_exit": 0,
         "audio_device_errors": 0,
         "connection_errors": 0,
+        "clock_resync_count": 0,
+        "input_discontinuity_count": 0,
         "first_input_at": None,
         "first_output_at": None,
         "first_overrun_at": None,
@@ -1181,6 +1196,8 @@ def main():
         quality_summary["xrun_unknown_count"] = counters["xrun_unknown_count"]
         quality_summary["last_xrun_type"] = counters["last_xrun_type"]
         quality_summary["last_xrun_type_source"] = counters["last_xrun_type_source"]
+        quality_summary["clock_resync_count"] = counters["clock_resync_count"]
+        quality_summary["input_discontinuity_count"] = counters["input_discontinuity_count"]
         _safe_log_system("stream_session_quality_summary", quality_summary)
 
         if stderr_drain_timeout:

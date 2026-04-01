@@ -22,6 +22,16 @@ from typing import Any, Dict, Optional
 import psutil
 import subprocess
 from typing import Any, Dict, Optional, Tuple
+from logger import (
+    log_error,
+    log_warn,
+    log_event,
+    log_trigger,
+    log_schedule,
+    log_prayer,
+    log_system,
+    get_and_reset_web_event_count,
+)
 
 logger = logging.getLogger(__name__)
 stream_logger = logging.getLogger("agent.stream")
@@ -139,6 +149,8 @@ class StreamClient:
         self._lock = threading.Lock()
         self._running = False
         self.last_error: Optional[str] = None
+        self._capture_jitters: deque = deque(maxlen=20)
+        self._last_capture_mono: float = 0.0
         self.last_error_details: Optional[str] = None
         self._attempt_seq = 0
         self._attempt: Optional[Dict[str, Any]] = None
@@ -739,12 +751,40 @@ class StreamClient:
                                 host,
                                 port,
                             )
+                            self._mark_stage(
+                                "recorder_open_ok",
+                                capture_rate=capture_rate,
+                                channels=channels,
+                                target_rate=_TARGET_SAMPLE_RATE,
+                                msg="Loopback capture active",
+                            )
+                            if capture_rate != _TARGET_SAMPLE_RATE:
+                                log_warn(
+                                    "sample_rate_mismatch",
+                                    {
+                                        "capture_rate": capture_rate,
+                                        "target_rate": _TARGET_SAMPLE_RATE,
+                                        "msg": "PC sound card rate differs from stream; resampling active",
+                                    },
+                                )
+
                             last_telemetry_mono = time.monotonic()
                             last_telemetry_packets = 0
                             pending_bytes = b""
+                            self._last_capture_mono = time.monotonic()
                             while self._running:
                                 # soundcard returns float32 in [-1.0, 1.0]
                                 data = recorder.record(numframes=capture_block_size)
+                                now_mono = time.monotonic()
+                                
+                                # Measure capture jitter (deviation from ideal capture interval)
+                                if self._last_capture_mono > 0:
+                                    delta = now_mono - self._last_capture_mono
+                                    ideal = capture_block_size / capture_rate
+                                    jitter = abs(delta - ideal)
+                                    self._capture_jitters.append(jitter * 1000)
+                                self._last_capture_mono = now_mono
+
                                 clean = np.nan_to_num(
                                     data, nan=0.0, posinf=1.0, neginf=-1.0
                                 )
@@ -933,11 +973,16 @@ class StreamClient:
             sock.close()
 
     def get_sender_health(self) -> Dict[str, Any]:
-        """Collect CPU, RAM and Power Scheme without opening CMD windows."""
+        """Collect CPU, RAM, Power Scheme and Capture Jitter."""
+        avg_jitter = 0.0
+        if self._capture_jitters:
+            avg_jitter = sum(self._capture_jitters) / len(self._capture_jitters)
+
         health = {
             "cpu_pct": psutil.cpu_percent(interval=None),
             "mem_pct": psutil.virtual_memory().percent,
             "power_scheme": "unknown",
+            "capture_jitter_ms": round(avg_jitter, 3),
             "os": os.name
         }
         

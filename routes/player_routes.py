@@ -141,6 +141,7 @@ def api_health():
 @login_required
 def api_play():
     """Play a media file."""
+    start_time = time.perf_counter()
     blocked = _reject_if_outside_working_hours()
     if blocked:
         return blocked
@@ -235,6 +236,15 @@ def api_play():
         if is_library_preview:
             _clear_preview_context()
 
+    if success:
+        duration_ms = (time.perf_counter() - start_time) * 1000
+        log_web("command_execution_audit", {
+            "command": "play",
+            "media_id": media_id,
+            "filename": media.get("filename"),
+            "processing_time_ms": round(duration_ms, 2),
+            "status": "success"
+        })
     return _json_success({"success": success})
 
 
@@ -242,12 +252,20 @@ def api_play():
 @login_required
 def api_stop():
     """Stop playback."""
+    start_time = time.perf_counter()
     player = get_player()
     success = player.stop()
     _volume_runtime.restore_override(reason="manual_stop")
     _clear_preview_context()
     db.update_playback_state(current_media_id=0, is_playing=False, position_seconds=0)
     log_web("stop", {})
+    
+    duration_ms = (time.perf_counter() - start_time) * 1000
+    log_web("command_execution_audit", {
+        "command": "stop",
+        "processing_time_ms": round(duration_ms, 2),
+        "status": "success" if success else "failed"
+    })
     return _json_success({"success": success})
 
 
@@ -319,6 +337,7 @@ def api_stop_preview():
 @login_required
 def api_volume():
     """Set canonical volume state (absolute volume or mute intent)."""
+    start_time = time.perf_counter()
     data = request.get_json(silent=True) or {}
     if not isinstance(data, dict):
         return _json_error("Geçersiz istek gövdesi", 400)
@@ -362,6 +381,14 @@ def api_volume():
         )
         if prev_volume != target_volume:
             log_web("volume", {"volume": target_volume, "muted": muted_intent})
+        
+        duration_ms = (time.perf_counter() - start_time) * 1000
+        log_web("command_execution_audit", {
+            "command": "volume",
+            "target": target_volume,
+            "processing_time_ms": round(duration_ms, 2),
+            "status": "success"
+        })
         return _json_success({"success": True, **canonical_state})
 
     # Keep DB as-is when player volume write fails.
