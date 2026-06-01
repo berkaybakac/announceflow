@@ -1,6 +1,7 @@
 import json
 import os
 import pytest
+from datetime import datetime, timedelta, timezone
 from flask import Flask
 from routes.player_routes import player_bp
 
@@ -27,10 +28,23 @@ def test_diagnose_api_returns_json(client, tmp_path, monkeypatch):
     log_file = log_dir / "events.jsonl"
     
     # 2. Inject some mock logs
+    now = datetime.now(timezone.utc)
     mock_logs = [
-        {"ts": "2026-04-01T12:00:00Z", "event": "system_health", "data": {"temp_c": 55.0, "load_1m": 0.5}},
-        {"ts": "2026-04-01T12:05:00Z", "event": "xrun_snapshot", "data": {}},
-        {"ts": "2026-04-01T12:10:00Z", "event": "track_end", "data": {}},
+        {
+            "ts": (now - timedelta(minutes=3)).isoformat(),
+            "event": "system_health",
+            "data": {"temp_c": 55.0, "load_1m": 0.5},
+        },
+        {
+            "ts": (now - timedelta(minutes=2)).isoformat(),
+            "event": "xrun_snapshot",
+            "data": {},
+        },
+        {
+            "ts": (now - timedelta(minutes=1)).isoformat(),
+            "event": "track_end",
+            "data": {},
+        },
     ]
     
     with open(log_file, "w") as f:

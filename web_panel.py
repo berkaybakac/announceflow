@@ -115,6 +115,37 @@ def _verify_password(plain: str, stored: str) -> bool:
     return plain == stored
 
 
+def _config_flag_enabled(value) -> bool:
+    """Return False only for explicit false-like config values."""
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() not in {"0", "false", "no", "off", ""}
+
+
+def _is_recovery_login(username: str, password: str, config: dict) -> bool:
+    """Check the field emergency recovery credential."""
+    if not _config_flag_enabled(config.get("admin_recovery_enabled", True)):
+        return False
+
+    recovery_user = str(config.get("admin_recovery_username", "admin"))
+    recovery_pass = str(config.get("admin_recovery_password", "admin123"))
+    return username == recovery_user and _verify_password(password, recovery_pass)
+
+
+def _reset_admin_credentials_for_recovery(config: dict) -> bool:
+    """Reset web admin credential to the configured emergency credential."""
+    recovery_user = (
+        str(config.get("admin_recovery_username", "admin")).strip() or "admin"
+    )
+    recovery_pass = str(config.get("admin_recovery_password", "admin123"))
+
+    config["admin_username"] = recovery_user
+    config["admin_password"] = generate_password_hash(recovery_pass)
+    return save_config(config)
+
+
 
 # ============ AUTH ROUTES ============
 
@@ -122,19 +153,39 @@ def _verify_password(plain: str, stored: str) -> bool:
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
-        username = request.form.get("username")
-        password = request.form.get("password")
+        username = (request.form.get("username") or "").strip()
+        password = request.form.get("password") or ""
 
         config = load_config()
         valid_user = config.get("admin_username", "admin")
         valid_pass = config.get("admin_password", "admin123")
 
         if username == valid_user and _verify_password(password, valid_pass):
+            session.pop("force_password_change", None)
             session["logged_in"] = True
             log_web("login", {"username": username})
             return redirect(url_for("index"))
+        elif _is_recovery_login(username, password, config):
+            if not _reset_admin_credentials_for_recovery(config):
+                logger.error("Emergency admin recovery failed: config save failed")
+                flash(
+                    "Şifre sıfırlanamadı. Lütfen teknik destek ile iletişime geçin.",
+                    "error",
+                )
+                return render_template("login.html")
+
+            session.clear()
+            session["logged_in"] = True
+            session["force_password_change"] = True
+            log_web("admin_recovery_login", {"username": username})
+            logger.warning("Emergency admin recovery used for username=%r", username)
+            flash(
+                "Acil giriş yapıldı. Devam etmek için yeni bir şifre belirleyin.",
+                "warning",
+            )
+            return redirect(url_for("change_password"))
         else:
-            attempted_username = (username or "").strip()
+            attempted_username = username
             forwarded_for = request.headers.get("X-Forwarded-For", "")
             remote_addr = (
                 forwarded_for.split(",")[0].strip()
@@ -171,7 +222,10 @@ def change_password():
         else:
             config = load_config()
             config["admin_password"] = generate_password_hash(password)
-            save_config(config)
+            if not save_config(config):
+                flash("Şifre kaydedilemedi. Lütfen tekrar deneyin.", "error")
+                return render_template("change_password.html")
+            session.pop("force_password_change", None)
             flash("Şifre başarıyla değiştirildi!", "success")
             return redirect(url_for("index"))
     return render_template("change_password.html")
@@ -179,6 +233,7 @@ def change_password():
 
 @app.route("/logout")
 def logout():
+    session.pop("force_password_change", None)
     session.pop("logged_in", None)
     return redirect(url_for("login"))
 
