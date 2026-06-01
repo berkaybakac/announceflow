@@ -51,6 +51,40 @@ SSH multiplexing is used to avoid repeated password prompts.
 2. After deployment, technical staff downloads EXE from panel (`/downloads/agent/latest`).
 3. First Windows login should use `http://stateksound.local:5001`.
 
+## Admin Password Recovery
+
+The field emergency credential is `admin` / `admin123`. It is intentionally
+simple for customer handoff support: when the normal login fails but this
+emergency credential is entered, the panel resets the admin credential to
+`admin123`, logs the recovery event, and forces the user through the password
+change page before any protected panel page can be used.
+
+This is a LAN support shortcut, not a second factor. Keep remote access limited
+to trusted networks or Tailscale, and change the password immediately after
+recovery.
+
+If the panel is unavailable, recover access from the server shell or SSH
+account:
+
+```bash
+ssh admin@stateksound.local
+cd /home/admin/announceflow
+python3 scripts/reset_admin_password.py --username admin
+sudo systemctl restart announceflow
+```
+
+For emergency field recovery to the original handoff credential:
+
+```bash
+python3 scripts/reset_admin_password.py --username admin --password admin123
+sudo systemctl restart announceflow
+```
+
+After login, change the password again from the Settings page. If `.env` or the
+service environment defines `ANNOUNCEFLOW_ADMIN_USERNAME`,
+`ANNOUNCEFLOW_ADMIN_PASSWORD`, `ADMIN_USERNAME`, or `ADMIN_PASSWORD`, update or
+remove that override too; environment values replace `config.json` on restart.
+
 ## Release Workflow
 
 1. Build/update `StatekSound.exe`.

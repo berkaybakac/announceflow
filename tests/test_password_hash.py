@@ -5,7 +5,7 @@ import sys
 from unittest.mock import patch
 
 import pytest
-from werkzeug.security import generate_password_hash
+from werkzeug.security import check_password_hash, generate_password_hash
 
 # Ensure project root is importable
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -131,3 +131,61 @@ class TestLoginFlow:
             "password": "strongpass",
         }, follow_redirects=False)
         assert resp.status_code == 302
+
+    def test_recovery_login_resets_admin_password_and_forces_change(self, client):
+        """Emergency admin/admin123 login resets forgotten credentials."""
+        c, config_path = client
+        config = json.loads(config_path.read_text())
+        config["admin_username"] = "field-admin"
+        config["admin_password"] = generate_password_hash("forgotten-pass")
+        config_path.write_text(json.dumps(config))
+
+        from services.config_service import ConfigService
+        svc = ConfigService()
+        svc._config = json.loads(config_path.read_text())
+
+        resp = c.post("/login", data={
+            "username": "admin",
+            "password": "admin123",
+        }, follow_redirects=False)
+
+        assert resp.status_code == 302
+        assert "/change-password" in resp.headers["Location"]
+
+        saved = json.loads(config_path.read_text())
+        assert saved["admin_username"] == "admin"
+        assert saved["admin_password"] != "admin123"
+        assert check_password_hash(saved["admin_password"], "admin123")
+
+        with c.session_transaction() as sess:
+            assert sess["logged_in"] is True
+            assert sess["force_password_change"] is True
+
+    def test_force_password_change_blocks_protected_pages_until_changed(self, client):
+        c, _ = client
+        with c.session_transaction() as sess:
+            sess["logged_in"] = True
+            sess["force_password_change"] = True
+
+        resp = c.get("/", follow_redirects=False)
+
+        assert resp.status_code == 302
+        assert "/change-password" in resp.headers["Location"]
+
+    def test_change_password_clears_recovery_force_flag(self, client):
+        c, config_path = client
+        with c.session_transaction() as sess:
+            sess["logged_in"] = True
+            sess["force_password_change"] = True
+
+        resp = c.post("/change-password", data={
+            "password": "newstrongpass",
+            "password_confirm": "newstrongpass",
+        }, follow_redirects=False)
+
+        assert resp.status_code == 302
+        with c.session_transaction() as sess:
+            assert "force_password_change" not in sess
+
+        saved = json.loads(config_path.read_text())
+        assert check_password_hash(saved["admin_password"], "newstrongpass")

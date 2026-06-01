@@ -3,7 +3,7 @@ AnnounceFlow Helpers
 Reusable helper functions for routes.
 """
 import functools
-from flask import jsonify, flash, redirect, url_for, session
+from flask import jsonify, flash, redirect, request, url_for, session
 import database as db
 from services.config_service import load_config
 from scheduler import is_within_working_hours
@@ -24,6 +24,11 @@ def login_required(f):
             return redirect(
                 "/login"
             )  # Direct path, not url_for (avoid app context dependency)
+        if (
+            session.get("force_password_change")
+            and request.endpoint != "change_password"
+        ):
+            return redirect(url_for("change_password"))
         return f(*args, **kwargs)
 
     return wrapped
