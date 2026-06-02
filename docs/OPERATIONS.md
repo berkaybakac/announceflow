@@ -15,6 +15,9 @@ python main.py
 # Standard deploy (dev/test)
 ./deploy.sh stateksound.local
 
+# Field update deploy (preserve customer content)
+DEPLOY_PROFILE=field-update ./deploy.sh stateksound.local
+
 # Customer delivery deploy (clean content)
 DEPLOY_PROFILE=clean-delivery ./deploy.sh stateksound.local
 ```
@@ -22,6 +25,8 @@ DEPLOY_PROFILE=clean-delivery ./deploy.sh stateksound.local
 ### Deploy Profiles
 
 - `standard`: routine deploy for development and regression validation.
+- `field-update`: live-site update. Preserves target `media/`, `logs/`,
+  `runtime/`, `config.json`, `.env`, and local database files.
 - `clean-delivery`: handoff-only deploy. Clears existing `media/`, `logs/`, `runtime/`, and local `*.db` files on target before first customer upload.
 
 ### Deploy Pipeline Details
@@ -29,13 +34,15 @@ DEPLOY_PROFILE=clean-delivery ./deploy.sh stateksound.local
 The `deploy.sh` script handles end-to-end deployment:
 
 1. Rsync project files to Pi (excludes `.git`, `venv`, `.env`, `config.json`, logs, databases).
-2. (clean-delivery only) Sanitize media/logs/runtime directories.
-3. Upload release stamp (commit hash, ref, branch, UTC deploy timestamp).
-4. Generate Flask secret key if missing, protect `.env` permissions.
-5. Install system dependencies (`mpg123`, `ffmpeg`, `alsa-utils`).
-6. Install Python dependencies (filters out desktop-only packages for Pi).
-7. Create and enable systemd service with auto-restart policy.
-8. Post-deploy health check: retries `/api/health` up to 15 times (2s intervals), validates player backend and scheduler state.
+2. (`field-update` only) Skip target customer content and runtime state during
+   sync.
+3. (clean-delivery only) Sanitize media/logs/runtime directories.
+4. Upload release stamp (commit hash, ref, branch, UTC deploy timestamp).
+5. Generate Flask secret key if missing, protect `.env` permissions.
+6. Install system dependencies (`mpg123`, `ffmpeg`, `alsa-utils`).
+7. Install Python dependencies (filters out desktop-only packages for Pi).
+8. Create and enable systemd service with auto-restart policy.
+9. Post-deploy health check: retries `/api/health` up to 15 times (2s intervals), validates player backend and scheduler state.
 
 SSH multiplexing is used to avoid repeated password prompts.
 
@@ -53,11 +60,20 @@ SSH multiplexing is used to avoid repeated password prompts.
 
 ## Admin Password Recovery
 
-The field emergency credential is `admin` / `admin123`. It is intentionally
-simple for customer handoff support: when the normal login fails but this
-emergency credential is entered, the panel resets the admin credential to
-`admin123`, logs the recovery event, and forces the user through the password
-change page before any protected panel page can be used.
+The web panel has a field emergency recovery flow for authorized support staff.
+The recovery credential is distributed separately through private device notes,
+not in this public repository.
+Credential details are kept in the local-only, gitignored file:
+`docs/DEVICE_NOTES.md`.
+
+There is no visible "forgot password" button. Field recovery is handled through
+the normal login form:
+
+1. Open the web panel login page.
+2. Enter the field recovery credential shared with authorized support staff.
+3. The panel resets the admin credential to the emergency credential.
+4. The panel redirects to the password change page.
+5. Set a new customer password before using any protected panel page.
 
 This is a LAN support shortcut, not a second factor. Keep remote access limited
 to trusted networks or Tailscale, and change the password immediately after
@@ -76,7 +92,7 @@ sudo systemctl restart announceflow
 For emergency field recovery to the original handoff credential:
 
 ```bash
-python3 scripts/reset_admin_password.py --username admin --password admin123
+python3 scripts/reset_admin_password.py --username admin
 sudo systemctl restart announceflow
 ```
 
