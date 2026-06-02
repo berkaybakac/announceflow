@@ -30,11 +30,11 @@ fi
 
 DEPLOY_PROFILE="${DEPLOY_PROFILE:-standard}"
 case "${DEPLOY_PROFILE}" in
-    standard|clean-delivery)
+    standard|field-update|clean-delivery)
         ;;
     *)
         echo "Invalid DEPLOY_PROFILE: ${DEPLOY_PROFILE}"
-        echo "Allowed values: standard, clean-delivery"
+        echo "Allowed values: standard, field-update, clean-delivery"
         exit 1
         ;;
 esac
@@ -58,7 +58,21 @@ BASE_RSYNC_EXCLUDES=(
 )
 
 PROFILE_RSYNC_EXCLUDES=()
-if [ "${DEPLOY_PROFILE}" = "clean-delivery" ]; then
+if [ "${DEPLOY_PROFILE}" = "field-update" ]; then
+    PROFILE_RSYNC_EXCLUDES=(
+        ".env"
+        "config.json"
+        "media/"
+        "logs/"
+        "runtime/"
+        "announceflow.db"
+        "announceflow.db-*"
+        "announceflow.db*"
+        "*.db"
+        "*.db-wal"
+        "*.db-shm"
+    )
+elif [ "${DEPLOY_PROFILE}" = "clean-delivery" ]; then
     PROFILE_RSYNC_EXCLUDES=(
         "media/"
         "runtime/"

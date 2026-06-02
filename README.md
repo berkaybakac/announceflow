@@ -154,7 +154,7 @@ python main.py
 
 ### Production
 
-Deployed to Raspberry Pi via `deploy.sh` with two profiles: `standard` (routine) and `clean-delivery` (customer handoff with content wipe).
+Deployed to Raspberry Pi via `deploy.sh` with three profiles: `standard` (routine), `field-update` (live-site update preserving customer media/config/database/runtime state), and `clean-delivery` (customer handoff with content wipe).
 
 Full deployment guide, release workflow, hostname standard, and agent distribution flow: [`docs/OPERATIONS.md`](docs/OPERATIONS.md)
 
