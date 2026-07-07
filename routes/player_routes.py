@@ -12,7 +12,7 @@ from typing import Optional
 from flask import Blueprint, jsonify, request
 import database as db
 from services.config_service import load_config, save_config
-from services.silence_policy import resolve_silence_policy
+from services.silence_policy import resolve_silence_policy, should_fail_safe_on_unknown
 from services.volume_runtime_service import get_volume_runtime_service
 from scheduler import is_within_working_hours
 from player import get_player
@@ -167,7 +167,7 @@ def api_play():
         silence_decision = resolve_silence_policy(
             config,
             allow_network=False,
-            fail_safe_on_unknown=True,
+            fail_safe_on_unknown=should_fail_safe_on_unknown(config),
         )
         if silence_decision.get("silence_active", False):
             blocked_payload = {
@@ -434,7 +434,7 @@ def api_now_playing():
     silence_decision = resolve_silence_policy(
         config,
         allow_network=False,
-        fail_safe_on_unknown=True,
+        fail_safe_on_unknown=should_fail_safe_on_unknown(config),
     )
     state["silence_policy"] = silence_decision
 

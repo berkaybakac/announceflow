@@ -17,6 +17,7 @@ from services.config_service import load_config
 from services.schedule_conflict_service import resolve_duration_seconds
 from services.silence_policy import (
     resolve_silence_policy,
+    should_fail_safe_on_unknown,
     is_within_working_hours as _policy_is_within_working_hours,
     is_prayer_time_active as _policy_is_prayer_time_active,
 )
@@ -55,7 +56,9 @@ def is_within_working_hours(config: dict) -> bool:
 def is_prayer_time_active(config: dict) -> bool:
     """Backward-compatible prayer helper."""
     return _policy_is_prayer_time_active(
-        config, allow_network=True, fail_safe_on_unknown=True
+        config,
+        allow_network=True,
+        fail_safe_on_unknown=should_fail_safe_on_unknown(config),
     )
 
 
@@ -977,7 +980,7 @@ class Scheduler:
         latest_decision = resolve_silence_policy(
             latest_config,
             allow_network=False,
-            fail_safe_on_unknown=True,
+            fail_safe_on_unknown=should_fail_safe_on_unknown(latest_config),
         )
         blocked_now, reason_now = self._is_policy_blocking_announcements(
             outside_working_hours=not is_within_working_hours(latest_config),
@@ -1415,7 +1418,7 @@ class Scheduler:
             decision = resolve_silence_policy(
                 config,
                 allow_network=False,
-                fail_safe_on_unknown=True,
+                fail_safe_on_unknown=should_fail_safe_on_unknown(config),
             )
             self._log_policy_decision_if_changed(decision)
             if should_force_stop_stream(decision.get("silence_active", False)):
@@ -1463,7 +1466,7 @@ class Scheduler:
                 silence_decision = resolve_silence_policy(
                     config,
                     allow_network=True,
-                    fail_safe_on_unknown=True,
+                    fail_safe_on_unknown=should_fail_safe_on_unknown(config),
                 )
                 self._log_policy_decision_if_changed(silence_decision)
                 self._apply_stream_runtime_policy(silence_decision)
@@ -1972,7 +1975,7 @@ class Scheduler:
         restore_decision = resolve_silence_policy(
             resume_config,
             allow_network=False,
-            fail_safe_on_unknown=True,
+            fail_safe_on_unknown=should_fail_safe_on_unknown(resume_config),
         )
         self._log_policy_decision_if_changed(restore_decision)
         if restore_decision.get("silence_active", False):
@@ -2141,7 +2144,7 @@ class Scheduler:
         policy_decision = resolve_silence_policy(
             config,
             allow_network=False,
-            fail_safe_on_unknown=True,
+            fail_safe_on_unknown=should_fail_safe_on_unknown(config),
         )
         if policy_decision.get("silence_active", False):
             log_schedule(
