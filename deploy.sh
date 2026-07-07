@@ -65,6 +65,8 @@ if [ "${DEPLOY_PROFILE}" = "field-update" ]; then
         "media/"
         "logs/"
         "runtime/"
+        "prayer_times_cache.json"
+        "cities_districts_cache.json"
         "announceflow.db"
         "announceflow.db-*"
         "announceflow.db*"
