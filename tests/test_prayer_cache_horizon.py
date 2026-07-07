@@ -19,7 +19,7 @@ def test_fetch_prunes_to_configured_cache_horizon(tmp_path, monkeypatch):
     monkeypatch.setattr(pt, "MAX_FETCH_DAYS", 30)
     monkeypatch.setattr(pt, "_get_district_id", lambda _city, _district: "34")
 
-    start_date = datetime(2026, 1, 1)
+    start_date = datetime.now()
     payload = []
     for i in range(45):
         d = start_date + timedelta(days=i)
