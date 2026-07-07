@@ -6,8 +6,9 @@ import logging
 import json
 import os
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, List, Tuple
+from urllib.parse import urlencode
 import urllib.request
 import urllib.error
 
@@ -35,8 +36,18 @@ def _log_error_event(event: str, data: Optional[Dict] = None):
 
 # Cache file path
 CACHE_FILE = "prayer_times_cache.json"
-CACHE_HORIZON_DAYS = 30
-MAX_FETCH_DAYS = 30
+CACHE_HORIZON_DAYS = int(os.environ.get("ANNOUNCEFLOW_PRAYER_CACHE_DAYS", "370"))
+MAX_FETCH_DAYS = CACHE_HORIZON_DAYS
+STALE_FALLBACK_DAYS = int(
+    os.environ.get("ANNOUNCEFLOW_PRAYER_STALE_FALLBACK_DAYS", "7")
+)
+NETWORK_RETRY_SECONDS = int(os.environ.get("ANNOUNCEFLOW_PRAYER_RETRY_SECONDS", "3600"))
+UNAVAILABLE_LOG_INTERVAL_SECONDS = int(
+    os.environ.get("ANNOUNCEFLOW_PRAYER_UNAVAILABLE_LOG_SECONDS", "3600")
+)
+
+_network_retry_after: Dict[str, datetime] = {}
+_last_unavailable_log_at: Dict[str, datetime] = {}
 
 # Turkey cities and their districts
 # Turkey cities cache
@@ -272,6 +283,74 @@ def _parse_date_key(date_key: str) -> Optional[datetime]:
         return None
 
 
+def _network_key(city: str, district: str) -> str:
+    return f"{city}|{district or 'Merkez'}"
+
+
+def _network_backoff_remaining_seconds(city: str, district: str) -> int:
+    retry_after = _network_retry_after.get(_network_key(city, district))
+    if retry_after is None:
+        return 0
+    remaining = int((retry_after - datetime.now()).total_seconds())
+    if remaining <= 0:
+        _network_retry_after.pop(_network_key(city, district), None)
+        return 0
+    return remaining
+
+
+def _mark_network_refresh_failed(city: str, district: str) -> None:
+    _network_retry_after[_network_key(city, district)] = datetime.now() + timedelta(
+        seconds=max(60, NETWORK_RETRY_SECONDS)
+    )
+
+
+def _mark_network_refresh_success(city: str, district: str) -> None:
+    _network_retry_after.pop(_network_key(city, district), None)
+
+
+def _log_unavailable_once(
+    city: str,
+    district: str,
+    *,
+    source: str,
+    stale_age_days: Optional[int] = None,
+    backoff_seconds: int = 0,
+) -> None:
+    key = _network_key(city, district)
+    now = datetime.now()
+    last = _last_unavailable_log_at.get(key)
+    if last and (now - last).total_seconds() < UNAVAILABLE_LOG_INTERVAL_SECONDS:
+        return
+    _last_unavailable_log_at[key] = now
+    payload = {
+        "city": city,
+        "district": district,
+        "source": source,
+        "stale_age_days": stale_age_days,
+        "cache_horizon_days": CACHE_HORIZON_DAYS,
+        "stale_fallback_days": STALE_FALLBACK_DAYS,
+        "network_backoff_seconds": backoff_seconds,
+    }
+    logger.error(
+        "Prayer times unavailable for %s/%s (source=%s, stale_age_days=%s, backoff=%ss)",
+        city,
+        district,
+        source,
+        stale_age_days,
+        backoff_seconds,
+    )
+    _log_error_event("prayer_times_unavailable", payload)
+
+
+def _extract_hhmm(value: str) -> str:
+    value = str(value or "").strip()
+    if not value:
+        return ""
+    # AlAdhan returns e.g. "03:28 (+03)".
+    token = value.split()[0]
+    return token[:5] if len(token) >= 5 else token
+
+
 def _prune_cache_for_city_district(
     cache: Dict, city: str, district: str, horizon_days: int
 ) -> bool:
@@ -341,70 +420,41 @@ def get_prayer_times(
         logger.debug(f"Using cached prayer times for {city}/{district} ({today})")
         return cached, "cache_fresh"
 
-    if allow_network and fetch_weekly_prayer_times(city, district):
-        refreshed = _load_cache()
-        cached = refreshed.get(cache_key)
-        if isinstance(cached, dict):
-            return cached, "network"
-        cache = refreshed
-
     if allow_network:
-        # Fallback: Try single-day fetch from alternative API
-        try:
-            url = f"https://api.collectapi.com/pray/all?data.city={city}"
-            req = urllib.request.Request(
-                url,
-                headers={
-                    "User-Agent": "AnnounceFlow/1.0",
-                    "content-type": "application/json",
-                },
+        backoff_seconds = _network_backoff_remaining_seconds(city, district)
+        if backoff_seconds <= 0:
+            refreshed_ok = (
+                fetch_weekly_prayer_times(city, district)
+                or fetch_aladhan_prayer_times(city, district)
+                or fetch_collectapi_prayer_times(city, district)
+            )
+            if refreshed_ok:
+                _mark_network_refresh_success(city, district)
+                refreshed = _load_cache()
+                cached = refreshed.get(cache_key)
+                if isinstance(cached, dict):
+                    return cached, "network"
+                cache = refreshed
+            else:
+                _mark_network_refresh_failed(city, district)
+                backoff_seconds = _network_backoff_remaining_seconds(city, district)
+        else:
+            logger.debug(
+                "Prayer network refresh skipped for %s/%s; retry in %ss",
+                city,
+                district,
+                backoff_seconds,
             )
 
-            with urllib.request.urlopen(req, timeout=10) as response:
-                data = json.loads(response.read().decode("utf-8"))
-
-                if data.get("success") and data.get("result"):
-                    result = (
-                        data["result"][0]
-                        if isinstance(data["result"], list)
-                        else data["result"]
-                    )
-
-                    prayer_times = {
-                        "imsak": result.get("imsak", ""),
-                        "gunes": result.get("gunes", ""),
-                        "ogle": result.get("ogle", ""),
-                        "ikindi": result.get("ikindi", ""),
-                        "aksam": result.get("aksam", ""),
-                        "yatsi": result.get("yatsi", ""),
-                        "date": today,
-                    }
-
-                    cache[cache_key] = prayer_times
-                    _save_cache(cache)
-
-                    logger.info(
-                        f"Fetched prayer times (alt API) for {city}: {prayer_times}"
-                    )
-                    return prayer_times, "network"
-
-        except urllib.error.HTTPError as e:
-            logger.warning(f"Alternative API HTTP error for {city}: {e.code} {e.reason}")
-        except urllib.error.URLError as e:
-            if "timed out" in str(e.reason).lower():
-                logger.warning(f"Alternative API timeout for {city}: {e.reason}")
-            else:
-                logger.warning(f"Alternative API network error for {city}: {e.reason}")
-        except Exception as e:
-            logger.error(f"Alternative API error for {city}: {type(e).__name__}: {e}")
-
     stale_entry = _find_stale_cached_times(cache, city, district)
+    stale_age_days = None
     if stale_entry:
         stale_date_key, stale = stale_entry
         stale_dt = _parse_date_key(stale_date_key)
         if today_dt and stale_dt:
             age_days = (today_dt.date() - stale_dt.date()).days
-            if 0 <= age_days <= CACHE_HORIZON_DAYS:
+            stale_age_days = age_days
+            if 0 <= age_days <= STALE_FALLBACK_DAYS:
                 logger.warning(
                     "Using stale cache for %s/%s - no fresh data available (age=%s days)",
                     city,
@@ -417,7 +467,7 @@ def get_prayer_times(
                 city,
                 district,
                 age_days,
-                CACHE_HORIZON_DAYS,
+                STALE_FALLBACK_DAYS,
             )
         else:
             logger.warning(
@@ -427,6 +477,13 @@ def get_prayer_times(
                 stale_date_key,
             )
 
+    _log_unavailable_once(
+        city,
+        district,
+        source="none",
+        stale_age_days=stale_age_days,
+        backoff_seconds=_network_backoff_remaining_seconds(city, district),
+    )
     return None, "none"
 
 
@@ -598,6 +655,188 @@ def fetch_weekly_prayer_times(city: str, district: str) -> bool:
         logger.error(
             f"Prayer times fetch error for {city}/{district}: {type(e).__name__}: {e}"
         )
+
+    return False
+
+
+def fetch_aladhan_prayer_times(city: str, district: str) -> bool:
+    """Fetch monthly prayer times from AlAdhan using Turkey/Diyanet method."""
+    cache = _load_cache()
+    today = datetime.now()
+    months = []
+    cursor = today.replace(day=1)
+    end_date = today + timedelta(days=CACHE_HORIZON_DAYS)
+    while cursor <= end_date:
+        months.append((cursor.year, cursor.month))
+        cursor = (cursor.replace(day=28) + timedelta(days=4)).replace(day=1)
+
+    cached_count = 0
+    try:
+        for year, month in months:
+            query = urlencode(
+                {
+                    "city": city,
+                    "country": "Turkey",
+                    "method": "13",
+                    "school": "1",
+                }
+            )
+            url = f"https://api.aladhan.com/v1/calendarByCity/{year}/{month}?{query}"
+            req = urllib.request.Request(
+                url,
+                headers={
+                    "User-Agent": "AnnounceFlow/1.0",
+                    "Accept": "application/json",
+                },
+            )
+
+            with urllib.request.urlopen(req, timeout=15) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+
+            rows = payload.get("data") if isinstance(payload, dict) else None
+            if not isinstance(rows, list):
+                continue
+
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                timings = row.get("timings") or {}
+                gregorian = (row.get("date") or {}).get("gregorian") or {}
+                date_text = str(gregorian.get("date", "")).strip()
+                try:
+                    date_key = datetime.strptime(date_text, "%d-%m-%Y").strftime(
+                        "%Y-%m-%d"
+                    )
+                except ValueError:
+                    continue
+
+                prayer_times = {
+                    "imsak": _extract_hhmm(timings.get("Fajr", "")),
+                    "gunes": _extract_hhmm(timings.get("Sunrise", "")),
+                    "ogle": _extract_hhmm(timings.get("Dhuhr", "")),
+                    "ikindi": _extract_hhmm(timings.get("Asr", "")),
+                    "aksam": _extract_hhmm(timings.get("Maghrib", "")),
+                    "yatsi": _extract_hhmm(timings.get("Isha", "")),
+                    "date": date_key,
+                }
+                if not all(
+                    prayer_times.get(k)
+                    for k in ["imsak", "gunes", "ogle", "ikindi", "aksam", "yatsi"]
+                ):
+                    continue
+
+                cache[_resolve_cache_key(city, district, date_key)] = prayer_times
+                cached_count += 1
+
+        if cached_count > 0:
+            _prune_cache_for_city_district(cache, city, district, CACHE_HORIZON_DAYS)
+            _save_cache(cache)
+            logger.info(
+                "Cached %s days of prayer times for %s/%s via AlAdhan",
+                cached_count,
+                city,
+                district,
+            )
+            _log_prayer_event(
+                "fetch",
+                {
+                    "city": city,
+                    "district": district,
+                    "days": cached_count,
+                    "horizon_days": CACHE_HORIZON_DAYS,
+                    "provider": "aladhan",
+                    "method": "13",
+                },
+            )
+            return True
+
+    except urllib.error.HTTPError as e:
+        logger.warning(
+            "AlAdhan API HTTP error for %s/%s: %s %s",
+            city,
+            district,
+            e.code,
+            e.reason,
+        )
+    except urllib.error.URLError as e:
+        if "timed out" in str(e.reason).lower():
+            logger.warning("AlAdhan API timeout for %s/%s: %s", city, district, e.reason)
+        else:
+            logger.warning(
+                "AlAdhan API network error for %s/%s: %s", city, district, e.reason
+            )
+    except Exception as e:
+        logger.error(
+            "AlAdhan API error for %s/%s: %s: %s",
+            city,
+            district,
+            type(e).__name__,
+            e,
+        )
+
+    return False
+
+
+def fetch_collectapi_prayer_times(city: str, district: str) -> bool:
+    """Fallback single-day CollectAPI fetch, enabled only when API key is present."""
+    api_key = os.environ.get("COLLECTAPI_KEY") or os.environ.get(
+        "ANNOUNCEFLOW_COLLECTAPI_KEY"
+    )
+    if not api_key:
+        logger.debug("CollectAPI prayer fallback skipped for %s: API key missing", city)
+        return False
+
+    today = datetime.now().strftime("%Y-%m-%d")
+    cache = _load_cache()
+    try:
+        url = f"https://api.collectapi.com/pray/all?{urlencode({'data.city': city})}"
+        req = urllib.request.Request(
+            url,
+            headers={
+                "User-Agent": "AnnounceFlow/1.0",
+                "content-type": "application/json",
+                "authorization": f"apikey {api_key}",
+            },
+        )
+
+        with urllib.request.urlopen(req, timeout=10) as response:
+            data = json.loads(response.read().decode("utf-8"))
+
+        if data.get("success") and data.get("result"):
+            result = data["result"][0] if isinstance(data["result"], list) else data["result"]
+            prayer_times = {
+                "imsak": result.get("imsak", ""),
+                "gunes": result.get("gunes", ""),
+                "ogle": result.get("ogle", ""),
+                "ikindi": result.get("ikindi", ""),
+                "aksam": result.get("aksam", ""),
+                "yatsi": result.get("yatsi", ""),
+                "date": today,
+            }
+            cache[_resolve_cache_key(city, district, today)] = prayer_times
+            _save_cache(cache)
+            logger.info("Fetched prayer times via CollectAPI for %s/%s", city, district)
+            _log_prayer_event(
+                "fetch",
+                {
+                    "city": city,
+                    "district": district,
+                    "days": 1,
+                    "horizon_days": CACHE_HORIZON_DAYS,
+                    "provider": "collectapi",
+                },
+            )
+            return True
+
+    except urllib.error.HTTPError as e:
+        logger.warning(f"CollectAPI HTTP error for {city}: {e.code} {e.reason}")
+    except urllib.error.URLError as e:
+        if "timed out" in str(e.reason).lower():
+            logger.warning(f"CollectAPI timeout for {city}: {e.reason}")
+        else:
+            logger.warning(f"CollectAPI network error for {city}: {e.reason}")
+    except Exception as e:
+        logger.error(f"CollectAPI error for {city}: {type(e).__name__}: {e}")
 
     return False
 

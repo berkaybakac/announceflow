@@ -8,7 +8,7 @@ from unittest.mock import patch
 import prayer_times as pt
 import scheduler as scheduler_module
 from scheduler import Scheduler
-from services.silence_policy import resolve_silence_policy
+from services.silence_policy import resolve_silence_policy, should_fail_safe_on_unknown
 
 
 class DummyPlayer:
@@ -86,6 +86,40 @@ def test_unknown_policy_falls_back_to_fail_safe():
     assert decision["fail_safe_applied"] is True
     assert decision["reason_code"] == "prayer_unknown_fail_safe"
     assert decision["source"] == "none"
+
+
+def test_unknown_policy_does_not_silence_by_default_config():
+    config = _base_config()
+
+    decision = resolve_silence_policy(
+        config,
+        allow_network=False,
+        fail_safe_on_unknown=should_fail_safe_on_unknown(config),
+        prayer_times_provider=lambda _city, _district, _allow_network: (None, "none"),
+    )
+
+    assert decision["policy"] == "unknown"
+    assert decision["silence_active"] is False
+    assert decision["fail_safe_applied"] is False
+    assert decision["reason_code"] == "prayer_times_unavailable"
+
+
+def test_unknown_policy_fail_safe_can_be_enabled_by_config():
+    config = {
+        **_base_config(),
+        "prayer_times_fail_safe_on_unknown": True,
+    }
+
+    decision = resolve_silence_policy(
+        config,
+        allow_network=False,
+        fail_safe_on_unknown=should_fail_safe_on_unknown(config),
+        prayer_times_provider=lambda _city, _district, _allow_network: (None, "none"),
+    )
+
+    assert decision["silence_active"] is True
+    assert decision["fail_safe_applied"] is True
+    assert decision["reason_code"] == "prayer_unknown_fail_safe"
 
 
 def test_policy_metadata_reports_cache_source_with_di_clock():

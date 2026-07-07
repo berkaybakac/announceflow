@@ -9,6 +9,11 @@ logger = logging.getLogger(__name__)
 PrayerTimesProvider = Callable[[str, str, bool], Tuple[Optional[Dict[str, Any]], str]]
 
 
+def should_fail_safe_on_unknown(config: dict) -> bool:
+    """Return whether unknown prayer-time state should force silence."""
+    return bool(config.get("prayer_times_fail_safe_on_unknown", False))
+
+
 def _is_time_within_window(curr_time, start_time, end_time) -> bool:
     """Check if a time is within a range, including overnight windows."""
     if start_time <= end_time:

@@ -19,7 +19,7 @@ from player import get_player
 from logger import log_system, log_error
 from services.config_service import load_config
 from services.release_service import load_release_stamp
-from services.silence_policy import resolve_silence_policy
+from services.silence_policy import resolve_silence_policy, should_fail_safe_on_unknown
 
 
 def _resolve_web_port(config: dict) -> int:
@@ -142,7 +142,7 @@ def main():
         startup_policy = resolve_silence_policy(
             startup_config,
             allow_network=False,
-            fail_safe_on_unknown=True,
+            fail_safe_on_unknown=should_fail_safe_on_unknown(startup_config),
         )
         resume_allowed = not startup_policy.get("silence_active", False)
 
