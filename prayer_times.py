@@ -365,12 +365,31 @@ def _prune_cache_for_city_district(
             continue
         dated_entries.append((parsed, key))
 
-    if len(dated_entries) <= horizon_days:
-        return False
-
-    dated_entries.sort(key=lambda item: item[0], reverse=True)
+    today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    min_keep = today - timedelta(days=max(0, STALE_FALLBACK_DAYS))
+    max_keep = today + timedelta(days=max(1, horizon_days))
     removed = False
-    for _, key in dated_entries[horizon_days:]:
+
+    for parsed, key in dated_entries:
+        if parsed < min_keep or parsed > max_keep:
+            cache.pop(key, None)
+            removed = True
+
+    dated_entries = [
+        (parsed, key)
+        for parsed, key in dated_entries
+        if key in cache and min_keep <= parsed <= max_keep
+    ]
+
+    max_entries = max(1, horizon_days + STALE_FALLBACK_DAYS + 1)
+    if len(dated_entries) <= max_entries:
+        return removed
+
+    dated_entries.sort(key=lambda item: item[0])
+    keep = {key for _, key in dated_entries[:max_entries]}
+    for _, key in dated_entries:
+        if key in keep:
+            continue
         if key in cache:
             cache.pop(key, None)
             removed = True
