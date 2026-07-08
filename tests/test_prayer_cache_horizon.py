@@ -103,6 +103,47 @@ def test_exact_date_hit_and_stale_horizon_behavior(tmp_path, monkeypatch):
     assert missing_source == "none"
 
 
+def test_future_cache_entries_are_not_used_as_stale_fallback(tmp_path, monkeypatch):
+    cache_path = tmp_path / "prayer_times_cache.json"
+    monkeypatch.setattr(pt, "CACHE_FILE", str(cache_path))
+    monkeypatch.setattr(pt, "STALE_FALLBACK_DAYS", 7)
+
+    city = "Gaziantep"
+    district = "Gazi̇antep"
+    now = datetime.now()
+    future = now + timedelta(days=30)
+    recent_past = now - timedelta(days=2)
+
+    pt._save_cache(
+        {
+            _cache_key(city, district, future): {
+                "ogle": "13:99",
+                "date": future.strftime("%Y-%m-%d"),
+            }
+        }
+    )
+    missing, missing_source = pt.get_prayer_times(city, district, allow_network=False)
+    assert missing is None
+    assert missing_source == "none"
+
+    pt._save_cache(
+        {
+            _cache_key(city, district, future): {
+                "ogle": "13:99",
+                "date": future.strftime("%Y-%m-%d"),
+            },
+            _cache_key(city, district, recent_past): {
+                "ogle": "12:41",
+                "date": recent_past.strftime("%Y-%m-%d"),
+            },
+        }
+    )
+    stale, stale_source = pt.get_prayer_times(city, district, allow_network=False)
+    assert stale_source == "cache_stale"
+    assert stale is not None
+    assert stale["ogle"] == "12:41"
+
+
 def test_corrupt_cache_is_quarantined(tmp_path, monkeypatch):
     cache_path = tmp_path / "prayer_times_cache.json"
     monkeypatch.setattr(pt, "CACHE_FILE", str(cache_path))

@@ -183,8 +183,18 @@ chmod 600 ${DEST_DIR}/.env"
 
 echo ""
 # 2.5 Install system dependencies (mpg123 needed for audio)
-echo "[2.5/5] Installing system dependencies (mpg123, ffmpeg)..."
-ssh ${SSH_OPTS} ${PI_USER}@${PI_HOST} "sudo apt-get update && sudo apt-get install -y mpg123 ffmpeg alsa-utils"
+INSTALL_SYSTEM_DEPS="${DEPLOY_INSTALL_SYSTEM_DEPS:-1}"
+if [ "${DEPLOY_PROFILE}" = "field-update" ] && [ -z "${DEPLOY_INSTALL_SYSTEM_DEPS+x}" ]; then
+    INSTALL_SYSTEM_DEPS="0"
+fi
+
+if [ "${INSTALL_SYSTEM_DEPS}" = "1" ]; then
+    echo "[2.5/5] Installing system dependencies (mpg123, ffmpeg)..."
+    ssh ${SSH_OPTS} ${PI_USER}@${PI_HOST} "sudo -n true"
+    ssh ${SSH_OPTS} ${PI_USER}@${PI_HOST} "sudo apt-get update && sudo apt-get install -y mpg123 ffmpeg alsa-utils"
+else
+    echo "[2.5/5] Skipping system dependencies (DEPLOY_INSTALL_SYSTEM_DEPS=${INSTALL_SYSTEM_DEPS})"
+fi
 
 echo ""
 echo "[3/5] Installing Python dependencies on Pi..."
@@ -216,12 +226,29 @@ EOF
 scp ${SSH_OPTS} announceflow.service ${PI_USER}@${PI_HOST}:${DEST_DIR}/
 
 echo ""
-echo "[5/6] Installing and reloading systemd service..."
-ssh ${SSH_OPTS} ${PI_USER}@${PI_HOST} "sudo install -m 644 ${DEST_DIR}/${SERVICE_NAME} /etc/systemd/system/${SERVICE_NAME} && sudo systemctl daemon-reload && sudo systemctl enable ${SERVICE_NAME}"
+INSTALL_SYSTEMD_SERVICE="${DEPLOY_INSTALL_SYSTEMD_SERVICE:-1}"
+if [ "${DEPLOY_PROFILE}" = "field-update" ] && [ -z "${DEPLOY_INSTALL_SYSTEMD_SERVICE+x}" ]; then
+    INSTALL_SYSTEMD_SERVICE="0"
+fi
+
+if [ "${INSTALL_SYSTEMD_SERVICE}" = "1" ]; then
+    echo "[5/6] Installing and reloading systemd service..."
+    ssh ${SSH_OPTS} ${PI_USER}@${PI_HOST} "sudo -n true"
+    ssh ${SSH_OPTS} ${PI_USER}@${PI_HOST} "sudo install -m 644 ${DEST_DIR}/${SERVICE_NAME} /etc/systemd/system/${SERVICE_NAME} && sudo systemctl daemon-reload && sudo systemctl enable ${SERVICE_NAME}"
+else
+    echo "[5/6] Skipping systemd service install (DEPLOY_INSTALL_SYSTEMD_SERVICE=${INSTALL_SYSTEMD_SERVICE})"
+fi
 
 echo ""
 echo "[6/6] Restarting announceflow service..."
-ssh ${SSH_OPTS} ${PI_USER}@${PI_HOST} "sudo systemctl restart ${SERVICE_NAME} && sudo systemctl status ${SERVICE_NAME} --no-pager | head -n 10"
+if [ "${DEPLOY_PROFILE}" = "field-update" ] && [ "${INSTALL_SYSTEMD_SERVICE}" != "1" ]; then
+    ssh ${SSH_OPTS} ${PI_USER}@${PI_HOST} "\
+pid=\$(pgrep -u ${PI_USER} -f '^/usr/bin/python3 ${DEST_DIR}/main.py$' | head -n 1); \
+if [ -n \"\$pid\" ]; then kill -TERM \"\$pid\"; else echo 'announceflow process not found; assuming service manager will start it'; fi"
+else
+    ssh ${SSH_OPTS} ${PI_USER}@${PI_HOST} "sudo -n true"
+    ssh ${SSH_OPTS} ${PI_USER}@${PI_HOST} "sudo systemctl restart ${SERVICE_NAME} && sudo systemctl status ${SERVICE_NAME} --no-pager | head -n 10"
+fi
 
 echo ""
 # 6.5 Post-deploy health check

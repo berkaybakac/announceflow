@@ -401,12 +401,16 @@ def _find_stale_cached_times(
 ) -> Optional[Tuple[str, Dict]]:
     prefix = f"{city}_{district}_"
     stale_candidates = []
+    today = datetime.now().date()
     for key, value in cache.items():
         if not key.startswith(prefix):
             continue
         if not isinstance(value, dict):
             continue
         date_key = key[len(prefix) :]
+        parsed = _parse_date_key(date_key)
+        if parsed is None or parsed.date() > today:
+            continue
         stale_candidates.append((date_key, value))
 
     if not stale_candidates:
