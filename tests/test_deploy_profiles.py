@@ -48,3 +48,23 @@ def test_cleanup_only_runs_for_clean_delivery_profile():
     cleanup_block = script[cleanup_start:cleanup_end]
 
     assert "field-update" not in cleanup_block
+
+
+def test_field_update_skips_system_dependency_install_by_default():
+    script = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+
+    assert 'INSTALL_SYSTEM_DEPS="${DEPLOY_INSTALL_SYSTEM_DEPS:-1}"' in script
+    assert 'if [ "${DEPLOY_PROFILE}" = "field-update" ]' in script
+    assert 'INSTALL_SYSTEM_DEPS="0"' in script
+    assert "DEPLOY_INSTALL_SYSTEM_DEPS" in script
+    assert "sudo -n true" in script
+
+
+def test_field_update_skips_systemd_install_and_restarts_without_sudo_by_default():
+    script = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+
+    assert 'INSTALL_SYSTEMD_SERVICE="${DEPLOY_INSTALL_SYSTEMD_SERVICE:-1}"' in script
+    assert 'INSTALL_SYSTEMD_SERVICE="0"' in script
+    assert "DEPLOY_INSTALL_SYSTEMD_SERVICE" in script
+    assert "pgrep -u ${PI_USER} -f '^/usr/bin/python3 ${DEST_DIR}/main.py$'" in script
+    assert 'kill -TERM \\"\\$pid\\"' in script
