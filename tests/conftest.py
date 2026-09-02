@@ -21,3 +21,10 @@ os.environ["ANNOUNCEFLOW_LOG_DIR"] = str(_LOG_DIR)
 os.environ["ANNOUNCEFLOW_EVENT_LOG_FILE"] = str(_LOG_DIR / "events.jsonl")
 os.environ["ANNOUNCEFLOW_APP_LOG_FILE"] = str(_RUNTIME_ROOT / "announceflow.log")
 os.environ["ANNOUNCEFLOW_AGENT_RUNTIME_DIR"] = str(_AGENT_RUNTIME)
+
+# Several tests assume the schema already exists (matching how main.py always
+# calls this on real boot) instead of isolating their own DB. Idempotent
+# (CREATE TABLE IF NOT EXISTS) — safe against an existing dev DB too.
+import database  # noqa: E402
+
+database.init_database()
