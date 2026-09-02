@@ -76,3 +76,50 @@ def test_stop_without_active_playback_sad_path_no_audit(monkeypatch):
     audits = [data for event, data in calls if event == "playback_usage_audit"]
     assert audits == []
 
+
+
+def test_stop_persists_music_usage_session(monkeypatch):
+    """stop() should also persist the duration to usage_sessions (kind=music)."""
+    player = _make_player()
+    calls = []
+
+    monkeypatch.setattr("player.db.save_playlist_state", lambda *args, **kwargs: None)
+    monkeypatch.setattr("player.log_play", lambda event, data: None)
+    monkeypatch.setattr(
+        "player.db.record_usage_session", lambda **kwargs: calls.append(kwargs)
+    )
+
+    player.is_playing = True
+    player.current_file = "/tmp/song_c.mp3"
+    player._session_play_started_at = time.monotonic() - 5.0
+    player._process = None
+
+    player.stop()
+
+    assert len(calls) == 1
+    assert calls[0]["kind"] == "music"
+    assert calls[0]["source"] == "song_c.mp3"
+    assert calls[0]["duration_seconds"] >= 5.0
+    assert calls[0]["started_at"] < calls[0]["ended_at"]
+
+
+def test_stop_playback_only_persists_music_usage_session(monkeypatch):
+    """_stop_playback_only should also persist the duration (interrupted branch)."""
+    player = _make_player()
+
+    monkeypatch.setattr("player.log_play", lambda event, data: None)
+    calls = []
+    monkeypatch.setattr(
+        "player.db.record_usage_session", lambda **kwargs: calls.append(kwargs)
+    )
+
+    player.is_playing = True
+    player.current_file = "/tmp/song_d.mp3"
+    player._session_play_started_at = time.monotonic() - 4.0
+    player._process = None
+
+    player._stop_playback_only()
+
+    assert len(calls) == 1
+    assert calls[0]["kind"] == "music"
+    assert calls[0]["source"] == "song_d.mp3"

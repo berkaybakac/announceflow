@@ -16,6 +16,7 @@ from .base_repository import BaseRepository
 from .media_repository import MediaRepository
 from .schedule_repository import ScheduleRepository
 from .playback_repository import PlaybackRepository
+from .usage_repository import UsageRepository
 from utils.time_utils import parse_storage_datetime_to_utc, to_storage_utc_z
 
 
@@ -28,6 +29,7 @@ DATABASE_PATH = "announceflow.db"
 _media_repo = MediaRepository(DATABASE_PATH)
 _schedule_repo = ScheduleRepository(DATABASE_PATH)
 _playback_repo = PlaybackRepository(DATABASE_PATH)
+_usage_repo = UsageRepository(DATABASE_PATH)
 logger = logging.getLogger(__name__)
 
 
@@ -213,6 +215,28 @@ def init_database():
         """
         INSERT OR IGNORE INTO playback_state (id, volume)
         VALUES (1, 80)
+    """
+    )
+
+    # Usage session history (music/stream/announcement durations)
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS usage_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            kind TEXT NOT NULL CHECK(kind IN ('music', 'stream', 'announcement')),
+            started_at TIMESTAMP NOT NULL,
+            ended_at TIMESTAMP NOT NULL,
+            duration_seconds REAL NOT NULL,
+            source TEXT,
+            detail_json TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """
+    )
+    cursor.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_usage_sessions_kind_started
+        ON usage_sessions(kind, started_at)
     """
     )
 
@@ -573,3 +597,16 @@ def save_playlist_state(
 def get_playlist_state() -> Dict[str, Any]:
     """Get saved playlist state from database."""
     return _playback_repo.get_playlist_state()
+
+
+# Usage Sessions (1 function)
+def record_usage_session(
+    kind: str,
+    started_at: str,
+    ended_at: str,
+    duration_seconds: float,
+    source: Optional[str] = None,
+    detail: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Persist one music/stream/announcement usage session row."""
+    _usage_repo.record_session(kind, started_at, ended_at, duration_seconds, source, detail)

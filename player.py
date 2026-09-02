@@ -9,7 +9,7 @@ import logging
 import subprocess
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Callable
 
 import database as db
@@ -680,6 +680,7 @@ class AudioPlayer:
                     "status": "interrupted",
                     "source": "local"
                 })
+                self._record_music_usage_session(stopped_file, duration)
                 self._session_play_started_at = 0.0
 
         if AUDIO_BACKEND == "mpg123" and self._process:
@@ -747,6 +748,7 @@ class AudioPlayer:
                     "status": "stopped",
                     "source": "local"
                 })
+                self._record_music_usage_session(stopped_file, duration)
                 self._session_play_started_at = 0.0
             # CRITICAL: Disable playlist to prevent monitor thread from calling play_next()
             self._playlist_active = False
@@ -875,6 +877,20 @@ class AudioPlayer:
         # Add playlist info
         state["playlist"] = self.get_playlist_state()
         return state
+
+    def _record_music_usage_session(self, filepath: str, duration_seconds: float) -> None:
+        """Persist a music playback duration to usage_sessions."""
+        if duration_seconds <= 0:
+            return
+        ended_at = datetime.now(timezone.utc)
+        started_at = ended_at - timedelta(seconds=duration_seconds)
+        db.record_usage_session(
+            kind="music",
+            started_at=started_at.isoformat(),
+            ended_at=ended_at.isoformat(),
+            duration_seconds=duration_seconds,
+            source=os.path.basename(filepath),
+        )
 
     def log_session_summary(self) -> None:
         """Log cumulative playback stats and reset counters."""

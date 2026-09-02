@@ -16,9 +16,10 @@ import math
 import os
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
+import database as db
 from logger import log_error, log_system
 
 logger = logging.getLogger(__name__)
@@ -1395,6 +1396,16 @@ class StreamService:
                         "stop_request_reason": reason,
                     },
                 )
+                if session_duration > 0:
+                    ended_at_dt = datetime.now(timezone.utc)
+                    started_at_dt = ended_at_dt - timedelta(seconds=session_duration)
+                    db.record_usage_session(
+                        kind="stream",
+                        started_at=started_at_dt.isoformat(),
+                        ended_at=ended_at_dt.isoformat(),
+                        duration_seconds=session_duration,
+                        source=correlation_id,
+                    )
                 self._session_started_at = 0.0
                 self._active_correlation_id = None
                 self._active_device_id = None

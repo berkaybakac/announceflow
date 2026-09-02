@@ -241,6 +241,31 @@ class TestStreamServiceStop:
         assert payload["stop_caller"] == "test_stop"
         assert payload["stop_request_reason"] == "unit_test"
 
+    @patch("services.stream_service.db.record_usage_session")
+    def test_stop_persists_usage_session(
+        self, mock_record, mock_manager, mock_player
+    ):
+        svc = _make_service(mock_manager, mock_player)
+        svc.start(correlation_id="cid-db", device_id="dev-1", device_name="Desk")
+        svc._session_started_at = time.monotonic() - 42.0
+
+        svc.stop(caller="test_stop", reason="unit_test")
+
+        mock_record.assert_called_once()
+        kwargs = mock_record.call_args.kwargs
+        assert kwargs["kind"] == "stream"
+        assert kwargs["duration_seconds"] >= 42.0
+        assert kwargs["source"] == "cid-db"
+        assert kwargs["started_at"] < kwargs["ended_at"]
+
+    @patch("services.stream_service.db.record_usage_session")
+    def test_stop_skips_usage_session_when_never_started(
+        self, mock_record, mock_manager, mock_player
+    ):
+        svc = _make_service(mock_manager, mock_player)
+        svc.stop(caller="test_stop", reason="unit_test")
+        mock_record.assert_not_called()
+
     def test_stop_calls_stop_receiver(self, mock_manager, mock_player):
         svc = _make_service(mock_manager, mock_player)
         svc.start()
