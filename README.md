@@ -176,7 +176,10 @@ Quickly check the health and streaming quality of the device from the terminal o
 
 - **Terminal:** `python3 diagnose.py` (Summarizes the last 60 minutes)
 - **Custom Duration:** `python3 diagnose.py 1440` (Analyzes the last 24 hours)
+- **Pulled Dump:** `python3 diagnose.py 100000 --dir ./dump` (analyze a field dump, not the local device)
 - **Browser/API:** `http://<device-ip>:5001/api/diagnose` (Returns JSON report)
+
+Incident timeline across logs + DB: see `docs/OPERATIONS.md` → "Analyzing a Pulled Field Dump".
 
 ---
 

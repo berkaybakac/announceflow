@@ -111,6 +111,28 @@ remove that override too; environment values replace `config.json` on restart.
 5. Validate panel health and agent download path.
 6. Commit, tag, release notes.
 
+## Analyzing a Pulled Field Dump
+
+Pull logs/DB from a device (adjust host/path):
+
+```bash
+rsync -avz admin@<host>:announceflow/logs/ ./dump/logs/
+rsync -avz admin@<host>:announceflow/announceflow.log* ./dump/
+rsync -avz admin@<host>:announceflow/announceflow.db* ./dump/
+```
+
+Then, from inside `./dump/`:
+
+```bash
+python3 /path/to/repo/diagnose.py 100000 --dir .          # health scoreboard
+python3 /path/to/repo/scripts/incident_report.py \
+  --around "2026-08-20T12:43:35" --window-minutes 15      # merged timeline
+```
+
+`incident_report.py` merges events.jsonl, announceflow.log, and
+usage_sessions into one chronological view around a timestamp. Both tools
+read rotated log backups (`.1`, `.2`, ...) automatically.
+
 ## XRUN Auto-Restart Validation (Staging/Pi)
 
 ### 288s Restart Isolation (Root Cause First)
