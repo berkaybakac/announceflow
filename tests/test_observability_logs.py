@@ -268,7 +268,12 @@ class TestDailyUsageSummary:
 
         sched._check_daily_usage_summary()
 
-        assert len(calls) == 2
+        events = {entry[0] for entry in calls}
+        assert events == {
+            "daily_usage_summary",
+            "playlist_daily_summary",
+            "db_daily_health_stats",
+        }
         daily = [entry for entry in calls if entry[0] == "daily_usage_summary"][0][1]
         playlist_daily = [
             entry for entry in calls if entry[0] == "playlist_daily_summary"
@@ -432,10 +437,117 @@ class TestWebEventCount:
 
         sched._check_daily_usage_summary()
 
-        assert len(calls) == 2
+        events = {entry[0] for entry in calls}
+        assert events == {
+            "daily_usage_summary",
+            "playlist_daily_summary",
+            "db_daily_health_stats",
+        }
         daily = [entry for entry in calls if entry[0] == "daily_usage_summary"][0][1]
         playlist_daily = [
             entry for entry in calls if entry[0] == "playlist_daily_summary"
         ][0][1]
         assert daily["web_events"] == 15
         assert playlist_daily["tracks_played"] == 1
+
+
+# ---------------------------------------------------------------------------
+# announcement_queue_health: log-on-change + heartbeat ceiling
+# ---------------------------------------------------------------------------
+
+class TestDbDailyHealthStats:
+    """Regression: db_daily_health_stats used wrong table names and never fired."""
+
+    def _make_scheduler(self) -> Scheduler:
+        return Scheduler(check_interval_seconds=60)
+
+    def test_uses_correct_table_names_and_logs(self, monkeypatch, tmp_path):
+        import sqlite3
+
+        db_path = tmp_path / "test.db"
+        conn = sqlite3.connect(str(db_path))
+        conn.execute("CREATE TABLE media_files (id INTEGER PRIMARY KEY)")
+        conn.execute("CREATE TABLE one_time_schedules (id INTEGER PRIMARY KEY)")
+        conn.execute("CREATE TABLE recurring_schedules (id INTEGER PRIMARY KEY)")
+        conn.execute("INSERT INTO media_files VALUES (1)")
+        conn.execute("INSERT INTO one_time_schedules VALUES (1)")
+        conn.commit()
+        conn.close()
+
+        sched = self._make_scheduler()
+        calls = []
+        monkeypatch.setattr("scheduler.log_system", lambda event, data: calls.append((event, data)))
+        monkeypatch.setattr("scheduler.get_player", lambda: MagicMock(
+            get_daily_playlist_summary=lambda reset=True: {}
+        ))
+        monkeypatch.setattr("scheduler.os.path.dirname", lambda _p: str(tmp_path))
+        monkeypatch.setattr(
+            "scheduler.db.get_db_connection", lambda: sqlite3.connect(str(db_path))
+        )
+
+        sched._daily_current_date = "2026-03-30"
+        monkeypatch.setattr("scheduler.datetime", type("FakeDT", (), {
+            "now": staticmethod(lambda: type("D", (), {"strftime": lambda self, f: "2026-03-31"})()),
+        }))
+
+        sched._check_daily_usage_summary()
+
+        stats = [d for e, d in calls if e == "db_daily_health_stats"]
+        assert len(stats) == 1, "db_daily_health_stats should fire with correct table names"
+        assert stats[0]["rows_media"] == 1
+        assert stats[0]["rows_one_time"] == 1
+        assert stats[0]["rows_recurring"] == 0
+
+
+class TestAnnouncementQueueHealthLog:
+    def _make_scheduler(self) -> Scheduler:
+        return Scheduler(check_interval_seconds=60)
+
+    def _capture(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(
+            "scheduler.log_schedule", lambda event, data: calls.append((event, data))
+        )
+        return calls
+
+    def test_first_call_emits_log(self, monkeypatch):
+        sched = self._make_scheduler()
+        calls = self._capture(monkeypatch)
+
+        sched._log_announcement_queue_health()
+
+        assert len(calls) == 1
+        assert calls[0][0] == "announcement_queue_health"
+
+    def test_unchanged_state_suppressed_within_ceiling(self, monkeypatch):
+        sched = self._make_scheduler()
+        sched._announcement_health_log_interval_seconds = 0  # skip eval throttle
+        calls = self._capture(monkeypatch)
+
+        sched._log_announcement_queue_health()
+        sched._log_announcement_queue_health()
+        sched._log_announcement_queue_health()
+
+        assert len(calls) == 1, "Unchanged snapshot should log once, not every tick"
+
+    def test_changed_state_logs_again(self, monkeypatch):
+        sched = self._make_scheduler()
+        sched._announcement_health_log_interval_seconds = 0
+        calls = self._capture(monkeypatch)
+
+        sched._log_announcement_queue_health()
+        sched._announcement_queue_counters["dropped_stale"] += 1
+        sched._log_announcement_queue_health()
+
+        assert len(calls) == 2
+
+    def test_heartbeat_ceiling_forces_log_even_if_unchanged(self, monkeypatch):
+        sched = self._make_scheduler()
+        sched._announcement_health_log_interval_seconds = 0
+        sched._announcement_health_heartbeat_ceiling_seconds = 0
+        calls = self._capture(monkeypatch)
+
+        sched._log_announcement_queue_health()
+        sched._log_announcement_queue_health()
+
+        assert len(calls) == 2, "Ceiling of 0 should force a log every call"

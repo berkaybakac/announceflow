@@ -113,7 +113,11 @@ class Scheduler:
             "stuck_reset": 0,
         }
         self._announcement_health_log_interval_seconds: int = 60
-        self._announcement_last_health_log_monotonic: float = 0.0
+        self._announcement_last_health_check_monotonic: float = 0.0  # eval throttle
+        self._announcement_last_health_log_monotonic: float = 0.0  # last actual write
+        self._announcement_last_health_snapshot: Optional[dict] = None
+        # Log-on-change; force a line every N seconds anyway as a liveness heartbeat.
+        self._announcement_health_heartbeat_ceiling_seconds: int = 600
         self._system_health_log_interval_seconds: int = 300  # 5 minutes
         self._system_health_last_log_monotonic: float = 0.0
         # Daily usage summary counters (reset at midnight)
@@ -600,12 +604,12 @@ class Scheduler:
     def _log_announcement_queue_health(self) -> None:
         now_mono = time.monotonic()
         if (
-            self._announcement_last_health_log_monotonic
-            and (now_mono - self._announcement_last_health_log_monotonic)
+            self._announcement_last_health_check_monotonic
+            and (now_mono - self._announcement_last_health_check_monotonic)
             < self._announcement_health_log_interval_seconds
         ):
             return
-        self._announcement_last_health_log_monotonic = now_mono
+        self._announcement_last_health_check_monotonic = now_mono
         with self._queue_lock:
             snapshot = {
                 "queue_size": len(self._announcement_queue),
@@ -621,6 +625,17 @@ class Scheduler:
                     self._announcement_queue_counters.get("stuck_reset", 0)
                 ),
             }
+        # Log only on change, or every heartbeat_ceiling seconds regardless.
+        unchanged = snapshot == self._announcement_last_health_snapshot
+        past_ceiling = (
+            not self._announcement_last_health_log_monotonic
+            or (now_mono - self._announcement_last_health_log_monotonic)
+            >= self._announcement_health_heartbeat_ceiling_seconds
+        )
+        if unchanged and not past_ceiling:
+            return
+        self._announcement_last_health_log_monotonic = now_mono
+        self._announcement_last_health_snapshot = snapshot
         log_schedule("announcement_queue_health", snapshot)
 
     def _log_system_health(self) -> None:
@@ -762,9 +777,9 @@ class Scheduler:
             cur = conn.cursor()
             cur.execute("SELECT count(*) FROM media_files")
             media_count = cur.fetchone()[0]
-            cur.execute("SELECT count(*) FROM schedules_one_time")
+            cur.execute("SELECT count(*) FROM one_time_schedules")
             one_time_count = cur.fetchone()[0]
-            cur.execute("SELECT count(*) FROM schedules_recurring")
+            cur.execute("SELECT count(*) FROM recurring_schedules")
             recurring_count = cur.fetchone()[0]
             conn.close()
 
