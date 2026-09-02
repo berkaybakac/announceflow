@@ -53,6 +53,7 @@ def get_summary_data(minutes=60, file=None):
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=minutes)
     stats = {
         "xruns": 0,
+        "xrun_hours": 0.0,  # summed session duration backing "xruns", for a rate
         "jitters": 0,
         "ping_warnings": 0,
         "temps": [],
@@ -62,7 +63,10 @@ def get_summary_data(minutes=60, file=None):
         "tracks_skipped": 0,
         "last_health": None,
         "total_entries": 0,
-        "lookback_minutes": minutes
+        "lookback_minutes": minutes,
+        # Metric families with zero backing events anywhere in the read log
+        # (not just this window) — a build/version gap, not "0 = healthy".
+        "unsupported": [],
     }
 
     # Rotated backups (events.jsonl.1, .2, ...) can hold entries within the
@@ -70,54 +74,75 @@ def get_summary_data(minutes=60, file=None):
     # data once the current file has rotated out that history.
     log_files = sorted(glob.glob(log_file_path + "*"))
 
+    # Every event name seen anywhere in the read files, regardless of the
+    # time window — used only to tell "this build doesn't emit this metric"
+    # apart from "this window happened to have zero incidents".
+    seen_events = set()
+
     try:
         for log_file in log_files:
             with open(log_file, "r") as f:
                 for line in f:
                     try:
                         entry = json.loads(line)
-                        ts_raw = entry.get("ts")
-                        if not ts_raw:
-                            continue
-
-                        ts = _parse_iso(ts_raw)
-                        if not ts or ts < cutoff:
-                            continue
-
-                        stats["total_entries"] += 1
-                        event = entry.get("event")
-                        data = entry.get("data", {})
-
-                        if event == "xrun_snapshot":
-                            stats["xruns"] += 1
-                        elif event == "stream_jitter_anomaly":
-                            stats["jitters"] += 1
-                        elif event == "sender_ping_latency_high":
-                            stats["ping_warnings"] += 1
-                        elif event == "system_health":
-                            stats["last_health"] = data
-                            if data.get("temp_c", -1) > 0:
-                                stats["temps"].append(data["temp_c"])
-                            if data.get("load_1m", -1) >= 0:
-                                stats["cpu_loads"].append(data["load_1m"])
-                            wifi_signal = data.get("wifi_signal_dbm", -1)
-                            if isinstance(wifi_signal, (int, float)) and wifi_signal != -1 and -100 <= wifi_signal <= 0:
-                                stats["wifi_signals"].append(wifi_signal)
-                        elif event == "track_end":
-                            stats["tracks_played"] += 1
-                        elif event == "tracks_skipped":
-                            stats["tracks_skipped"] += 1
-                        elif event in ("playlist_track_missing", "playlist_track_start_failed"):
-                            stats["tracks_skipped"] += 1
-                        elif event == "playback_usage_audit":
-                            status = str(data.get("status", "")).strip().lower()
-                            if status in {"interrupted", "stopped"}:
-                                stats["tracks_skipped"] += 1
-
-                    except (json.JSONDecodeError, KeyError):
+                    except json.JSONDecodeError:
                         continue
+
+                    event = entry.get("event")
+                    if event:
+                        seen_events.add(event)
+
+                    ts_raw = entry.get("ts")
+                    if not ts_raw:
+                        continue
+                    ts = _parse_iso(ts_raw)
+                    if not ts or ts < cutoff:
+                        continue
+
+                    stats["total_entries"] += 1
+                    data = entry.get("data", {}) or {}
+
+                    if event == "stream_receiver_summary":
+                        # Unthrottled, per-session xrun count. Present since
+                        # v2.2.0 (2026-03), unlike the throttled xrun_snapshot
+                        # alarm event, which only exists from 2026-04-01 on.
+                        stats["xruns"] += int(data.get("alsa_xrun") or 0)
+                        stats["xrun_hours"] += float(data.get("duration_seconds") or 0) / 3600.0
+                    elif event == "stream_jitter_anomaly":
+                        stats["jitters"] += 1
+                    elif event == "sender_ping_latency_high":
+                        stats["ping_warnings"] += 1
+                    elif event == "system_health":
+                        stats["last_health"] = data
+                        if data.get("temp_c", -1) > 0:
+                            stats["temps"].append(data["temp_c"])
+                        if data.get("load_1m", -1) >= 0:
+                            stats["cpu_loads"].append(data["load_1m"])
+                        wifi_signal = data.get("wifi_signal_dbm", -1)
+                        if isinstance(wifi_signal, (int, float)) and wifi_signal != -1 and -100 <= wifi_signal <= 0:
+                            stats["wifi_signals"].append(wifi_signal)
+                    elif event == "track_end":
+                        stats["tracks_played"] += 1
+                    elif event == "tracks_skipped":
+                        stats["tracks_skipped"] += 1
+                    elif event in ("playlist_track_missing", "playlist_track_start_failed"):
+                        stats["tracks_skipped"] += 1
+                    elif event == "playback_usage_audit":
+                        status = str(data.get("status", "")).strip().lower()
+                        if status in {"interrupted", "stopped"}:
+                            stats["tracks_skipped"] += 1
+
     except Exception:
         return None
+
+    if not ({"stream_receiver_summary", "stream_receiver_alsa_xrun"} & seen_events):
+        stats["unsupported"].append("xruns")
+    if "stream_jitter_anomaly" not in seen_events:
+        stats["unsupported"].append("jitters")
+    if "sender_ping_latency_high" not in seen_events:
+        stats["unsupported"].append("ping_warnings")
+    if "system_health" not in seen_events:
+        stats["unsupported"].append("system_health")
 
     return stats
 
@@ -130,34 +155,58 @@ def analyze_history(minutes=60, file=None):
     print(f"(kaynak: {log_file_path})")
     _print_report(stats, minutes)
 
+_UNSUPPORTED_LABELS = {
+    "xruns": "XRUN (ses kesilmesi)",
+    "jitters": "ağ dalgalanması (jitter)",
+    "ping_warnings": "gönderici PC gecikme uyarısı",
+    "system_health": "donanım sağlığı (ısı/CPU/WiFi)",
+}
+
+
 def _print_report(s, minutes):
+    unsupported = set(s.get("unsupported", []))
     print("\n" + "="*50)
     print(f" ANNOUNCEFLOW LOG ANALİZİ (Son {minutes} dakika)")
     print("="*50)
 
     # 1. Donanım Özeti
     print("\n[DONANIM SAĞLIĞI]")
-    if s["temps"]:
+    if "system_health" in unsupported:
+        print("  - Veri yok: bu log setinde donanım sağlığı hiç kaydedilmemiş")
+        print("    (eski build, 2026-04-01 öncesi — telemetri o build'de yok)")
+    elif s["temps"]:
         avg_temp = round(sum(s["temps"]) / len(s["temps"]), 1)
         max_temp = max(s["temps"])
         temp_status = "TAMAM" if max_temp < 75 else "UYARI (Yüksek Isı!)"
         print(f"  - İşlemci Isısı: {avg_temp}°C (Peak: {max_temp}°C) -> {temp_status}")
+        if s["cpu_loads"]:
+            avg_load = round(sum(s["cpu_loads"]) / len(s["cpu_loads"]), 2)
+            print(f"  - İşlemci Yükü (1m avg): {avg_load}")
+        if s["wifi_signals"]:
+            avg_signal = round(sum(s["wifi_signals"]) / len(s["wifi_signals"]), 1)
+            print(f"  - WiFi Sinyali: {avg_signal} dBm")
     else:
-        print("  - İşlemci Isısı: Veri yok")
+        print("  - Bu pencerede kayıt yok (build destekliyor, henüz veri gelmemiş)")
 
-    if s["cpu_loads"]:
-        avg_load = round(sum(s["cpu_loads"]) / len(s["cpu_loads"]), 2)
-        print(f"  - İşlemci Yükü (1m avg): {avg_load}")
-
-    if s["wifi_signals"]:
-        avg_signal = round(sum(s["wifi_signals"]) / len(s["wifi_signals"]), 1)
-        print(f"  - WiFi Sinyali: {avg_signal} dBm")
-    
     # 2. Ses Kalitesi Analizi
     print("\n[SES KALİTESİ & NETWORK]")
-    print(f"  - Ses Kesilmesi (XRUN): {s['xruns']} adet")
-    print(f"  - Ağ Dalgalanması (JITTER): {s['jitters']} adet")
-    print(f"  - PC Gecikme Uyarıları: {s['ping_warnings']} adet")
+    xrun_rate = (s["xruns"] / s["xrun_hours"]) if s.get("xrun_hours") else None
+    if "xruns" in unsupported:
+        print("  - Ses Kesilmesi (XRUN): Veri yok (bu build'de xrun telemetrisi yok)")
+    elif xrun_rate is not None:
+        print(f"  - Ses Kesilmesi (XRUN): {s['xruns']} adet (saatte {xrun_rate:.1f})")
+    else:
+        print(f"  - Ses Kesilmesi (XRUN): {s['xruns']} adet")
+
+    if "jitters" in unsupported:
+        print("  - Ağ Dalgalanması (JITTER): Veri yok (bu build'de bu telemetri yok)")
+    else:
+        print(f"  - Ağ Dalgalanması (JITTER): {s['jitters']} adet")
+
+    if "ping_warnings" in unsupported:
+        print("  - PC Gecikme Uyarıları: Veri yok (bu build'de bu telemetri yok)")
+    else:
+        print(f"  - PC Gecikme Uyarıları: {s['ping_warnings']} adet")
 
     # 3. Oynatma Karnesi
     print("\n[OYNATMA İSTATİSTİKLERİ]")
@@ -173,19 +222,32 @@ def _print_report(s, minutes):
     # 4. Sonuç & Tavsiye
     print("\n" + "-"*50)
     print(" KESİN TEŞHİS:")
-    
+
     reasons = []
-    if s["xruns"] > 5: reasons.append("Ses donanımı (alsa) çok sık kesiliyor.")
-    if s["jitters"] > 5: reasons.append("Ağ bağlantınız stabil değil (jitter yüksek).")
-    if s["ping_warnings"] > 3: reasons.append("PC (Gönderici) uyku moduna geçiyor veya gecikme yapıyor.")
-    if any(t > 80 for t in s["temps"]): reasons.append("Cihaz aşırı ısınıyor (Sıcaklık 80+).")
-    
-    if not reasons:
+    if "xruns" not in unsupported:
+        if xrun_rate is not None and xrun_rate > 5:
+            reasons.append(f"Ses donanımı (alsa) sık kesiliyor (saatte {xrun_rate:.1f} xrun).")
+        elif xrun_rate is None and s["xruns"] > 5:
+            reasons.append("Ses donanımı (alsa) çok sık kesiliyor.")
+    if "jitters" not in unsupported and s["jitters"] > 5:
+        reasons.append("Ağ bağlantınız stabil değil (jitter yüksek).")
+    if "ping_warnings" not in unsupported and s["ping_warnings"] > 3:
+        reasons.append("PC (Gönderici) uyku moduna geçiyor veya gecikme yapıyor.")
+    if "system_health" not in unsupported and any(t > 80 for t in s["temps"]):
+        reasons.append("Cihaz aşırı ısınıyor (Sıcaklık 80+).")
+
+    for r in reasons:
+        print(f" [!] {r}")
+
+    if unsupported:
+        missing = ", ".join(_UNSUPPORTED_LABELS.get(k, k) for k in sorted(unsupported))
+        print(f" [?] KISITLI TEŞHİS: {missing} için bu veri setinde hiç ölçüm yok.")
+        print("     Bu metrikler değerlendirme dışı — 'sorun yok' anlamına gelmez.")
+        if not reasons:
+            print(" [+] Ölçülebilen metriklerde sorun tespit edilmedi.")
+    elif not reasons:
         print(" [+] SİSTEM MÜKEMMEL: Herhangi bir problem tespit edilmedi.")
-    else:
-        for r in reasons:
-            print(f" [!] {r}")
-    
+
     print("="*50 + "\n")
 
 if __name__ == "__main__":

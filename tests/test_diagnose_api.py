@@ -37,8 +37,8 @@ def test_diagnose_api_returns_json(client, tmp_path, monkeypatch):
         },
         {
             "ts": (now - timedelta(minutes=2)).isoformat(),
-            "event": "xrun_snapshot",
-            "data": {},
+            "event": "stream_receiver_summary",
+            "data": {"alsa_xrun": 1, "duration_seconds": 600},
         },
         {
             "ts": (now - timedelta(minutes=1)).isoformat(),
