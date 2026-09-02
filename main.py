@@ -66,9 +66,10 @@ def setup_logging():
     logger.setLevel(logging.INFO)
 
     formatter = logging.Formatter(
-        "%(asctime)s.%(msecs)03d - %(levelname)s - [%(name)s] %(message)s",
+        "%(asctime)s.%(msecs)03dZ - %(levelname)s - [%(name)s] %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )
+    formatter.converter = time.gmtime  # UTC, matches events.jsonl (logger.py)
 
     # File handler; 5MB x 5 backups (~25MB total) for a longer field history.
     file_handler = RotatingFileHandler(log_file, maxBytes=5_000_000, backupCount=5)
