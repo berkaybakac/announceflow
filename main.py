@@ -70,8 +70,8 @@ def setup_logging():
         datefmt="%Y-%m-%d %H:%M:%S",
     )
 
-    # File handler
-    file_handler = RotatingFileHandler(log_file, maxBytes=500_000, backupCount=3)
+    # File handler; 5MB x 5 backups (~25MB total) for a longer field history.
+    file_handler = RotatingFileHandler(log_file, maxBytes=5_000_000, backupCount=5)
     file_handler.setFormatter(formatter)
     logger.addHandler(file_handler)
 

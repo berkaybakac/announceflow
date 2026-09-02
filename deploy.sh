@@ -192,6 +192,14 @@ if [ "${INSTALL_SYSTEM_DEPS}" = "1" ]; then
     echo "[2.5/5] Installing system dependencies (mpg123, ffmpeg)..."
     ssh ${SSH_OPTS} ${PI_USER}@${PI_HOST} "sudo -n true"
     ssh ${SSH_OPTS} ${PI_USER}@${PI_HOST} "sudo apt-get update && sudo apt-get install -y mpg123 ffmpeg alsa-utils"
+
+    # Persist journald across reboots, capped at 200MB (field diagnostics history).
+    ssh ${SSH_OPTS} ${PI_USER}@${PI_HOST} "\
+        sudo mkdir -p /var/log/journal && \
+        sudo systemd-tmpfiles --create --prefix /var/log/journal && \
+        sudo mkdir -p /etc/systemd/journald.conf.d && \
+        printf '[Journal]\nStorage=persistent\nSystemMaxUse=200M\n' | sudo tee /etc/systemd/journald.conf.d/announceflow-persist.conf > /dev/null && \
+        sudo systemctl restart systemd-journald"
 else
     echo "[2.5/5] Skipping system dependencies (DEPLOY_INSTALL_SYSTEM_DEPS=${INSTALL_SYSTEM_DEPS})"
 fi

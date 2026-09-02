@@ -39,7 +39,8 @@ The `deploy.sh` script handles end-to-end deployment:
 3. (clean-delivery only) Sanitize media/logs/runtime directories.
 4. Upload release stamp (commit hash, ref, branch, UTC deploy timestamp).
 5. Generate Flask secret key if missing, protect `.env` permissions.
-6. Install system dependencies (`mpg123`, `ffmpeg`, `alsa-utils`).
+6. Install system dependencies (`mpg123`, `ffmpeg`, `alsa-utils`); enable persistent
+   journald capped at 200MB.
 7. Install Python dependencies (filters out desktop-only packages for Pi).
 8. Create and enable systemd service with auto-restart policy.
 9. Post-deploy health check: retries `/api/health` up to 15 times (2s intervals), validates player backend and scheduler state.

@@ -117,9 +117,26 @@ _event_logger.propagate = False  # Don't propagate to root logger
 if _event_logger.hasHandlers():
     _event_logger.handlers.clear()
 
-# JSON Lines file handler (1MB, 5 backups)
+def _parse_positive_int_env(var_name: str, default: int) -> int:
+    raw = os.environ.get(var_name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+# JSON Lines file handler; default 5MB x 10 backups (~50MB total).
+_EVENT_LOG_MAX_BYTES = _parse_positive_int_env(
+    "ANNOUNCEFLOW_EVENT_LOG_MAX_BYTES", 5_000_000
+)
+_EVENT_LOG_BACKUP_COUNT = _parse_positive_int_env(
+    "ANNOUNCEFLOW_EVENT_LOG_BACKUP_COUNT", 10
+)
 _event_handler = RotatingFileHandler(
-    EVENT_LOG_FILE, maxBytes=1_000_000, backupCount=5  # 1 MB
+    EVENT_LOG_FILE, maxBytes=_EVENT_LOG_MAX_BYTES, backupCount=_EVENT_LOG_BACKUP_COUNT
 )
 _event_handler.setFormatter(logging.Formatter("%(message)s"))
 _event_logger.addHandler(_event_handler)

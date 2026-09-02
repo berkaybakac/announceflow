@@ -27,7 +27,7 @@
 >
 > **Scale:** Single-branch retail, one Pi per store.
 >
-> **Tested:** ~700 test cases across 140+ files.
+> **Tested:** ~800 test cases across 57 test files.
 
 ---
 

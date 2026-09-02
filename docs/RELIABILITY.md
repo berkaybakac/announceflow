@@ -35,5 +35,5 @@ This document captures lower-level implementation details behind the higher-leve
 ## Process and Storage Hygiene
 
 - SQLite runs in WAL mode for safer concurrent access between panel, scheduler, and runtime services.
-- App logs rotate at `500_000` bytes with 3 backups; stream logs use a separate rotating writer capped at `2 MB` with 5 backups.
+- App logs rotate at `5 MB` with 5 backups; event log (`events.jsonl`) at `5 MB` with 10 backups; stream logs use a separate rotating writer capped at `2 MB` with 5 backups.
 - Before starting a new mpg123 process, orphaned playback processes are cleaned up; ffmpeg stderr is drained continuously to avoid pipe-buffer deadlock.
