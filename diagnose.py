@@ -5,6 +5,7 @@ AnnounceFlow - Diagnostic & Health Tool (diagnose.py)
 Parses logs/events.jsonl and provides a terminal-friendly health scoreboard.
 """
 
+import glob
 import os
 import sys
 import json
@@ -49,54 +50,60 @@ def get_summary_data(minutes=60):
         "lookback_minutes": minutes
     }
 
+    # Rotated backups (events.jsonl.1, .2, ...) can hold entries within the
+    # lookback window too; without them a "last 24h" query can silently miss
+    # data once the current file has rotated out that history.
+    log_files = sorted(glob.glob(LOG_FILE + "*"))
+
     try:
-        with open(LOG_FILE, "r") as f:
-            for line in f:
-                try:
-                    entry = json.loads(line)
-                    ts_raw = entry.get("ts")
-                    if not ts_raw:
-                        continue
-                    
-                    ts = _parse_iso(ts_raw)
-                    if not ts or ts < cutoff:
-                        continue
-                    
-                    stats["total_entries"] += 1
-                    event = entry.get("event")
-                    data = entry.get("data", {})
+        for log_file in log_files:
+            with open(log_file, "r") as f:
+                for line in f:
+                    try:
+                        entry = json.loads(line)
+                        ts_raw = entry.get("ts")
+                        if not ts_raw:
+                            continue
 
-                    if event == "xrun_snapshot":
-                        stats["xruns"] += 1
-                    elif event == "stream_jitter_anomaly":
-                        stats["jitters"] += 1
-                    elif event == "sender_ping_latency_high":
-                        stats["ping_warnings"] += 1
-                    elif event == "system_health":
-                        stats["last_health"] = data
-                        if data.get("temp_c", -1) > 0:
-                            stats["temps"].append(data["temp_c"])
-                        if data.get("load_1m", -1) >= 0:
-                            stats["cpu_loads"].append(data["load_1m"])
-                        wifi_signal = data.get("wifi_signal_dbm", -1)
-                        if isinstance(wifi_signal, (int, float)) and wifi_signal != -1 and -100 <= wifi_signal <= 0:
-                            stats["wifi_signals"].append(wifi_signal)
-                    elif event == "track_end":
-                        stats["tracks_played"] += 1
-                    elif event == "tracks_skipped":
-                        stats["tracks_skipped"] += 1
-                    elif event in ("playlist_track_missing", "playlist_track_start_failed"):
-                        stats["tracks_skipped"] += 1
-                    elif event == "playback_usage_audit":
-                        status = str(data.get("status", "")).strip().lower()
-                        if status in {"interrupted", "stopped"}:
+                        ts = _parse_iso(ts_raw)
+                        if not ts or ts < cutoff:
+                            continue
+
+                        stats["total_entries"] += 1
+                        event = entry.get("event")
+                        data = entry.get("data", {})
+
+                        if event == "xrun_snapshot":
+                            stats["xruns"] += 1
+                        elif event == "stream_jitter_anomaly":
+                            stats["jitters"] += 1
+                        elif event == "sender_ping_latency_high":
+                            stats["ping_warnings"] += 1
+                        elif event == "system_health":
+                            stats["last_health"] = data
+                            if data.get("temp_c", -1) > 0:
+                                stats["temps"].append(data["temp_c"])
+                            if data.get("load_1m", -1) >= 0:
+                                stats["cpu_loads"].append(data["load_1m"])
+                            wifi_signal = data.get("wifi_signal_dbm", -1)
+                            if isinstance(wifi_signal, (int, float)) and wifi_signal != -1 and -100 <= wifi_signal <= 0:
+                                stats["wifi_signals"].append(wifi_signal)
+                        elif event == "track_end":
+                            stats["tracks_played"] += 1
+                        elif event == "tracks_skipped":
                             stats["tracks_skipped"] += 1
+                        elif event in ("playlist_track_missing", "playlist_track_start_failed"):
+                            stats["tracks_skipped"] += 1
+                        elif event == "playback_usage_audit":
+                            status = str(data.get("status", "")).strip().lower()
+                            if status in {"interrupted", "stopped"}:
+                                stats["tracks_skipped"] += 1
 
-                except (json.JSONDecodeError, KeyError):
-                    continue
+                    except (json.JSONDecodeError, KeyError):
+                        continue
     except Exception:
         return None
-    
+
     return stats
 
 def analyze_history(minutes=60):

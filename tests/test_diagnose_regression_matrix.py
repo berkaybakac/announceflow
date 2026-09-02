@@ -81,3 +81,29 @@ def test_diagnose_metric_branches_happy_critical(authed_client, tmp_path, monkey
     assert payload["tracks_played"] == 1
     assert payload["wifi_signals"] == [-67]
 
+
+
+def test_diagnose_reads_rotated_backups(authed_client, tmp_path, monkeypatch):
+    """Regression: get_summary_data must also scan events.jsonl.1, .2, ... —
+    a busy device can rotate past the lookback window in the current file alone."""
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    log_file = log_dir / "events.jsonl"
+
+    now = datetime.now(timezone.utc)
+    t_current = now - timedelta(minutes=5)
+    t_rotated = now - timedelta(minutes=10)
+
+    with open(log_file, "w", encoding="utf-8") as f:
+        f.write(json.dumps({"ts": _iso_utc(t_current), "event": "track_end", "data": {}}) + "\n")
+
+    with open(str(log_file) + ".1", "w", encoding="utf-8") as f:
+        f.write(json.dumps({"ts": _iso_utc(t_rotated), "event": "track_end", "data": {}}) + "\n")
+
+    monkeypatch.setattr(diagnose, "LOG_FILE", str(log_file))
+
+    resp = authed_client.get("/api/diagnose?minutes=60")
+    assert resp.status_code == 200
+    payload = resp.get_json()
+
+    assert payload["tracks_played"] == 2, "entries in events.jsonl.1 must be counted too"
