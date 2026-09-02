@@ -5,9 +5,9 @@ AnnounceFlow - Diagnostic & Health Tool (diagnose.py)
 Parses logs/events.jsonl and provides a terminal-friendly health scoreboard.
 """
 
+import argparse
 import glob
 import os
-import sys
 import json
 import time
 from datetime import datetime, timedelta, timezone
@@ -15,6 +15,19 @@ from datetime import datetime, timedelta, timezone
 # Standard configuration
 LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs", "events.jsonl")
 DEFAULT_LOOKBACK_MINUTES = 60
+
+
+def resolve_log_file(file=None, dump_dir=None):
+    """Pick the events.jsonl to analyze: explicit --file, a pulled dump
+    --dir (logs/events.jsonl inside it), or the local device default."""
+    if file:
+        return file
+    if dump_dir:
+        candidate = os.path.join(dump_dir, "logs", "events.jsonl")
+        if os.path.exists(candidate):
+            return candidate
+        return os.path.join(dump_dir, "events.jsonl")
+    return LOG_FILE
 
 def _parse_iso(iso_str):
     """Parse ISO timestamp to UTC datetime object reliably."""
@@ -30,9 +43,11 @@ def _parse_iso(iso_str):
     except Exception:
         return None
 
-def get_summary_data(minutes=60):
-    """Core analysis logic, returns a dict of stats."""
-    if not os.path.exists(LOG_FILE):
+def get_summary_data(minutes=60, file=None):
+    """Core analysis logic, returns a dict of stats. `file` overrides the
+    local device log path — pass a pulled dump's events.jsonl to analyze it."""
+    log_file_path = file or LOG_FILE
+    if not os.path.exists(log_file_path):
         return None
 
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=minutes)
@@ -53,7 +68,7 @@ def get_summary_data(minutes=60):
     # Rotated backups (events.jsonl.1, .2, ...) can hold entries within the
     # lookback window too; without them a "last 24h" query can silently miss
     # data once the current file has rotated out that history.
-    log_files = sorted(glob.glob(LOG_FILE + "*"))
+    log_files = sorted(glob.glob(log_file_path + "*"))
 
     try:
         for log_file in log_files:
@@ -106,11 +121,13 @@ def get_summary_data(minutes=60):
 
     return stats
 
-def analyze_history(minutes=60):
-    stats = get_summary_data(minutes)
+def analyze_history(minutes=60, file=None):
+    log_file_path = file or LOG_FILE
+    stats = get_summary_data(minutes, file=file)
     if stats is None:
-        print(f"ERROR: Log file not found or unreadable at {LOG_FILE}")
+        print(f"ERROR: Log file not found or unreadable at {log_file_path}")
         return
+    print(f"(kaynak: {log_file_path})")
     _print_report(stats, minutes)
 
 def _print_report(s, minutes):
@@ -172,10 +189,15 @@ def _print_report(s, minutes):
     print("="*50 + "\n")
 
 if __name__ == "__main__":
-    minutes = DEFAULT_LOOKBACK_MINUTES
-    if len(sys.argv) > 1:
-        try:
-            minutes = int(sys.argv[1])
-        except ValueError:
-            pass
-    analyze_history(minutes)
+    parser = argparse.ArgumentParser(description="AnnounceFlow diagnostic scoreboard")
+    parser.add_argument(
+        "minutes", nargs="?", type=int, default=DEFAULT_LOOKBACK_MINUTES,
+        help="Lookback window in minutes (default: 60)",
+    )
+    parser.add_argument("--file", help="Path to a specific events.jsonl")
+    parser.add_argument(
+        "--dir", help="Pulled field dump directory (uses <dir>/logs/events.jsonl)"
+    )
+    args = parser.parse_args()
+
+    analyze_history(args.minutes, file=resolve_log_file(args.file, args.dir))
