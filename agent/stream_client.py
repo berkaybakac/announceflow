@@ -34,6 +34,62 @@ _CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 # Audio format must match _stream_receiver.py expectations
 _TARGET_SAMPLE_RATE = 44100
 
+# --- Windows sleep prevention (wake lock) -----------------------------------
+# Thread-affine: acquired inside the capture thread (not start_sender), so the
+# lock auto-releases if the thread dies. See docs/backlog.md P0.
+_ES_CONTINUOUS = 0x80000000
+_ES_SYSTEM_REQUIRED = 0x00000001
+
+
+class _SleepBlocker:
+    """Blocks Windows idle sleep while streaming; screen may still turn off.
+    No-op on non-Windows or when disabled via env var.
+    """
+
+    def __init__(self) -> None:
+        self._active = False
+
+    @staticmethod
+    def _enabled() -> bool:
+        raw = os.environ.get("ANNOUNCEFLOW_AGENT_PREVENT_SLEEP", "1").strip().lower()
+        return raw not in ("0", "false", "no", "off")
+
+    def acquire(self) -> None:
+        if self._active or os.name != "nt" or not self._enabled():
+            return
+        try:
+            import ctypes
+
+            result = ctypes.windll.kernel32.SetThreadExecutionState(
+                _ES_CONTINUOUS | _ES_SYSTEM_REQUIRED
+            )
+            if not result:
+                stream_logger.warning(
+                    "StreamClient: sleep prevention rejected by OS"
+                )
+                return
+            self._active = True
+            stream_logger.info("StreamClient: sleep prevention active")
+        except Exception as exc:
+            stream_logger.warning(
+                "StreamClient: sleep prevention failed: %s", exc
+            )
+
+    def release(self) -> None:
+        if not self._active:
+            return
+        self._active = False
+        try:
+            import ctypes
+
+            ctypes.windll.kernel32.SetThreadExecutionState(_ES_CONTINUOUS)
+            stream_logger.info("StreamClient: sleep prevention released")
+        except Exception as exc:
+            stream_logger.warning(
+                "StreamClient: sleep prevention release failed: %s", exc
+            )
+
+
 def _env_int(name: str, default: int, minimum: int, maximum: int) -> int:
     raw = os.environ.get(name, "").strip()
     if not raw:
@@ -663,6 +719,8 @@ class StreamClient:
         """
         sock = None
         sent_any_packet = False
+        sleep_blocker = _SleepBlocker()
+        sleep_blocker.acquire()
         try:
             import numpy as np
             import soundcard as sc
@@ -922,6 +980,7 @@ class StreamClient:
                 stage="capture_error",
             )
         finally:
+            sleep_blocker.release()
             if sock is not None:
                 sock.close()
             self._running = False
