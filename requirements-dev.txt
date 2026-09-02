@@ -4,3 +4,4 @@
 black==23.12.1
 flake8==6.1.0
 pytest==9.0.2
+psutil==5.9.6  # imported by agent/stream_client.py; matches agent/requirements-agent.txt
