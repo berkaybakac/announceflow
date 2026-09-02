@@ -192,16 +192,24 @@ if [ "${INSTALL_SYSTEM_DEPS}" = "1" ]; then
     echo "[2.5/5] Installing system dependencies (mpg123, ffmpeg)..."
     ssh ${SSH_OPTS} ${PI_USER}@${PI_HOST} "sudo -n true"
     ssh ${SSH_OPTS} ${PI_USER}@${PI_HOST} "sudo apt-get update && sudo apt-get install -y mpg123 ffmpeg alsa-utils"
+else
+    echo "[2.5/5] Skipping system dependencies (DEPLOY_INSTALL_SYSTEM_DEPS=${INSTALL_SYSTEM_DEPS})"
+fi
 
-    # Persist journald across reboots, capped at 200MB (field diagnostics history).
+# Persist journald (200MB cap), once per device — idempotent, runs even on
+# field-update. Was previously nested under INSTALL_SYSTEM_DEPS, which
+# field-update defaults to 0, so it never actually applied on live sites.
+JOURNALD_MARKER="/etc/systemd/journald.conf.d/announceflow-persist.conf"
+if ssh ${SSH_OPTS} ${PI_USER}@${PI_HOST} "test -f ${JOURNALD_MARKER}"; then
+    echo "[2.6/5] Persistent journald already configured"
+else
+    echo "[2.6/5] Enabling persistent journald..."
     ssh ${SSH_OPTS} ${PI_USER}@${PI_HOST} "\
         sudo mkdir -p /var/log/journal && \
         sudo systemd-tmpfiles --create --prefix /var/log/journal && \
         sudo mkdir -p /etc/systemd/journald.conf.d && \
-        printf '[Journal]\nStorage=persistent\nSystemMaxUse=200M\n' | sudo tee /etc/systemd/journald.conf.d/announceflow-persist.conf > /dev/null && \
+        printf '[Journal]\nStorage=persistent\nSystemMaxUse=200M\n' | sudo tee ${JOURNALD_MARKER} > /dev/null && \
         sudo systemctl restart systemd-journald"
-else
-    echo "[2.5/5] Skipping system dependencies (DEPLOY_INSTALL_SYSTEM_DEPS=${INSTALL_SYSTEM_DEPS})"
 fi
 
 echo ""

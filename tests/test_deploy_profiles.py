@@ -68,3 +68,21 @@ def test_field_update_skips_systemd_install_and_restarts_without_sudo_by_default
     assert "DEPLOY_INSTALL_SYSTEMD_SERVICE" in script
     assert "pgrep -u ${PI_USER} -f '^/usr/bin/python3 ${DEST_DIR}/main.py$'" in script
     assert 'kill -TERM \\"\\$pid\\"' in script
+
+
+def test_journald_persistence_runs_regardless_of_system_deps_gate():
+    """Regression: journald persistence was nested inside the INSTALL_SYSTEM_DEPS
+    block, which field-update defaults to skipping — so it never applied on
+    live-site deploys. Must now be its own, idempotent step."""
+    script = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+
+    deps_start = script.index('if [ "${INSTALL_SYSTEM_DEPS}" = "1" ]; then')
+    deps_end = script.index('\nfi\n', deps_start) + len('\nfi\n')
+    deps_block = script[deps_start:deps_end]
+
+    assert "journald" not in deps_block.lower()
+
+    after_deps_block = script[deps_end:]
+    assert "SystemMaxUse=200M" in after_deps_block
+    assert "journald.conf.d/announceflow-persist.conf" in after_deps_block
+    assert "test -f ${JOURNALD_MARKER}" in after_deps_block
