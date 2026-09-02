@@ -50,7 +50,7 @@ def test_init_database_creates_usage_sessions_table(isolated_db):
     conn.close()
     assert cols == {
         "id", "kind", "started_at", "ended_at", "duration_seconds",
-        "source", "detail_json", "created_at",
+        "source", "detail_json", "ended_reason", "gap_seconds", "created_at",
     }
 
 
@@ -91,3 +91,33 @@ def test_record_usage_session_swallows_errors(isolated_db):
         ended_at="2026-09-01T10:00:05+00:00",
         duration_seconds=5.0,
     )  # must not raise
+
+
+def test_migration_adds_columns_to_pre_existing_table(isolated_db):
+    """Simulates a DB created before ended_reason/gap_seconds existed."""
+    conn = sqlite3.connect(isolated_db)
+    conn.execute("ALTER TABLE usage_sessions RENAME TO usage_sessions_new")
+    conn.execute(
+        """
+        CREATE TABLE usage_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            kind TEXT NOT NULL,
+            started_at TIMESTAMP NOT NULL,
+            ended_at TIMESTAMP NOT NULL,
+            duration_seconds REAL NOT NULL,
+            source TEXT,
+            detail_json TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+        """
+    )
+    conn.execute("DROP TABLE usage_sessions_new")
+    conn.commit()
+    conn.close()
+
+    db.init_database()  # re-runs _run_migrations against the old schema
+
+    conn = sqlite3.connect(isolated_db)
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(usage_sessions)")}
+    conn.close()
+    assert {"ended_reason", "gap_seconds"} <= cols

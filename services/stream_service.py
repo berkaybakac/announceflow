@@ -274,6 +274,8 @@ class StreamService:
         self._preferred_device_name: Optional[str] = None
         # Monotonic timestamp of session start (for duration calculation).
         self._session_started_at: float = 0.0
+        # Monotonic timestamp of the previous stream stop, for gap_seconds.
+        self._last_stream_stopped_at: float = 0.0
         # Monotonic timestamp of the last accepted heartbeat.
         # Stays 0.0 until the first heartbeat() call is received so that
         # old clients that never call heartbeat are never auto-stopped.
@@ -1399,13 +1401,21 @@ class StreamService:
                 if session_duration > 0:
                     ended_at_dt = datetime.now(timezone.utc)
                     started_at_dt = ended_at_dt - timedelta(seconds=session_duration)
+                    gap_seconds = None
+                    if 0 < self._last_stream_stopped_at < self._session_started_at:
+                        gap_seconds = round(
+                            self._session_started_at - self._last_stream_stopped_at, 1
+                        )
                     db.record_usage_session(
                         kind="stream",
                         started_at=started_at_dt.isoformat(),
                         ended_at=ended_at_dt.isoformat(),
                         duration_seconds=session_duration,
                         source=correlation_id,
+                        ended_reason=reason,
+                        gap_seconds=gap_seconds,
                     )
+                self._last_stream_stopped_at = time.monotonic()
                 self._session_started_at = 0.0
                 self._active_correlation_id = None
                 self._active_device_id = None

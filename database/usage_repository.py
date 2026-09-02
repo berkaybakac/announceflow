@@ -21,6 +21,8 @@ class UsageRepository(BaseRepository):
         duration_seconds: float,
         source: Optional[str] = None,
         detail: Optional[Dict[str, Any]] = None,
+        ended_reason: Optional[str] = None,
+        gap_seconds: Optional[float] = None,
     ) -> None:
         """Insert one usage session row. Never raises — logs and swallows on failure,
         so a DB hiccup never breaks the playback/stream stop path calling this."""
@@ -30,8 +32,9 @@ class UsageRepository(BaseRepository):
                 conn.execute(
                     """
                     INSERT INTO usage_sessions
-                        (kind, started_at, ended_at, duration_seconds, source, detail_json)
-                    VALUES (?, ?, ?, ?, ?, ?)
+                        (kind, started_at, ended_at, duration_seconds, source,
+                         detail_json, ended_reason, gap_seconds)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         kind,
@@ -40,6 +43,8 @@ class UsageRepository(BaseRepository):
                         duration_seconds,
                         source,
                         json.dumps(detail, ensure_ascii=False) if detail else None,
+                        ended_reason,
+                        gap_seconds,
                     ),
                 )
                 conn.commit()

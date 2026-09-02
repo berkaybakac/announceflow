@@ -229,6 +229,8 @@ def init_database():
             duration_seconds REAL NOT NULL,
             source TEXT,
             detail_json TEXT,
+            ended_reason TEXT,
+            gap_seconds REAL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """
@@ -431,6 +433,14 @@ def _run_migrations():
             skipped,
         )
 
+    # Migration: Add ended_reason/gap_seconds columns to usage_sessions
+    try:
+        cursor.execute("SELECT ended_reason FROM usage_sessions LIMIT 1")
+    except sqlite3.OperationalError:
+        cursor.execute("ALTER TABLE usage_sessions ADD COLUMN ended_reason TEXT")
+        cursor.execute("ALTER TABLE usage_sessions ADD COLUMN gap_seconds REAL")
+        conn.commit()
+
     conn.close()
 
 
@@ -607,6 +617,11 @@ def record_usage_session(
     duration_seconds: float,
     source: Optional[str] = None,
     detail: Optional[Dict[str, Any]] = None,
+    ended_reason: Optional[str] = None,
+    gap_seconds: Optional[float] = None,
 ) -> None:
     """Persist one music/stream/announcement usage session row."""
-    _usage_repo.record_session(kind, started_at, ended_at, duration_seconds, source, detail)
+    _usage_repo.record_session(
+        kind, started_at, ended_at, duration_seconds, source, detail,
+        ended_reason, gap_seconds,
+    )

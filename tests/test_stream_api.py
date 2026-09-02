@@ -257,6 +257,29 @@ class TestStreamServiceStop:
         assert kwargs["duration_seconds"] >= 42.0
         assert kwargs["source"] == "cid-db"
         assert kwargs["started_at"] < kwargs["ended_at"]
+        assert kwargs["ended_reason"] == "unit_test"
+        assert kwargs["gap_seconds"] is None  # no prior session in this test
+
+    @patch("services.stream_service.db.record_usage_session")
+    def test_stop_persists_gap_seconds_since_previous_stop(
+        self, mock_record, mock_manager, mock_player
+    ):
+        """gap_seconds should measure silence between two consecutive sessions."""
+        svc = _make_service(mock_manager, mock_player)
+
+        svc.start(correlation_id="cid-1", device_id="dev-1", device_name="Desk")
+        svc._session_started_at = time.monotonic() - 10.0
+        svc.stop(caller="test_stop", reason="first_stop")
+
+        svc._last_stream_stopped_at = time.monotonic() - 61.0  # simulate the gap
+        svc.start(correlation_id="cid-2", device_id="dev-1", device_name="Desk")
+        svc._session_started_at = time.monotonic() - 5.0
+        svc.stop(caller="test_stop", reason="second_stop")
+
+        assert mock_record.call_count == 2
+        second_call_kwargs = mock_record.call_args_list[1].kwargs
+        assert second_call_kwargs["source"] == "cid-2"
+        assert second_call_kwargs["gap_seconds"] == pytest.approx(56.0, abs=1.0)
 
     @patch("services.stream_service.db.record_usage_session")
     def test_stop_skips_usage_session_when_never_started(

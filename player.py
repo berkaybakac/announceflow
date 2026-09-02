@@ -680,7 +680,7 @@ class AudioPlayer:
                     "status": "interrupted",
                     "source": "local"
                 })
-                self._record_music_usage_session(stopped_file, duration)
+                self._record_music_usage_session(stopped_file, duration, "interrupted")
                 self._session_play_started_at = 0.0
 
         if AUDIO_BACKEND == "mpg123" and self._process:
@@ -748,7 +748,7 @@ class AudioPlayer:
                     "status": "stopped",
                     "source": "local"
                 })
-                self._record_music_usage_session(stopped_file, duration)
+                self._record_music_usage_session(stopped_file, duration, "stopped")
                 self._session_play_started_at = 0.0
             # CRITICAL: Disable playlist to prevent monitor thread from calling play_next()
             self._playlist_active = False
@@ -878,7 +878,9 @@ class AudioPlayer:
         state["playlist"] = self.get_playlist_state()
         return state
 
-    def _record_music_usage_session(self, filepath: str, duration_seconds: float) -> None:
+    def _record_music_usage_session(
+        self, filepath: str, duration_seconds: float, status: str
+    ) -> None:
         """Persist a music playback duration to usage_sessions."""
         if duration_seconds <= 0:
             return
@@ -890,6 +892,7 @@ class AudioPlayer:
             ended_at=ended_at.isoformat(),
             duration_seconds=duration_seconds,
             source=os.path.basename(filepath),
+            ended_reason=status,
         )
 
     def log_session_summary(self) -> None:

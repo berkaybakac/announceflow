@@ -101,6 +101,7 @@ def test_stop_persists_music_usage_session(monkeypatch):
     assert calls[0]["source"] == "song_c.mp3"
     assert calls[0]["duration_seconds"] >= 5.0
     assert calls[0]["started_at"] < calls[0]["ended_at"]
+    assert calls[0]["ended_reason"] == "stopped"
 
 
 def test_stop_playback_only_persists_music_usage_session(monkeypatch):
@@ -123,3 +124,4 @@ def test_stop_playback_only_persists_music_usage_session(monkeypatch):
     assert len(calls) == 1
     assert calls[0]["kind"] == "music"
     assert calls[0]["source"] == "song_d.mp3"
+    assert calls[0]["ended_reason"] == "interrupted"
