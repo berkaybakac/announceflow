@@ -9,6 +9,7 @@ Examples:
 from __future__ import annotations
 
 import argparse
+import glob
 import json
 import os
 import sys
@@ -52,20 +53,26 @@ def _parse_timestamp(raw: str) -> Optional[datetime]:
     return dt.astimezone(timezone.utc)
 
 
+def _resolve_log_files(path: str) -> list[str]:
+    """Base file plus rotated backups (events.jsonl.1, .2, ...), oldest first."""
+    return sorted(glob.glob(path + "*"), reverse=True)
+
+
 def _iter_jsonl(path: str) -> Iterable[dict]:
-    with open(path, "r", encoding="utf-8", errors="replace") as f:
-        for lineno, line in enumerate(f, start=1):
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                payload = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(payload, dict):
-                payload["_line"] = lineno
-                payload["_raw"] = line
-                yield payload
+    for log_file in _resolve_log_files(path):
+        with open(log_file, "r", encoding="utf-8", errors="replace") as f:
+            for lineno, line in enumerate(f, start=1):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    payload = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(payload, dict):
+                    payload["_line"] = lineno
+                    payload["_raw"] = line
+                    yield payload
 
 
 def main() -> int:

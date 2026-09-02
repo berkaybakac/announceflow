@@ -6,6 +6,7 @@ Focuses on receiver startup/output timing and UDP overrun counters per correlati
 from __future__ import annotations
 
 import argparse
+import glob
 import json
 import os
 import sys
@@ -131,18 +132,24 @@ def _diagnose_row(row: dict) -> dict:
     }
 
 
+def _resolve_log_files(path: str) -> list[str]:
+    """Base file plus rotated backups (events.jsonl.1, .2, ...), oldest first."""
+    return sorted(glob.glob(path + "*"), reverse=True)
+
+
 def _iter_jsonl(path: str):
-    with open(path, "r", encoding="utf-8", errors="replace") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                obj = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(obj, dict):
-                yield obj
+    for log_file in _resolve_log_files(path):
+        with open(log_file, "r", encoding="utf-8", errors="replace") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(obj, dict):
+                    yield obj
 
 
 def main() -> int:
