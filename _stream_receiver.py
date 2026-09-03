@@ -990,8 +990,46 @@ def _health_receiver_loop(port: int, stop_event: threading.Event) -> None:
             
     sock.close()
 
+
+def _apply_receiver_priority() -> None:
+    """Best-effort SCHED_OTHER niceness boost (not realtime) for this process
+    and its ffmpeg child (inherited via fork), so the audio pipeline gets a
+    larger CPU share under contention on a shared Pi.
+
+    Opt-in via env var, disabled by default. Deliberately NOT SCHED_FIFO/RR:
+    a misbehaving realtime process can starve the whole system, a nice
+    adjustment stays inside the fair scheduler and is trivially reversible.
+    Failure (e.g. missing CAP_SYS_NICE) is non-fatal. See docs/backlog.md P0.
+    """
+    raw = os.environ.get("ANNOUNCEFLOW_STREAM_RECEIVER_NICE", "").strip()
+    if not raw:
+        return
+    try:
+        value = int(raw)
+    except ValueError:
+        _emit_internal_diag(
+            "receiver_priority_invalid_value",
+            f"receiver_priority_invalid_value raw={raw!r}",
+        )
+        return
+    if value == 0:
+        return
+    try:
+        new_nice = os.nice(value)
+        _safe_log_system(
+            "stream_receiver_priority_applied",
+            {"requested_delta": value, "resulting_nice": new_nice},
+        )
+    except OSError as exc:
+        _safe_log_system(
+            "stream_receiver_priority_failed",
+            {"requested_delta": value, "error": str(exc)},
+        )
+
+
 def main():
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 5800
+    _apply_receiver_priority()
     ffmpeg_bin = _find_ffmpeg()
     alsa_device = _resolve_alsa_device()
     correlation_id = _resolve_correlation_id()
