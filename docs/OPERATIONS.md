@@ -249,3 +249,68 @@ Dry-run scenario (default safe mode):
 2. Cross XRUN threshold for active `correlation_id`.
 3. Verify `stream_xrun_auto_restart_dry_run` is logged.
 4. Verify receiver process is not restarted (no stop/start cycle).
+
+## Common XRUN Validation — Staged Priority/Buffer Test
+
+Validates the fix for the *common* xrun pattern (moderate xrun count over long
+sessions, `speed=` stays ~1.0000 — scheduling/jitter, not clock drift).
+Does NOT apply to the rare throughput-drift sessions (huge burst, xrun starts
+within ~1s of stream start, `speed` measurably <1.0 for the whole session) —
+that stays a separate, open problem. See `docs/backlog.md` P0.
+
+Candidates, in test order (cheapest/most-targeted first):
+
+1. **Receiver niceness boost** (Pi-side, opt-in): `ANNOUNCEFLOW_STREAM_RECEIVER_NICE=-10`
+   in `.env`. Requires `AmbientCapabilities=CAP_SYS_NICE` in the installed
+   systemd unit — a normal `field-update` deploy does NOT reinstall the unit
+   file by default; use `DEPLOY_INSTALL_SYSTEMD_SERVICE=1` (or `standard`
+   profile) at least once for this to take effect.
+2. **ALSA buffer/period widening** (Pi-side, no code change): via
+   `ANNOUNCEFLOW_STREAM_FFMPEG_ARGS="-buffer_size 500000 -period_size 125000"`
+   — test only if (1) alone isn't enough.
+
+Stop as soon as a stage fails to reproduce the problem cleanly enough to
+compare — don't jump straight to a long soak for every candidate.
+
+### Stage 0 — Smoke (minutes, not hours)
+
+1. Set `ANNOUNCEFLOW_STREAM_RECEIVER_NICE=-10`, restart service.
+2. Confirm `stream_receiver_priority_applied` in `logs/events.jsonl` (not
+   `..._failed` — if it fails, `AmbientCapabilities` likely isn't installed;
+   fix the unit before continuing).
+3. Confirm the service is otherwise healthy (`systemctl status`, one clean
+   stream start/stop).
+
+### Stage 1 — Latency check (single run, deterministic)
+
+Measure `first_output_at - first_input_at` from `stream_receiver_summary`
+(baseline vs candidate) and the existing announcement-interruption timing
+check. This does not need repetition — it's not session-dependent noise.
+Reject the candidate here if latency regresses noticeably; no need to spend
+soak-test time on a candidate that already fails this.
+
+### Stage 2 — Realistic few-hour comparison
+
+Run each surviving candidate for a few hours under realistic load (continuous
+stream + periodic announcement interruption + normal panel use), sequentially
+on the same device (baseline → candidate A → candidate B). Pull comparable
+windows with:
+
+```bash
+python3 diagnose.py --file logs/events.jsonl --minutes <window>
+python3 scripts/stream_telemetry_report.py --file logs/events.jsonl --since <ts> --compact
+```
+
+Compare: xrun/hour, `SLOW_REQUEST` rate (web_panel — priority change must not
+starve it), and flag/exclude any session matching the rare-drift signature
+(see above) so it doesn't skew the comparison.
+
+If a few hours already shows a clear, consistent improvement (or a clear
+non-improvement), that's enough to decide — don't default to 24-48h.
+
+### Stage 3 — Soak (only for the promising candidate)
+
+Only if Stage 2 is ambiguous (small sample, inconsistent) or borderline: extend
+that one candidate to a longer window (at least a full business day) before
+committing. Don't soak-test a candidate that already failed Stage 1 or showed
+no effect in Stage 2.
