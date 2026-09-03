@@ -234,6 +234,11 @@ ExecStart=/usr/bin/python3 ${DEST_DIR}/main.py
 Restart=always
 RestartSec=10
 
+# Lets the stream receiver (child process) lower its own niceness via
+# ANNOUNCEFLOW_STREAM_RECEIVER_NICE without running as root. No effect
+# unless that env var is set. See docs/backlog.md P0.
+AmbientCapabilities=CAP_SYS_NICE
+
 [Install]
 WantedBy=multi-user.target
 EOF
