@@ -445,7 +445,10 @@ class ScheduleConflictTestCase(unittest.TestCase):
 
     def test_scheduler_queue_lite_policy_block_keeps_fifo_then_dispatches_first(self):
         scheduler = Scheduler(check_interval_seconds=1)
-        due_dt = datetime.now() + timedelta(minutes=1)
+        # tz-aware: naive datetime.now() is misread as CI runner's local tz
+        # (UTC), not Europe/Istanbul, shifting due_ts hours off and
+        # tripping the staleness drop below.
+        due_dt = datetime.now(ZoneInfo("Europe/Istanbul")) + timedelta(minutes=1)
         scheduler._announcement_next_allowed_monotonic = 0
 
         scheduler._queue_announcement(
@@ -620,7 +623,8 @@ class ScheduleConflictTestCase(unittest.TestCase):
     def test_scheduler_queue_lite_drops_invalid_cancelled_one_time_before_dispatch(self):
         scheduler = Scheduler(check_interval_seconds=1)
         media_id = self._add_media("cancelled_before_dispatch.mp3", 10, media_type="announcement")
-        due_dt = datetime.now() - timedelta(seconds=30)
+        # tz-aware: see note in test_scheduler_queue_lite_policy_block_keeps_fifo_then_dispatches_first
+        due_dt = datetime.now(ZoneInfo("Europe/Istanbul")) - timedelta(seconds=30)
         schedule_id = db.add_one_time_schedule(media_id, due_dt)
 
         queued = scheduler._queue_announcement(
