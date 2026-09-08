@@ -314,3 +314,18 @@ Only if Stage 2 is ambiguous (small sample, inconsistent) or borderline: extend
 that one candidate to a longer window (at least a full business day) before
 committing. Don't soak-test a candidate that already failed Stage 1 or showed
 no effect in Stage 2.
+
+### Result (2026-09-08) — closed
+
+Receiver niceness boost confirmed: Stage 0/1 passed, Stage 2 sessions with
+the common (jitter, not drift) signature all landed well under the <5/hour
+target once distinguished from the separate chronic/drift pattern (see
+`docs/backlog.md`). Buffer/period widening was never needed.
+
+**Rollout status:** still opt-in (`ANNOUNCEFLOW_STREAM_RECEIVER_NICE` unset
+by default, undocumented in `.env.example`). For permanent field use this
+needs two small changes, not yet made — pending approval:
+1. Document the var in `.env.example` (so a fresh clone/device knows it exists).
+2. Set it in `stateksound`'s `.env` permanently (currently only set live via
+   SSH for this test) and decide the default for new field devices.
+
