@@ -364,7 +364,8 @@ class TestJitterAnomaly:
         import _stream_receiver as mod
         calls = []
         monkeypatch.setattr(mod, "_safe_log_error", lambda event, data: calls.append((event, data)))
-        monkeypatch.setattr(mod, "_last_jitter_anomaly_mono", 0.0)
+        # -inf: 0.0 falsely tripped the throttle on fresh CI runners (low uptime)
+        monkeypatch.setattr(mod, "_last_jitter_anomaly_mono", float("-inf"))
 
         counters = {"alsa_xrun": 0, "udp_overrun": 1}
         _log_jitter_anomaly(counters, "test-cid", "udp_overrun")
