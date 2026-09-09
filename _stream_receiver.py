@@ -991,27 +991,27 @@ def _health_receiver_loop(port: int, stop_event: threading.Event) -> None:
     sock.close()
 
 
-def _apply_receiver_priority() -> None:
-    """Best-effort SCHED_OTHER niceness boost (not realtime) for this process
-    and its ffmpeg child (inherited via fork), so the audio pipeline gets a
-    larger CPU share under contention on a shared Pi.
+_DEFAULT_RECEIVER_NICE = -10
 
-    Opt-in via env var, disabled by default. Deliberately NOT SCHED_FIFO/RR:
-    a misbehaving realtime process can starve the whole system, a nice
-    adjustment stays inside the fair scheduler and is trivially reversible.
-    Failure (e.g. missing CAP_SYS_NICE) is non-fatal. See docs/backlog.md P0.
+
+def _apply_receiver_priority() -> None:
+    """Niceness boost for this process + ffmpeg child (fork inherits it).
+    On by default (validated 2026-09). Set ANNOUNCEFLOW_STREAM_RECEIVER_NICE=0
+    to disable. Not SCHED_FIFO/RR — stays in fair scheduler, reversible.
+    Failure (no CAP_SYS_NICE) is non-fatal. See docs/backlog.md P0.
     """
     raw = os.environ.get("ANNOUNCEFLOW_STREAM_RECEIVER_NICE", "").strip()
     if not raw:
-        return
-    try:
-        value = int(raw)
-    except ValueError:
-        _emit_internal_diag(
-            "receiver_priority_invalid_value",
-            f"receiver_priority_invalid_value raw={raw!r}",
-        )
-        return
+        value = _DEFAULT_RECEIVER_NICE
+    else:
+        try:
+            value = int(raw)
+        except ValueError:
+            _emit_internal_diag(
+                "receiver_priority_invalid_value",
+                f"receiver_priority_invalid_value raw={raw!r}",
+            )
+            return
     if value == 0:
         return
     try:

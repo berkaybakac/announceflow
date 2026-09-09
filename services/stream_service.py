@@ -44,6 +44,8 @@ XRUN_MAX_RESTARTS_PER_HOUR = 3
 # Cooldown after a successful auto-restart to avoid burst restart loops.
 XRUN_AUTO_RESTART_COOLDOWN_SECONDS = 60.0
 SENDER_HEALTH_LOG_INTERVAL_SECONDS = 60.0
+# Startup burst window: unthrottled logging, ~13 samples at 4.5s heartbeat.
+STARTUP_HEALTH_BURST_SECONDS = 60.0
 
 _XRUN_DRY_RUN_ENV = "ANNOUNCEFLOW_XRUN_AUTO_RECOVERY_DRY_RUN"
 _XRUN_THRESHOLD_ENV = "ANNOUNCEFLOW_XRUN_RESTART_THRESHOLD"
@@ -1621,12 +1623,21 @@ class StreamService:
                 )
                 if sender_health_present and request_device_id == self._active_device_id:
                     now_mono = time.monotonic()
+                    # Unthrottled at session start — chronic xrun onset
+                    # needs finer resolution than 60s. See backlog.md P0.
+                    if meta.get("health_burst_correlation_id") != self._active_correlation_id:
+                        meta["health_burst_correlation_id"] = self._active_correlation_id
+                        meta["health_burst_until_mono"] = now_mono + STARTUP_HEALTH_BURST_SECONDS
+                    in_startup_burst = now_mono < float(
+                        meta.get("health_burst_until_mono") or 0.0
+                    )
                     last_health_log_mono = _coerce_non_negative_float(
                         meta.get("last_sender_health_log_mono"),
                         default=0.0,
                     )
                     if (
-                        last_health_log_mono == 0.0
+                        in_startup_burst
+                        or last_health_log_mono == 0.0
                         or (now_mono - last_health_log_mono) >= SENDER_HEALTH_LOG_INTERVAL_SECONDS
                     ):
                         meta["last_sender_health_log_mono"] = now_mono
