@@ -322,10 +322,49 @@ the common (jitter, not drift) signature all landed well under the <5/hour
 target once distinguished from the separate chronic/drift pattern (see
 `docs/backlog.md`). Buffer/period widening was never needed.
 
-**Rollout status:** still opt-in (`ANNOUNCEFLOW_STREAM_RECEIVER_NICE` unset
-by default, undocumented in `.env.example`). For permanent field use this
-needs two small changes, not yet made — pending approval:
-1. Document the var in `.env.example` (so a fresh clone/device knows it exists).
-2. Set it in `stateksound`'s `.env` permanently (currently only set live via
-   SSH for this test) and decide the default for new field devices.
+**Rollout:** on by default (`_DEFAULT_RECEIVER_NICE = -10` in
+`_stream_receiver.py`), documented in `.env.example`. Set
+`ANNOUNCEFLOW_STREAM_RECEIVER_NICE=0` to opt out. No per-device `.env`
+edit needed — this is the actual source of truth now.
+
+## Chronic/Session-Specific XRUN — Next Occurrence Runbook
+
+**Status:** open, root cause unknown. Separate from the common-xrun fix
+above (that one's done). See `docs/backlog.md` for full investigation
+history — this section is only "what to do when it happens again."
+
+**How to recognize it (vs. normal/common xrun):**
+
+```bash
+grep -a -A2 "correlation_id=<the session>" logs/stream_receiver_ffmpeg.log | grep -E "ALSA buffer xrun|repeated"
+```
+
+If the first xrun appears within ~30s of session start AND xrun count in
+`stream_receiver_summary` is more than a handful (dozens+) for that
+session, it's this pattern, not a random blip.
+
+**Data to pull the moment you notice it (or right after, while logs are
+still fresh):**
+
+1. `grep -a stream_sender_health logs/events.jsonl | grep <correlation_id>`
+   — first ~60s now log every heartbeat (~4.5s resolution). Look at the
+   CPU/mem/wifi trend right at session start.
+2. Raw `logs/stream_receiver_ffmpeg.log` for that session — as of
+   2026-09-10 ffmpeg no longer collapses repeats (`-loglevel repeat+info`),
+   so every xrun has its own real timestamp. Check: constant low-rate drip,
+   or a dense early burst, or something else. This is the one thing we
+   couldn't see before and specifically added telemetry for.
+3. `owner_device_id` / PC identity for that session (`stream_start_api_request`
+   in events.jsonl) — confirm which physical PC, for pattern-matching
+   against past occurrences.
+
+**What's already ruled out (don't re-litigate without new evidence):**
+sample-rate/clock drift as sole cause (speed= stays ~1x), fixed/broken
+device (same PC produced both clean and chronic sessions), the existing
+`stream_xrun_auto_restart` safety net (threshold=100/300s never trips for
+this pattern — don't lower it blindly, within-burst density still unknown
+until data from point 2 above accumulates).
+
+**Record the findings back in `docs/backlog.md`'s chronic-xrun entry** —
+current status, not a new dated diary entry.
 
