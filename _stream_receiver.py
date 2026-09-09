@@ -1040,6 +1040,10 @@ def main():
         "-hide_banner",
         "-nostats",
         "-y",
+        # "repeat": don't collapse repeated xrun lines into one summary —
+        # each gets its own timestamp, so we can see WHEN xruns actually
+        # happened in a session, not just the total count. See backlog.md P0.
+        "-loglevel", "repeat+info",
         # Larger real-time demuxer buffer reduces DTS discontinuity warnings
         # that can cascade into ALSA underruns on network-jittery links.
         "-rtbufsize", "10M",

@@ -237,6 +237,10 @@ RestartSec=10
 # Lets the receiver self-nice (on by default) without running as root.
 AmbientCapabilities=CAP_SYS_NICE
 
+# Kill the receiver/ffmpeg child on restart too (default KillMode leaves
+# them orphaned, risking ALSA/UDP port conflicts on the next start).
+KillMode=control-group
+
 [Install]
 WantedBy=multi-user.target
 EOF
