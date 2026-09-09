@@ -2,7 +2,7 @@
 
 # AnnounceFlow
 
-**Production-deployed in-store audio control system**
+**Audio scheduling and live Windows-to-Raspberry Pi streaming for retail stores**
 
 [![Python](https://img.shields.io/badge/Python-3.9+-3776AB?logo=python&logoColor=white)](https://python.org)
 [![Flask](https://img.shields.io/badge/Flask-3.0-000000?logo=flask)](https://flask.palletsprojects.com)
@@ -11,7 +11,7 @@
 [![Tests](https://img.shields.io/badge/Tests-Pytest_Suite-2ea44f)](#testing)
 [![License](https://img.shields.io/badge/License-Proprietary-red)](#license)
 
-*Validated on Raspberry Pi 4 (1 GB RAM) in a real store environment since January 2026*
+*Used by 3 customers at 3 locations — deployment snapshot confirmed 8 September 2026.*
 
 </div>
 
@@ -25,9 +25,19 @@
 >
 > **Why it's hard:** LAN instability, power loss, no on-site IT support. The system must keep audio running without manual intervention during business hours.
 >
-> **Scale:** Single-branch retail, one Pi per store.
+> **Deployment model:** A local installation per branch, controlled over its LAN.
 >
-> **Tested:** ~800 test cases across 57 test files.
+> **My role:** Sole software developer at Statek Stabil Teknoloji, responsible for requirements, implementation, deployment and field support.
+
+[Architecture](#architecture) · [Local setup](#quick-start-development) · [Testing](#testing) · [Operations guide](docs/OPERATIONS.md)
+
+## Selected engineering work
+
+- **Diagnosing interrupted live audio:** Sender, network and receiver telemetry helped separate failure modes. Smaller UDP audio blocks address fragmentation; receiver recovery uses cooldowns and stop/start race protection.
+- **Coordinating playback policies:** Scheduled announcements, live audio, prayer-time silence and business hours share playback resources. Recovery must respect the active policy rather than simply restart audio.
+- **Supporting deployed devices:** Persistent logs, diagnostics and deployment profiles support field investigation while preserving customer configuration and media during routine updates.
+
+The regression suite covers scheduling, stream lifecycle and recovery behavior. Audio quality and hardware recovery also need validation on the target device and network; automated tests alone do not establish uninterrupted playback.
 
 ---
 
