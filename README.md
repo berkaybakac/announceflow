@@ -11,7 +11,7 @@
 [![Tests](https://img.shields.io/badge/Tests-Pytest_Suite-2ea44f)](#testing)
 [![License](https://img.shields.io/badge/License-Proprietary-red)](#license)
 
-*Used by 3 customers at 3 locations — deployment snapshot confirmed 8 September 2026.*
+*Used by 4 customers at 4 locations — deployment snapshot confirmed 6 October 2026.*
 
 </div>
 
