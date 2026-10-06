@@ -121,6 +121,41 @@ def _usage_sessions(db_path: str, since: datetime, until: datetime, tz: ZoneInfo
     return out
 
 
+# Signals for risks that were consciously deferred ("wait until it happens"):
+# each must be visible here, otherwise waiting means never noticing.
+_HEALTH_EVENTS = {
+    "stream_receiver_died": "stream_receiver_died",          # stream dropped, music not restored
+    "reconcile_resume": "music_auto_resumed",                # music stopped unexpectedly, watchdog restarted it
+    "scheduler_tick_slow": "scheduler_tick_slow",            # can skip a specific-time announcement
+    "audio_device_hdmi_selected": "audio_device_hdmi",       # silent output on site
+    "admin_recovery_login": "admin_recovery_login",          # emergency credential used
+    "playlist_restore_failed": "playlist_restore_failed",
+    "policy_fail_safe_engaged": "prayer_fail_safe",
+    "announcement_queue_stuck_reset": "announcement_stuck_reset",
+    "stream_receiver_priority_failed": "receiver_priority_failed",  # crackle fix not active
+}
+_HEALTH_APP_LOG = {
+    "amixer failed for all card/control candidates": "amixer_failed",  # volume not applied
+    "Scheduler error:": "scheduler_exception",
+}
+
+
+def _new_health() -> dict:
+    keys = list(_HEALTH_EVENTS.values()) + ["announcement_cut_short"] + list(_HEALTH_APP_LOG.values())
+    health = {k: {"count": 0, "last": None} for k in keys}
+    health["app_log_errors"] = {"count": 0, "last": None}
+    health["scheduler_tick_slow"]["max_duration_s"] = None
+    return health
+
+
+def _bump(health: dict, key: str, t: datetime) -> None:
+    slot = health[key]
+    slot["count"] += 1
+    stamp = t.strftime("%Y-%m-%d %H:%M")
+    if slot["last"] is None or stamp > slot["last"]:
+        slot["last"] = stamp
+
+
 def build_report(dump_dir: str, since: datetime, until: datetime, tz: ZoneInfo) -> dict:
     in_range = lambda t: t is not None and since <= t <= until  # noqa: E731
     media_type = _media_types(os.path.join(dump_dir, "announceflow.db"))
@@ -131,6 +166,7 @@ def build_report(dump_dir: str, since: datetime, until: datetime, tz: ZoneInfo) 
         coverage[source] = [t if lo is None or t < lo else lo, t if hi is None or t > hi else hi]
 
     active_days: dict[str, set] = defaultdict(set)
+    health = _new_health()
 
     # ── Live stream sessions (ffmpeg receiver summaries) ──────────────────────
     # One stream can span several receiver segments with the same
@@ -179,6 +215,11 @@ def build_report(dump_dir: str, since: datetime, until: datetime, tz: ZoneInfo) 
         seen("announceflow.log", t)
         if not in_range(t):
             continue
+        for needle, key in _HEALTH_APP_LOG.items():
+            if needle in line:
+                _bump(health, key, t)
+        if " - ERROR - " in line:
+            _bump(health, "app_log_errors", t)
         if "StreamService: heartbeat expired" in line:
             heartbeat_lost += 1
             sender_pcs.update(_AGENT_ID.findall(line))
@@ -218,6 +259,15 @@ def build_report(dump_dir: str, since: datetime, until: datetime, tz: ZoneInfo) 
         seen("events.jsonl", t)
         event = obj.get("event")
         data = obj.get("data") or {}
+        if in_range(t) and isinstance(data, dict):
+            if event in _HEALTH_EVENTS:
+                key = _HEALTH_EVENTS[event]
+                _bump(health, key, t)
+                if key == "scheduler_tick_slow" and data.get("duration_s") is not None:
+                    previous = health[key]["max_duration_s"]
+                    health[key]["max_duration_s"] = max(previous or 0.0, float(data["duration_s"]))
+            elif event == "announcement_queue_finish" and data.get("cut_short"):
+                _bump(health, "announcement_cut_short", t)
         if in_range(t) and isinstance(data, dict):
             sender_pcs.update(_AGENT_ID.findall(json.dumps(data)))
         if event == "login" and in_range(t):
@@ -284,6 +334,7 @@ def build_report(dump_dir: str, since: datetime, until: datetime, tz: ZoneInfo) 
             "music_paused_for_prayer": music_paused_for_prayer,
             "prayer_silence_windows": prayer_silence_windows,
         },
+        "health": health,
         "panel": {"logins": logins, "failed_logins": failed_logins},
         "boots": boots,
         "usage_sessions_v2_4": _usage_sessions(os.path.join(dump_dir, "announceflow.db"), since, until, tz),
@@ -318,6 +369,14 @@ def render_markdown(reports: list[dict]) -> str:
         p = r["prayer"]
         out.append(f"- Prayer-time automation: music paused {p['music_paused_for_prayer']}×"
                    f" · prayer silence windows (events): {p['prayer_silence_windows']}")
+        signals = [(k, v) for k, v in r["health"].items() if v["count"]]
+        if signals:
+            out.append("- Health signals: " + ", ".join(
+                f"{k} ×{v['count']} (last {v['last']}"
+                + (f", max {v['max_duration_s']} s" if v.get("max_duration_s") else "") + ")"
+                for k, v in signals))
+        else:
+            out.append("- Health signals: none")
         out.append(f"- Panel logins: {r['panel']['logins']} (failed: {r['panel']['failed_logins']}) · boots: {r['boots']}")
         if r["usage_sessions_v2_4"]:
             parts = ", ".join(f"{k}: {v['sessions']} sessions / {v['hours']:.1f} h"

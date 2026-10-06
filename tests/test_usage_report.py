@@ -162,3 +162,43 @@ def test_latest_agent_version_per_sender_pc(dump):
         "agent-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee": "v2.5.0-1a2b3c4"
     }
     assert "v2.5.0-1a2b3c4" in usage_report.render_markdown([r])
+
+
+def test_health_signals_count_deferred_risks(tmp_path):
+    """Every 'wait' decision must have a signal the report surfaces."""
+    d = tmp_path / "health"
+    (d / "logs").mkdir(parents=True)
+    events = [
+        {"ts": "2026-09-05T08:00:00.000Z", "event": "stream_receiver_died", "data": {}},
+        {"ts": "2026-09-05T08:05:00.000Z", "event": "reconcile_resume", "data": {}},
+        {"ts": "2026-09-05T08:10:00.000Z", "event": "scheduler_tick_slow", "data": {"duration_s": 41.5}},
+        {"ts": "2026-09-05T08:11:00.000Z", "event": "scheduler_tick_slow", "data": {"duration_s": 12.0}},
+        {"ts": "2026-09-05T08:20:00.000Z", "event": "announcement_queue_finish", "data": {"cut_short": True}},
+        {"ts": "2026-09-05T08:21:00.000Z", "event": "announcement_queue_finish", "data": {"cut_short": False}},
+        {"ts": "2026-09-05T08:30:00.000Z", "event": "audio_device_hdmi_selected", "data": {"device": "plughw:0,0"}},
+        {"ts": "2026-09-05T08:40:00.000Z", "event": "admin_recovery_login", "data": {}},
+    ]
+    (d / "logs" / "events.jsonl").write_text("".join(json.dumps(e) + "\n" for e in events))
+    (d / "announceflow.log").write_text(
+        "2026-09-05 08:50:00.000Z - WARNING - [player] amixer failed for all card/control candidates\n"
+        "2026-09-05 08:51:00.000Z - ERROR - [scheduler] Scheduler error: boom\n"
+        "2026-09-05 08:52:00.000Z - INFO - [player] Playing next track: 1/2\n"
+    )
+
+    h = _report(d)["health"]
+    assert h["stream_receiver_died"]["count"] == 1
+    assert h["music_auto_resumed"]["count"] == 1
+    assert h["scheduler_tick_slow"] == {"count": 2, "last": "2026-09-05 11:11", "max_duration_s": 41.5}
+    assert h["announcement_cut_short"]["count"] == 1
+    assert h["audio_device_hdmi"]["count"] == 1
+    assert h["admin_recovery_login"]["count"] == 1
+    assert h["amixer_failed"]["count"] == 1
+    assert h["scheduler_exception"]["count"] == 1
+    assert h["app_log_errors"]["count"] == 1
+    assert "Health signals" in usage_report.render_markdown([_report(d)])
+
+
+def test_health_signals_empty_when_quiet(dump):
+    h = _report(dump)["health"]
+    assert all(v["count"] == 0 for v in h.values())
+    assert "Health signals: none" in usage_report.render_markdown([_report(dump)])
