@@ -1,5 +1,4 @@
 {
-    "volume": 80,
     "admin_username": "admin",
     "admin_password": "CHANGE_ME_STRONG_PASSWORD",
     "database_path": "announceflow.db",

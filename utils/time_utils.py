@@ -141,11 +141,3 @@ def to_storage_utc_z(raw_value: Any) -> str:
     )
 
 
-def format_storage_datetime_local(
-    raw_value: Any, *, fmt: str = "%d.%m.%Y %H:%M"
-) -> Optional[str]:
-    """Format DB datetime value for local display."""
-    parsed_local = parse_storage_datetime_to_local(raw_value, naive_as_local=True)
-    if parsed_local is None:
-        return None
-    return parsed_local.strftime(fmt)

@@ -513,7 +513,6 @@ def settings():
 # Phase 3.1: All player endpoints moved to routes/player_routes.py
 # - 3.1a: /api/health, /api/play, /api/stop, /api/volume
 # - 3.1b: /api/now-playing, /api/media/music
-# - 3.1c: /api/pause, /api/resume (deprecated)
 
 
 # ============ PLAYLIST API ============
@@ -537,42 +536,3 @@ def settings():
 from routes import register_blueprints
 
 register_blueprints(app)
-
-
-# ============ MAIN ============
-
-if __name__ == "__main__":
-    # Initialize database
-    db.init_database()
-
-    # Initialize runtime player volume from canonical DB state
-    config = load_config()
-    canonical_volume = db.get_volume_state()
-    initial_volume = int(canonical_volume.get("volume", 80))
-    try:
-        web_port = int(config.get("web_port", 5001))
-        if web_port < 1 or web_port > 65535:
-            raise ValueError("out of range")
-    except (TypeError, ValueError):
-        web_port = 5001
-
-    player = get_player()
-    player.set_volume(initial_volume)
-
-    # Start scheduler
-    scheduler = get_scheduler()
-    scheduler.start()
-
-    # Run web server
-    from waitress import serve
-
-    print(f"AnnounceFlow Web Panel çalışıyor (Port {web_port})...")
-    # Increase threads to prevent queue depth warnings
-    serve(
-        app,
-        host="0.0.0.0",
-        port=web_port,
-        threads=16,
-        channel_timeout=10,
-        connection_limit=100,
-    )

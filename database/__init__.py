@@ -566,23 +566,6 @@ def delete_all_recurring_announcements() -> int:
 
 
 # Playback State (2 functions)
-def get_playback_state() -> Dict[str, Any]:
-    """Get current playback state."""
-    return _playback_repo.get_playback_state()
-
-
-def update_playback_state(
-    current_media_id: Optional[int] = None,
-    position_seconds: Optional[float] = None,
-    is_playing: Optional[bool] = None,
-    volume: Optional[int] = None,
-) -> bool:
-    """Update playback state."""
-    return _playback_repo.update_playback_state(
-        current_media_id, position_seconds, is_playing, volume
-    )
-
-
 def get_volume_state() -> Dict[str, Any]:
     """Get canonical volume state."""
     return _playback_repo.get_volume_state()

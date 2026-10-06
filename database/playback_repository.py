@@ -52,67 +52,6 @@ class PlaybackRepository(BaseRepository):
 
     # ============ PLAYBACK STATE ============
 
-    def get_playback_state(self) -> Dict[str, Any]:
-        """Get current playback state with media info."""
-        conn = self.get_connection()
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            SELECT ps.*, m.filename, m.filepath
-            FROM playback_state ps
-            LEFT JOIN media_files m ON ps.current_media_id = m.id
-            WHERE ps.id = 1
-        """
-        )
-        row = cursor.fetchone()
-        conn.close()
-        return dict(row) if row else {}
-
-    def update_playback_state(
-        self,
-        current_media_id: Optional[int] = None,
-        position_seconds: Optional[float] = None,
-        is_playing: Optional[bool] = None,
-        volume: Optional[int] = None,
-    ) -> bool:
-        """Update playback state."""
-        conn = self.get_connection()
-        cursor = conn.cursor()
-
-        updates = []
-        values = []
-
-        if current_media_id is not None:
-            updates.append("current_media_id = ?")
-            try:
-                mid = int(current_media_id)
-                values.append(mid if mid > 0 else None)
-            except (ValueError, TypeError):
-                values.append(None)
-        if position_seconds is not None:
-            updates.append("position_seconds = ?")
-            values.append(position_seconds)
-        if is_playing is not None:
-            updates.append("is_playing = ?")
-            values.append(1 if is_playing else 0)
-        if volume is not None:
-            normalized_volume = self._normalize_volume(volume)
-            updates.append("volume = ?")
-            values.append(normalized_volume)
-            if normalized_volume > 0:
-                updates.append("last_nonzero_volume = ?")
-                values.append(normalized_volume)
-            updates.append("volume_revision = COALESCE(volume_revision, 0) + 1")
-
-        if updates:
-            updates.append("updated_at = CURRENT_TIMESTAMP")
-            query = f"UPDATE playback_state SET {', '.join(updates)} WHERE id = 1"
-            cursor.execute(query, values)
-            conn.commit()
-
-        conn.close()
-        return True
-
     def get_volume_state(self) -> Dict[str, Any]:
         """Get canonical volume state used by all clients."""
         conn = self.get_connection()

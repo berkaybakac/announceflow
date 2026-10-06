@@ -574,7 +574,8 @@ def _find_ffmpeg():
 def _resolve_alsa_device():
     """Resolve ALSA output device using same logic as player.py.
 
-    Priority: CLI arg > ANNOUNCEFLOW_ALSA_DEVICE env > probe candidates.
+    Priority: CLI arg (manual runs only; StreamManager never passes it)
+    > ANNOUNCEFLOW_ALSA_DEVICE env > probe candidates.
     """
 
     def _probe_candidate(candidate: str) -> bool:
@@ -657,7 +658,8 @@ def _resolve_alsa_device():
             result.append(item)
         return result
 
-    # CLI argument (passed by StreamManager)
+    # CLI argument: manual debugging override, e.g.
+    #   python3 _stream_receiver.py 5800 plughw:1,0
     if len(sys.argv) > 2:
         return sys.argv[2]
 

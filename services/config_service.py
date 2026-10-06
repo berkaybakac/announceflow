@@ -21,7 +21,6 @@ _DOTENV_LOADED = False
 
 # Default values (fallback if key missing)
 DEFAULTS = {
-    "volume": 100,
     "admin_username": "admin",
     "admin_password": "admin123",
     "admin_recovery_enabled": True,

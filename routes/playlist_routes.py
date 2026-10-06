@@ -79,9 +79,6 @@ def api_playlist_play():
     logger.info("[source] manual play -> playlist current track")
     success = player.play_playlist()
 
-    if success:
-        db.update_playback_state(is_playing=True)
-
     return _json_success({"success": success})
 
 
@@ -114,7 +111,6 @@ def api_playlist_stop():
     """Stop playlist and clear it."""
     player = get_player()
     player.stop_playlist()
-    db.update_playback_state(current_media_id=0, is_playing=False)
     return _json_success()
 
 
@@ -149,9 +145,6 @@ def api_playlist_start_all():
         player.set_playlist(file_paths, loop=True, shuffle=shuffle)
         logger.info(f"[source] manual play -> playlist start-all (tracks={len(file_paths)}, shuffle={shuffle})")
         success = player.play_playlist()
-
-        if success:
-            db.update_playback_state(is_playing=True)
 
         return _json_success({"success": success, "tracks": len(file_paths)})
     finally:

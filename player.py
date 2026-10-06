@@ -784,13 +784,6 @@ class AudioPlayer:
             log_play("stop", {})
         return True
 
-    # Pause/Resume removed for stability with mpg123
-    def pause(self) -> bool:
-        return False
-
-    def resume(self) -> bool:
-        return False
-
     def set_volume(self, volume: int) -> bool:
         """Set volume level (0-100) using logarithmic mapping for natural feel."""
         volume = max(0, min(100, volume))
@@ -859,10 +852,6 @@ class AudioPlayer:
 
             return pygame.mixer.music.get_pos() / 1000.0
         return self._position
-
-    def get_duration(self) -> float:
-        """Get duration of current track in seconds."""
-        return self._duration
 
     def get_state(self) -> dict:
         """Get current player state."""

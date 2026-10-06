@@ -160,20 +160,3 @@ def resolve_silence_policy(
     return decision
 
 
-def is_prayer_time_active(
-    config: dict,
-    *,
-    allow_network: bool = True,
-    fail_safe_on_unknown: bool = False,
-    now: Optional[datetime] = None,
-    prayer_times_provider: Optional[PrayerTimesProvider] = None,
-) -> bool:
-    """Compatibility helper for callers that need a boolean."""
-    decision = resolve_silence_policy(
-        config,
-        allow_network=allow_network,
-        fail_safe_on_unknown=fail_safe_on_unknown,
-        now=now,
-        prayer_times_provider=prayer_times_provider,
-    )
-    return bool(decision.get("silence_active", False) and decision.get("policy") != "working_hours")

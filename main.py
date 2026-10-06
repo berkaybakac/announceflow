@@ -108,7 +108,7 @@ def main():
     log_system(
         "boot",
         {
-            "version": "1.5.1",
+            "version": release["ref"],
             "backend": AUDIO_BACKEND,
             "release_ref": release["ref"],
             "release_commit": release["commit_short"],

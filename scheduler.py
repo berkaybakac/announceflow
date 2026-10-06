@@ -19,7 +19,6 @@ from services.silence_policy import (
     resolve_silence_policy,
     should_fail_safe_on_unknown,
     is_within_working_hours as _policy_is_within_working_hours,
-    is_prayer_time_active as _policy_is_prayer_time_active,
 )
 from services.stream_policy import (
     should_force_stop_stream,
@@ -51,15 +50,6 @@ def _is_time_within_window(curr_time, start_time, end_time) -> bool:
 def is_within_working_hours(config: dict) -> bool:
     """Backward-compatible working hours helper."""
     return _policy_is_within_working_hours(config)
-
-
-def is_prayer_time_active(config: dict) -> bool:
-    """Backward-compatible prayer helper."""
-    return _policy_is_prayer_time_active(
-        config,
-        allow_network=True,
-        fail_safe_on_unknown=should_fail_safe_on_unknown(config),
-    )
 
 
 class Scheduler:
@@ -172,9 +162,6 @@ class Scheduler:
         if normalized == "announcement":
             return "announcement"
         return "music"
-
-    def _is_announcement_media_type(self, raw_media_type: Any) -> bool:
-        return self._normalize_media_type(raw_media_type) == "announcement"
 
     def _audit_media_types_once(self) -> None:
         """Normalize legacy/invalid media_type rows at startup."""
@@ -443,15 +430,6 @@ class Scheduler:
                 )
 
             self._prayer_pause_state = None
-
-    def _set_pause_state_by_policy(self, state: dict[str, Any], policy: str) -> None:
-        pause_state = {
-            "playlist": list(state.get("playlist") or []),
-            "index": state.get("index", -1),
-            "loop": state.get("loop", True),
-            "active": bool(state.get("active", True)),
-        }
-        self._set_pause_state(policy, pause_state)
 
     def defer_playlist_restore(self, policy: str, pause_state: dict[str, Any]) -> None:
         """Public entrypoint for startup to defer playlist restore safely."""

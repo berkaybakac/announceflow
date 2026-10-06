@@ -875,57 +875,6 @@ def fetch_prayer_times(city: str, district: str) -> Optional[Dict]:
     return times
 
 
-def is_prayer_time(city: str, district: str, buffer_minutes: int = 1) -> bool:
-    """
-    Check if current time is within a prayer time window.
-
-    Args:
-        city: City name
-        district: District name
-        buffer_minutes: Minutes before prayer to silence, and after to resume
-
-    Returns:
-        True if we should be silent (in prayer time window)
-    """
-    if not city:
-        return False
-
-    times = fetch_prayer_times(city, district or "Merkez")
-    if not times:
-        return False
-
-    now = datetime.now()
-    current_minutes = now.hour * 60 + now.minute
-
-    # Check each prayer time
-    for prayer_key in ["imsak", "ogle", "ikindi", "aksam", "yatsi"]:
-        prayer_time_str = times.get(prayer_key, "")
-        if not prayer_time_str:
-            continue
-
-        try:
-            # Parse HH:MM
-            h, m = map(int, prayer_time_str.split(":"))
-            prayer_minutes = h * 60 + m
-
-            # Check if within buffer window
-            start = prayer_minutes - buffer_minutes
-            # Ezan typically lasts ~5 minutes, add buffer after
-            end = prayer_minutes + 5 + buffer_minutes
-
-            if start <= current_minutes <= end:
-                logger.info(f"In prayer time window: {prayer_key} ({prayer_time_str})")
-                _log_prayer_event(
-                    "in_window", {"prayer": prayer_key, "time": prayer_time_str}
-                )
-                return True
-
-        except (ValueError, AttributeError):
-            continue
-
-    return False
-
-
 def get_next_prayer_time(city: str, district: str) -> Optional[Dict]:
     """Get the next upcoming prayer time."""
     times = fetch_prayer_times(city, district or "Merkez")
@@ -974,5 +923,4 @@ if __name__ == "__main__":
     times = fetch_prayer_times("İstanbul", "Kadıköy")
     print("Prayer times:", times)
 
-    print("Is prayer time now:", is_prayer_time("İstanbul", "Kadıköy"))
     print("Next prayer:", get_next_prayer_time("İstanbul", "Kadıköy"))

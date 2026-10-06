@@ -766,21 +766,6 @@ class StreamService:
         self._agent_registry.pop(device_id, None)
         return False
 
-    def _online_agent_ids_unlocked(self) -> list[str]:
-        now = time.time()
-        stale_ids = []
-        online = []
-        for device_id, meta in self._agent_registry.items():
-            last_seen = float(meta.get("last_seen_at") or 0.0)
-            if now - last_seen <= AGENT_ONLINE_TTL_SECONDS:
-                online.append((device_id, last_seen))
-            else:
-                stale_ids.append(device_id)
-        for stale_id in stale_ids:
-            self._agent_registry.pop(stale_id, None)
-        online.sort(key=lambda item: item[1], reverse=True)
-        return [device_id for device_id, _ in online]
-
     def _mark_preferred_device_unlocked(
         self,
         *,

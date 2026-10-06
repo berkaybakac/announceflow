@@ -53,7 +53,6 @@ class TestManualAnnouncementPolicy:
         player.play.assert_not_called()
 
     @patch("routes.player_routes._volume_runtime")
-    @patch("routes.player_routes.db.update_playback_state")
     @patch("routes.player_routes.db.get_volume_state")
     @patch("routes.player_routes._reject_if_outside_working_hours", return_value=None)
     @patch("routes.player_routes._get_media_or_404")
@@ -66,7 +65,6 @@ class TestManualAnnouncementPolicy:
         mock_get_media,
         _mock_hours_guard,
         mock_get_volume_state,
-        _mock_update_state,
         mock_volume_runtime,
         client,
     ):

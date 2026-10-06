@@ -205,9 +205,6 @@ def api_play():
                 effective_volume=override_volume,
                 source="manual_announcement",
             )
-        db.update_playback_state(
-            current_media_id=media_id, is_playing=True, position_seconds=0
-        )
         log_web("play", {"media_id": media_id, "filename": media["filename"]})
         playback_session = getattr(player, "_playback_session", None)
         if is_library_preview:
@@ -259,7 +256,6 @@ def api_stop():
     success = player.stop()
     _volume_runtime.restore_override(reason="manual_stop")
     _clear_preview_context()
-    db.update_playback_state(current_media_id=0, is_playing=False, position_seconds=0)
     log_web("stop", {})
     
     duration_ms = (time.perf_counter() - start_time) * 1000
@@ -471,18 +467,6 @@ def api_get_music_files():
     return jsonify({"files": files, "count": len(files)})
 
 
-@player_bp.route("/api/pause", methods=["POST"])
-@login_required
-def api_pause():
-    """Deprecated."""
-    return _json_error("Not supported", 405)
-
-
-@player_bp.route("/api/resume", methods=["POST"])
-@login_required
-def api_resume():
-    """Deprecated."""
-    return _json_error("Not supported", 405)
 @player_bp.route("/api/diagnose", methods=["GET"])
 @login_required
 def get_diagnostic_report():
