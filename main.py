@@ -155,8 +155,8 @@ def main():
                 f"Playlist restore ediliyor: {len(valid_playlist)} şarkı, index={index}"
             )
 
-            # Adjust index if files were removed
-            if index >= len(valid_playlist):
+            # Adjust index if files were removed (or nothing was played yet: -1)
+            if index < 0 or index >= len(valid_playlist):
                 index = 0
             player.apply_playlist_state(
                 playlist=valid_playlist,

@@ -94,6 +94,21 @@ def test_missing_files_are_dropped_and_out_of_range_index_resets(monkeypatch, te
     player.play_next.assert_called_once_with()
 
 
+def test_never_played_index_restores_from_first_track(monkeypatch, temp_db, tracks):
+    """Saved index -1 (playlist set, nothing played yet) must start at track 0.
+
+    Reproduced on a Pi: -1 became -2 for play_next, which wrapped to the
+    *last* track and kept saving index -1.
+    """
+    db.save_playlist_state(playlist=tracks, index=-1, loop=True, active=True)
+
+    player, _, _, _ = _run_main_boot(monkeypatch)
+
+    player.apply_playlist_state.assert_called_once_with(
+        playlist=tracks, index=-1, loop=True, runtime_active=True
+    )
+
+
 @pytest.mark.parametrize("policy_name", ["working_hours", "prayer"])
 def test_restore_is_deferred_while_silence_policy_active(monkeypatch, temp_db, tracks, policy_name):
     db.save_playlist_state(playlist=tracks, index=1, loop=True, active=True)
