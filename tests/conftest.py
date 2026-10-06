@@ -54,6 +54,26 @@ point_database_at(_SESSION_DB_PATH)
 database.init_database()
 
 
+import time  # noqa: E402
+
+_REAL_MONOTONIC = time.monotonic
+_LONG_UPTIME_SECONDS = 1_000_000.0
+
+
+@pytest.fixture(autouse=True)
+def _long_uptime_monotonic(monkeypatch):
+    """Run every test as if the machine had been up for a long time.
+
+    On Linux time.monotonic() is roughly uptime. Tests (and some code) build
+    baselines like `time.monotonic() - 65` or treat 0.0 as "never"; on a
+    freshly booted CI runner those go negative and tests fail at random
+    (see 5d2ee2d). Production Pis run for weeks, so shift the clock by a
+    constant: still monotonic, intervals unchanged. Nothing imports
+    monotonic directly (`from time import ...`), so one patch covers all.
+    """
+    monkeypatch.setattr(time, "monotonic", lambda: _REAL_MONOTONIC() + _LONG_UPTIME_SECONDS)
+
+
 @pytest.fixture
 def repoint_db():
     """`point_database_at` for tests; combine with `temp_db` so it gets restored."""
