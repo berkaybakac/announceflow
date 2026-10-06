@@ -50,6 +50,23 @@ jobs:
           Write-Host "PASS: EXE built successfully"
         shell: pwsh
 
+      - name: Smoke test - EXE self-test
+        working-directory: agent
+        shell: pwsh
+        timeout-minutes: 5
+        run: |
+          $out = Join-Path (Get-Location) "selftest.txt"
+          $p = Start-Process -FilePath "dist\StatekSound.exe" -ArgumentList @("--self-test", "`"$out`"") -Wait -PassThru
+          if (!(Test-Path $out)) {
+            Write-Error "Self-test wrote no report (exit $($p.ExitCode))"
+            exit 1
+          }
+          Get-Content $out
+          if (-not (Select-String -Path $out -Pattern "^RESULT=PASS$" -Quiet)) {
+            Write-Error "Self-test failed (exit $($p.ExitCode))"
+            exit 1
+          }
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:

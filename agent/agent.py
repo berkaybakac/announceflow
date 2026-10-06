@@ -3021,8 +3021,60 @@ class AgentGUI:
                 widget.destroy()
 
 
+# Modules the EXE needs at runtime. soundcard/numpy are imported lazily when
+# a stream starts, so a bundle missing them would only fail at a customer's
+# first stream; --self-test imports them up front.
+_SELF_TEST_MODULES = [
+    "soundcard",
+    "numpy",
+    "keyring",
+    "keyring.errors",
+    "requests",
+    "psutil",
+    "tkinter",
+    "stream_client",
+    "credential_manager",
+]
+if os.name == "nt":
+    _SELF_TEST_MODULES.append("keyring.backends.Windows")
+
+
+def _self_test_output_path(argv) -> Optional[str]:
+    """Return the --self-test output path, or None when not requested."""
+    if "--self-test" not in argv:
+        return None
+    idx = argv.index("--self-test")
+    return argv[idx + 1] if idx + 1 < len(argv) else "selftest.txt"
+
+
+def run_self_test(out_path: str, import_module=None) -> int:
+    """Import every runtime module and write a PASS/FAIL report to out_path.
+
+    Writes to a file because the windowed (--noconsole) EXE has no stdout.
+    """
+    import importlib
+
+    import_module = import_module or importlib.import_module
+    lines = [f"version={AGENT_VERSION}"]
+    ok = True
+    for name in _SELF_TEST_MODULES:
+        try:
+            import_module(name)
+            lines.append(f"{name}: ok")
+        except Exception as exc:  # report every failure, keep going
+            ok = False
+            lines.append(f"{name}: error: {type(exc).__name__}: {exc}")
+    lines.append("RESULT=PASS" if ok else "RESULT=FAIL")
+    with open(out_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+    return 0 if ok else 1
+
+
 def main():
     """Main entry point."""
+    self_test_path = _self_test_output_path(sys.argv)
+    if self_test_path is not None:
+        sys.exit(run_self_test(self_test_path))
     setup_agent_logging()
     logger.info("AnnounceFlow Agent starting")
     agent = AnnounceFlowAgent()
