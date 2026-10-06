@@ -1,7 +1,10 @@
 """Tests for observability log additions: system_health, playlist summaries,
 daily_usage_summary, xrun_snapshot, and jitter_anomaly."""
+import platform
 import time
 from unittest.mock import MagicMock, patch
+
+import pytest
 
 from scheduler import Scheduler
 from player import AudioPlayer
@@ -10,6 +13,8 @@ from _stream_receiver import (
     _log_jitter_anomaly,
     _XRUN_SNAPSHOT_INTERVAL,
     _JITTER_ANOMALY_INTERVAL,
+    _read_process_rss_mb,
+    _emit_memory_probe_sample,
 )
 
 
@@ -552,3 +557,50 @@ class TestAnnouncementQueueHealthLog:
         sched._log_announcement_queue_health()
 
         assert len(calls) == 2, "Ceiling of 0 should force a log every call"
+
+
+# ---------------------------------------------------------------------------
+# memory probe (backlog.md P0 — chronic xrun investigation)
+# ---------------------------------------------------------------------------
+
+class TestMemoryProbe:
+    @pytest.mark.skipif(platform.system() != "Linux", reason="/proc RSS reading is Linux-only")
+    def test_read_process_rss_mb_returns_positive_for_self(self):
+        """Reading our own PID's RSS should return a real positive value."""
+        import os
+        rss = _read_process_rss_mb(os.getpid())
+        assert rss > 0
+
+    def test_read_process_rss_mb_returns_negative_one_for_bad_pid(self):
+        """A nonexistent PID should fail closed, not raise."""
+        assert _read_process_rss_mb(999999999) == -1
+
+    @pytest.mark.skipif(platform.system() != "Linux", reason="/proc RSS reading is Linux-only")
+    def test_emit_memory_probe_sample_logs_expected_fields(self, monkeypatch):
+        """Sample should log regardless of xrun state, with both process RSS values."""
+        import os
+        import _stream_receiver as mod
+        calls = []
+        monkeypatch.setattr(mod, "_safe_log_system", lambda event, data: calls.append((event, data)))
+
+        counters = {"alsa_xrun": 0, "udp_overrun": 0}
+        _emit_memory_probe_sample(os.getpid(), counters, "test-cid", time.monotonic() - 5)
+
+        assert len(calls) == 1
+        assert calls[0][0] == "stream_memory_probe"
+        data = calls[0][1]
+        assert data["correlation_id"] == "test-cid"
+        assert data["receiver_rss_mb"] > 0
+        assert data["elapsed_s"] >= 5
+        assert data["alsa_xrun_so_far"] == 0
+
+    def test_emit_memory_probe_sample_never_raises_on_bad_ffmpeg_pid(self, monkeypatch):
+        """A dead/invalid ffmpeg pid must not crash the probe loop."""
+        import _stream_receiver as mod
+        calls = []
+        monkeypatch.setattr(mod, "_safe_log_system", lambda event, data: calls.append((event, data)))
+
+        _emit_memory_probe_sample(999999999, {"alsa_xrun": 1}, "test-cid", time.monotonic())
+
+        assert len(calls) == 1
+        assert calls[0][1]["ffmpeg_rss_mb"] == -1

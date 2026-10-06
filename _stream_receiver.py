@@ -232,6 +232,18 @@ def _read_proc_stat_snapshot() -> dict:
     return snapshot
 
 
+def _read_process_rss_mb(pid: int) -> int:
+    """Read one process's resident memory (RSS) in MB from /proc. -1 if unavailable."""
+    try:
+        with open(f"/proc/{pid}/status") as f:
+            for line in f:
+                if line.startswith("VmRSS:"):
+                    return int(line.split()[1]) // 1024
+    except Exception:
+        pass
+    return -1
+
+
 # Xrun status file: receiver writes current count so StreamManager can read it.
 _XRUN_STATUS_DIR = os.environ.get("ANNOUNCEFLOW_LOG_DIR", "").strip() or os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "logs"
@@ -951,6 +963,50 @@ def _ping_sender_loop(sender_ip: str, stop_event: threading.Event) -> None:
             
         time.sleep(10)
 
+def _emit_memory_probe_sample(
+    ffmpeg_pid: int,
+    counters: Dict[str, Any],
+    correlation_id: str,
+    started_mono: float,
+) -> None:
+    """One unconditional memory sample — independent of xrun events.
+
+    xrun_snapshot/jitter_anomaly only sample memory WHEN an xrun fires, so a
+    clean (0-xrun) session gives zero visibility, and cause vs. effect can't
+    be told apart. Split by process (ffmpeg vs. this receiver), so a real
+    leak shows up as a trend even on sessions that never trip an xrun.
+    See backlog.md P0.
+    """
+    try:
+        snap = _read_proc_stat_snapshot()
+        _safe_log_system(
+            "stream_memory_probe",
+            {
+                "correlation_id": correlation_id,
+                "elapsed_s": round(time.monotonic() - started_mono, 1),
+                "mem_available_mb": snap.get("mem_available_mb", -1),
+                "ffmpeg_rss_mb": _read_process_rss_mb(ffmpeg_pid),
+                "receiver_rss_mb": _read_process_rss_mb(os.getpid()),
+                "alsa_xrun_so_far": counters.get("alsa_xrun", 0),
+                "udp_overrun_so_far": counters.get("udp_overrun", 0),
+            },
+        )
+    except Exception as exc:
+        _emit_internal_diag("memory_probe_failed", f"memory_probe_failed error={exc}")
+
+
+def _periodic_memory_probe_loop(
+    ffmpeg_pid: int,
+    counters: Dict[str, Any],
+    correlation_id: str,
+    started_mono: float,
+    stop_event: threading.Event,
+) -> None:
+    """Fixed-cadence (~20s) wrapper around `_emit_memory_probe_sample`."""
+    while not stop_event.wait(20.0):
+        _emit_memory_probe_sample(ffmpeg_pid, counters, correlation_id, started_mono)
+
+
 def _health_receiver_loop(port: int, stop_event: threading.Event) -> None:
     """Listen for UDP health telemetry packets from the sender."""
     import socket
@@ -1156,6 +1212,13 @@ def main():
 
     # Start health sidechannel receiver
     health_stop_event = threading.Event()
+
+    memory_probe_thread = threading.Thread(
+        target=_periodic_memory_probe_loop,
+        args=(proc.pid, counters, correlation_id, started_mono, health_stop_event),
+        daemon=True,
+    )
+    memory_probe_thread.start()
     health_thread = threading.Thread(
         target=_health_receiver_loop,
         args=(port + 1, health_stop_event),
