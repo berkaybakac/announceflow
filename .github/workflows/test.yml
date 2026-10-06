@@ -29,3 +29,39 @@ jobs:
 
       - name: Run tests
         run: python -m pytest -q
+
+  # Field Pis run Raspberry Pi OS trixie (Python 3.13) and install
+  # requirements the way deploy.sh does (desktop-only packages filtered out).
+  pytest-pi:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies (as deploy.sh on the Pi)
+        run: |
+          grep -vE 'pygame|pyinstaller|altgraph|macholib|pefile' requirements.txt > requirements_pi.txt
+          pip install -r requirements_pi.txt
+          pip install -r requirements-dev.txt
+
+      - name: Run tests
+        run: python -m pytest -q
+
+  # Undefined names and syntax errors only: these crash on the device the
+  # first time the line runs, and tests may not reach every line.
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Ruff (undefined names, syntax)
+        run: |
+          pip install ruff==0.15.12
+          ruff check --select F821,F822,F823,E9 $(git ls-files '*.py')
