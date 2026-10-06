@@ -216,6 +216,11 @@ def main() -> int:
                 "duration_seconds": None,
                 "return_code": None,
                 "exit_class": None,
+                # Summed over receiver segments: a stream resumed after an
+                # announcement/prayer keeps its correlation_id.
+                "segments": 0,
+                "sum_alsa_xrun": 0,
+                "sum_udp_overrun": 0,
             },
         )
 
@@ -227,24 +232,29 @@ def main() -> int:
         elif event == "stream_receiver_summary":
             if ts is not None:
                 row["receiver_summary_ts"] = ts
-            row["first_input_at"] = _parse_ts(data.get("first_input_at"))
-            row["first_output_at"] = _parse_ts(data.get("first_output_at"))
-            row["udp_overrun"] = int(data.get("udp_overrun") or 0)
-            row["alsa_xrun"] = int(data.get("alsa_xrun") or 0)
-            peak_1s = data.get("xrun_peak_1s")
-            peak_60s = data.get("xrun_peak_60s")
-            max_consecutive = data.get("xrun_max_consecutive")
-            session_rate = data.get("xrun_session_rate_per_sec")
-            burst_rate = data.get("xrun_burst_rate_per_sec")
-            row["xrun_peak_1s"] = _to_int_or_none(peak_1s)
-            row["xrun_peak_60s"] = _to_int_or_none(peak_60s)
-            row["xrun_max_consecutive"] = _to_int_or_none(max_consecutive)
-            row["xrun_session_rate_per_sec"] = _to_float_or_none(session_rate)
-            row["xrun_burst_rate_per_sec"] = _to_float_or_none(burst_rate)
-            row["demux_errors"] = int(data.get("demux_errors") or 0)
-            row["immediate_exit"] = int(data.get("immediate_exit") or 0)
+            first_segment = row["segments"] == 0
+            row["segments"] += 1
+            if first_segment or row["first_input_at"] is None:
+                row["first_input_at"] = _parse_ts(data.get("first_input_at"))
+            if first_segment or row["first_output_at"] is None:
+                row["first_output_at"] = _parse_ts(data.get("first_output_at"))
+            row["sum_udp_overrun"] += int(data.get("udp_overrun") or 0)
+            row["sum_alsa_xrun"] += int(data.get("alsa_xrun") or 0)
+            for key in ("xrun_peak_1s", "xrun_peak_60s", "xrun_max_consecutive"):
+                value = _to_int_or_none(data.get(key))
+                if value is not None:
+                    row[key] = value if row[key] is None else max(row[key], value)
+            burst_rate = _to_float_or_none(data.get("xrun_burst_rate_per_sec"))
+            if burst_rate is not None:
+                previous = row["xrun_burst_rate_per_sec"]
+                row["xrun_burst_rate_per_sec"] = burst_rate if previous is None else max(previous, burst_rate)
+            row["demux_errors"] += int(data.get("demux_errors") or 0)
+            row["immediate_exit"] += int(data.get("immediate_exit") or 0)
             duration = data.get("duration_seconds")
-            row["duration_seconds"] = float(duration) if duration is not None else None
+            if duration is not None:
+                row["duration_seconds"] = (row["duration_seconds"] or 0.0) + float(duration)
+            if first_segment:  # recomputed from totals below for multi-segment sessions
+                row["xrun_session_rate_per_sec"] = _to_float_or_none(data.get("xrun_session_rate_per_sec"))
             row["return_code"] = data.get("return_code")
             row["exit_class"] = data.get("exit_class")
         elif event == "stream_receiver_first_input":
@@ -263,6 +273,15 @@ def main() -> int:
             row["exit_class"] = data.get("exit_class") or "unexpected"
             if row.get("return_code") is None:
                 row["return_code"] = data.get("return_code")
+
+    for row in rows.values():
+        if row["segments"]:
+            # Summary totals are authoritative; per-segment alarm events only
+            # fill in sessions that never wrote a summary.
+            row["alsa_xrun"] = row["sum_alsa_xrun"]
+            row["udp_overrun"] = row["sum_udp_overrun"]
+            if row["segments"] > 1 and row["duration_seconds"]:
+                row["xrun_session_rate_per_sec"] = row["alsa_xrun"] / row["duration_seconds"]
 
     ordered = sorted(
         rows.values(),

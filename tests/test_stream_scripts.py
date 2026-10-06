@@ -264,3 +264,31 @@ def test_stream_telemetry_report_diagnose_prints_likely_owner(tmp_path):
     assert proc.returncode == 0
     assert "=== DIAGNOSE ===" in proc.stdout
     assert "cid-diag | network_jitter_burst | customer_network" in proc.stdout
+
+
+def test_stream_telemetry_report_sums_receiver_segments_of_one_session(tmp_path):
+    """A stream paused for an announcement and resumed keeps its correlation_id
+    but gets a new receiver segment; the report kept only the last segment."""
+    events_file = tmp_path / "events.jsonl"
+
+    def summary(ts, xrun, peak, duration, overrun=0):
+        return {"ts": ts, "cat": "SYSTEM", "event": "stream_receiver_summary",
+                "data": {"correlation_id": "cid-seg", "alsa_xrun": xrun, "udp_overrun": overrun,
+                         "xrun_peak_1s": peak, "xrun_peak_60s": peak, "xrun_max_consecutive": 1,
+                         "xrun_session_rate_per_sec": 0.0, "xrun_burst_rate_per_sec": 0.0,
+                         "duration_seconds": duration, "return_code": 0}}
+
+    rows = [
+        summary("2026-09-01T09:30:00.000Z", 10, 7, 1800.0, overrun=1),
+        # per-segment alarm event emitted next to the summary: must not double count
+        {"ts": "2026-09-01T09:30:00.100Z", "cat": "ERROR", "event": "stream_receiver_alsa_xrun",
+         "data": {"correlation_id": "cid-seg", "xrun_count": 10}},
+        summary("2026-09-01T10:00:00.000Z", 5, 3, 1200.0),
+    ]
+    events_file.write_text("\n".join(json.dumps(r) for r in rows) + "\n", encoding="utf-8")
+
+    proc = _run_script("scripts/stream_telemetry_report.py", "--file", str(events_file), "--compact")
+    assert proc.returncode == 0
+    # 15 xruns total, peak is the max of segments, duration summed, rate = 15/3000
+    assert "cid-seg | 15 | 7 | 7 | 1 | 0.005 |" in proc.stdout
+    assert "| 3000.000 |" in proc.stdout

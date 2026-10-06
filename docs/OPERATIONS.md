@@ -191,6 +191,11 @@ scripts\preflight_windows_audio.cmd
 scripts\collect_windows_agent_logs.ps1 -LastMinutes 180
 ```
 
+The bundle includes rotated agent logs and `power_events.csv` (last 7 days
+of Windows sleep/wake events; `-PowerEventDays` to change). On the Pi side,
+`stream_heartbeat_expired` (`elapsed_s`) and `stream_agent_heartbeat_returned`
+(`offline_after_expiry_s`) show when the sender vanished and for how long.
+
 Pattern triage:
 1. `stream_xrun_auto_restart` near restart time:
    xrun policy is actively restarting.

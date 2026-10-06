@@ -1,6 +1,7 @@
 param(
     [int]$LastMinutes = 120,
-    [string]$OutputDir = ""
+    [string]$OutputDir = "",
+    [int]$PowerEventDays = 7
 )
 
 $ErrorActionPreference = "Stop"
@@ -21,13 +22,29 @@ $null = New-Item -ItemType Directory -Path $stageDir -Force
 
 $cutoff = (Get-Date).AddMinutes(-1 * [math]::Abs($LastMinutes))
 
-# Copy main log files (if present)
-$mainLogs = @("agent.log", "agent_stream.log")
-foreach ($name in $mainLogs) {
-    $src = Join-Path $logsRoot $name
-    if (Test-Path $src) {
-        Copy-Item -Path $src -Destination (Join-Path $stageDir $name) -Force
-    }
+# Copy agent logs including rotated backups (agent.log.1, agent_stream.log.3, ...)
+Get-ChildItem -Path $logsRoot -Filter "agent*.log*" -File | ForEach-Object {
+    Copy-Item -Path $_.FullName -Destination (Join-Path $stageDir $_.Name) -Force
+}
+
+# Windows sleep/wake evidence for "stream dropped" reports: Kernel-Power
+# (42 = entering sleep, 107 = resumed, 41 = unexpected shutdown) and
+# Power-Troubleshooter (1 = woke up, with sleep/wake times).
+$powerEventCount = 0
+try {
+    $powerEvents = Get-WinEvent -FilterHashtable @{
+        LogName      = "System"
+        ProviderName = @("Microsoft-Windows-Kernel-Power", "Microsoft-Windows-Power-Troubleshooter")
+        StartTime    = (Get-Date).AddDays(-1 * [math]::Abs($PowerEventDays))
+    } -ErrorAction Stop
+    $powerEvents |
+        Select-Object TimeCreated, Id, ProviderName, @{Name = "Message"; Expression = { ($_.Message -split "`r?`n")[0] } } |
+        Export-Csv -Path (Join-Path $stageDir "power_events.csv") -NoTypeInformation -Encoding UTF8
+    $powerEventCount = @($powerEvents).Count
+}
+catch {
+    "power events unavailable: $($_.Exception.Message)" |
+        Set-Content -Path (Join-Path $stageDir "power_events_unavailable.txt") -Encoding UTF8
 }
 
 # Copy stream attempt JSON files
@@ -95,6 +112,8 @@ $meta = [PSCustomObject]@{
     last_minutes   = $LastMinutes
     cutoff         = $cutoff.ToString("s")
     attempt_count  = $attemptFiles.Count
+    power_event_days  = $PowerEventDays
+    power_event_count = $powerEventCount
 }
 $meta | ConvertTo-Json -Depth 3 | Set-Content -Path (Join-Path $stageDir "meta.json") -Encoding UTF8
 
