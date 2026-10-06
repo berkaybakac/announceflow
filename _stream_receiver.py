@@ -167,6 +167,10 @@ _last_jitter_anomaly_mono: float = 0.0
 _last_xrun_snapshot_mono: float = 0.0
 _XRUN_SNAPSHOT_INTERVAL: float = 30.0
 _JITTER_ANOMALY_INTERVAL: float = 60.0
+# Per-line ffmpeg warnings (resync/discontinuity) can repeat at the input
+# packet rate; exact counts live in `counters`, event lines are capped.
+_THROTTLED_WARN_INTERVAL: float = 60.0
+_last_throttled_warn_mono: Dict[str, float] = {}
 
 
 def _emit_internal_diag(key: str, message: str) -> None:
@@ -532,6 +536,16 @@ def _log_jitter_anomaly(
     )
 
 
+def _log_warn_throttled(event: str, correlation_id: str, text: str, count_so_far: int) -> None:
+    """Log the first occurrence, then at most one line per interval per event."""
+    now = time.monotonic()
+    last = _last_throttled_warn_mono.get(event)
+    if last is not None and now - last < _THROTTLED_WARN_INTERVAL:
+        return
+    _last_throttled_warn_mono[event] = now
+    log_warn(event, {"correlation_id": correlation_id, "text": text, "count_so_far": count_so_far})
+
+
 def _log_xrun_snapshot(counters: Dict[str, Any], correlation_id: str) -> None:
     """Log a system-state snapshot at the moment of an ALSA xrun.
 
@@ -831,11 +845,13 @@ def _process_ffmpeg_line(
     if "connection refused" in lower:
         counters["connection_errors"] += 1
     if "resyncing" in lower and "aresample" in lower:
-        counters["clock_resync_count"] += 1
-        log_warn("stream_clock_resync", {"correlation_id": correlation_id, "text": text})
+        counters["clock_resync_count"] = counters.get("clock_resync_count", 0) + 1
+        _log_warn_throttled("stream_clock_resync", correlation_id, text, counters["clock_resync_count"])
     if "discontinuity" in lower or "dts mismatch" in lower:
-        counters["input_discontinuity_count"] += 1
-        log_warn("stream_input_discontinuity", {"correlation_id": correlation_id, "text": text})
+        counters["input_discontinuity_count"] = counters.get("input_discontinuity_count", 0) + 1
+        _log_warn_throttled(
+            "stream_input_discontinuity", correlation_id, text, counters["input_discontinuity_count"]
+        )
 
     if not line_has_xrun:
         counters["xrun_current_consecutive"] = 0
@@ -1052,7 +1068,7 @@ def _health_receiver_loop(port: int, stop_event: threading.Event) -> None:
 _DEFAULT_RECEIVER_NICE = -10
 
 
-def _apply_receiver_priority() -> None:
+def _apply_receiver_priority(correlation_id: str = "") -> None:
     """Niceness boost for this process + ffmpeg child (fork inherits it).
     On by default (validated 2026-09). Set ANNOUNCEFLOW_STREAM_RECEIVER_NICE=0
     to disable. Not SCHED_FIFO/RR — stays in fair scheduler, reversible.
@@ -1076,21 +1092,21 @@ def _apply_receiver_priority() -> None:
         new_nice = os.nice(value)
         _safe_log_system(
             "stream_receiver_priority_applied",
-            {"requested_delta": value, "resulting_nice": new_nice},
+            {"requested_delta": value, "resulting_nice": new_nice, "correlation_id": correlation_id},
         )
     except OSError as exc:
         _safe_log_system(
             "stream_receiver_priority_failed",
-            {"requested_delta": value, "error": str(exc)},
+            {"requested_delta": value, "error": str(exc), "correlation_id": correlation_id},
         )
 
 
 def main():
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 5800
-    _apply_receiver_priority()
+    correlation_id = _resolve_correlation_id()
+    _apply_receiver_priority(correlation_id)
     ffmpeg_bin = _find_ffmpeg()
     alsa_device = _resolve_alsa_device()
-    correlation_id = _resolve_correlation_id()
 
     udp_input_url = _build_udp_input_url(port)
     cmd = [
@@ -1182,6 +1198,8 @@ def main():
         "stream_receiver_started",
         {
             "correlation_id": correlation_id,
+            # Same pid as stream_receiver_stop_reason (StreamManager's Popen).
+            "pid": os.getpid(),
             "port": port,
             "alsa_device": alsa_device,
             "udp_input": udp_input_url,

@@ -17,7 +17,7 @@ import os
 import threading
 import time
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Tuple
 
 import database as db
 from logger import log_error, log_system
@@ -295,6 +295,10 @@ class StreamService:
         self._command_status: str = "idle"  # idle|pending|applied|failed|expired
         self._command_error: Optional[str] = None
         self._agent_registry: Dict[str, Dict[str, Any]] = {}
+        # device_id -> (wall-clock expiry time, correlation_id) for senders
+        # whose heartbeats stopped; used to log how long they were gone
+        # (PC sleep) when they come back.
+        self._heartbeat_expired_at: Dict[str, Tuple[float, Optional[str]]] = {}
         # Xrun auto-restart: rolling window tracking
         self._xrun_last_known_count: int = 0
         self._xrun_window_start_mono: float = 0.0
@@ -339,6 +343,7 @@ class StreamService:
         should_stop = False
         evicted_device = None
         evicted_cid = None
+        elapsed = 0.0
         with self._lock:
             if (
                 self._status.active
@@ -350,6 +355,8 @@ class StreamService:
                     should_stop = True
                     evicted_device = self._active_device_id
                     evicted_cid = self._active_correlation_id
+                    if evicted_device:
+                        self._heartbeat_expired_at[evicted_device] = (time.time(), evicted_cid)
         if should_stop:
             logger.warning(
                 "StreamService: heartbeat expired (device=%s, cid=%s), auto-stopping",
@@ -358,7 +365,11 @@ class StreamService:
             )
             log_system(
                 "stream_heartbeat_expired",
-                {"device_id": evicted_device, "correlation_id": evicted_cid},
+                {
+                    "device_id": evicted_device,
+                    "correlation_id": evicted_cid,
+                    "elapsed_s": round(elapsed, 1),
+                },
             )
             self.stop(
                 caller="stream_service._check_heartbeat",
@@ -1545,6 +1556,17 @@ class StreamService:
                     }
                     self._agent_registry[request_device_id] = meta
                 meta["last_seen_at"] = now_epoch
+                expired = self._heartbeat_expired_at.pop(request_device_id, None)
+                if expired is not None:
+                    expired_at, expired_cid = expired
+                    log_system(
+                        "stream_agent_heartbeat_returned",
+                        {
+                            "device_id": request_device_id,
+                            "expired_correlation_id": expired_cid,
+                            "offline_after_expiry_s": round(max(0.0, now_epoch - expired_at), 1),
+                        },
+                    )
                 if request_device_name:
                     meta["device_name"] = request_device_name
                     if request_device_id == self._preferred_device_id:

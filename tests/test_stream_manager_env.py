@@ -407,3 +407,21 @@ def test_stop_receiver_logs_graceful_quick_reason(monkeypatch, fake_popen):
             and c.args[1].get("request_reason") == "unit_test_graceful"
             for c in mock_log_system.call_args_list
         )
+
+
+def test_stop_reason_carries_correlation_id_of_the_stopped_receiver(monkeypatch, fake_popen_timeout):
+    """stop_reason had a pid but no correlation_id, so it couldn't be joined
+    to the session it ended."""
+    with patch("stream_manager.log_system") as mock_log_system:
+        mgr = StreamManager(port=5800)
+        assert mgr.start_receiver(correlation_id="cid-join") is True
+        assert mgr.stop_receiver() is True
+        deadline = time.monotonic() + 2
+        while time.monotonic() < deadline:
+            reasons = [c.args[1] for c in mock_log_system.call_args_list
+                       if c.args and c.args[0] == "stream_receiver_stop_reason"]
+            if reasons:
+                break
+            time.sleep(0.05)
+        assert reasons
+        assert all(r.get("correlation_id") == "cid-join" for r in reasons)

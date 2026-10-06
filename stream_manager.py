@@ -102,6 +102,9 @@ class StreamManager:
         data = {"reason": reason, "port": self._port}
         if proc is not None:
             data["pid"] = getattr(proc, "pid", None)
+            cid = getattr(proc, "af_correlation_id", None)
+            if cid:
+                data["correlation_id"] = cid
         if phase:
             data["phase"] = phase
         if error:
@@ -244,6 +247,11 @@ class StreamManager:
                         return False
                 # Receiver alive — drain stderr in background to prevent pipe buffer deadlock
                 self._start_stderr_drain(self._process)
+                # Lets stop telemetry name the session it ended.
+                try:
+                    self._process.af_correlation_id = correlation_id
+                except AttributeError:
+                    pass
                 logger.info(
                     "StreamManager: receiver started (pid=%d, port=%d, correlation_id=%s)",
                     self._process.pid,

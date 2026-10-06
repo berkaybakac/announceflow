@@ -36,10 +36,11 @@ def test_applies_configured_delta(monkeypatch):
         receiver, "_safe_log_system", lambda event, data: events.append((event, data))
     )
 
-    receiver._apply_receiver_priority()
+    receiver._apply_receiver_priority("cid-prio")
 
     assert events == [
-        ("stream_receiver_priority_applied", {"requested_delta": -10, "resulting_nice": -10})
+        ("stream_receiver_priority_applied",
+         {"requested_delta": -10, "resulting_nice": -10, "correlation_id": "cid-prio"})
     ]
 
 

@@ -1303,3 +1303,47 @@ class TestStreamMiniGate:
         client.post("/api/stream/stop")
         resp3 = client.get("/api/stream/status")
         assert resp3.get_json()["active"] is False
+
+
+class TestHeartbeatGapTelemetry:
+    """Make PC sleep visible: how long was the sender gone, and did it come back?"""
+
+    def _events(self, mock_log_system, name):
+        return [c.args[1] for c in mock_log_system.call_args_list if c.args and c.args[0] == name]
+
+    @patch("services.stream_service.log_system")
+    def test_expiry_logs_elapsed_and_return_logs_offline_gap(
+        self, mock_log_system, mock_manager, mock_player, monkeypatch
+    ):
+        wall = [1_000_000.0]
+        monkeypatch.setattr("services.stream_service.time.time", lambda: wall[0])
+        svc = _make_service(mock_manager, mock_player)
+        svc.start(correlation_id="cid-sleep", device_id="dev-1")
+        svc.heartbeat(device_id="dev-1")
+        svc._last_heartbeat_at = time.monotonic() - (HEARTBEAT_TIMEOUT + 3)
+
+        assert svc._check_heartbeat() is True
+        (expired,) = self._events(mock_log_system, "stream_heartbeat_expired")
+        assert expired["device_id"] == "dev-1"
+        assert expired["correlation_id"] == "cid-sleep"
+        assert expired["elapsed_s"] >= HEARTBEAT_TIMEOUT + 3
+
+        wall[0] += 1800  # PC asleep for 30 min
+        svc.heartbeat(device_id="dev-1")
+        svc.heartbeat(device_id="dev-1")  # logged once, not per heartbeat
+
+        (returned,) = self._events(mock_log_system, "stream_agent_heartbeat_returned")
+        assert returned["device_id"] == "dev-1"
+        assert returned["expired_correlation_id"] == "cid-sleep"
+        assert returned["offline_after_expiry_s"] == 1800.0
+
+    @patch("services.stream_service.log_system")
+    def test_other_devices_heartbeats_do_not_log_return(self, mock_log_system, mock_manager, mock_player):
+        svc = _make_service(mock_manager, mock_player)
+        svc.start(correlation_id="cid-x", device_id="dev-1")
+        svc.heartbeat(device_id="dev-1")
+        svc._last_heartbeat_at = time.monotonic() - (HEARTBEAT_TIMEOUT + 1)
+        svc._check_heartbeat()
+
+        svc.heartbeat(device_id="dev-2")
+        assert self._events(mock_log_system, "stream_agent_heartbeat_returned") == []

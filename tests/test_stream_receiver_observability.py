@@ -474,3 +474,36 @@ def test_stop_process_process_lookup_error():
     
     proc.terminate.assert_called_once()
     proc.kill.assert_called_once()
+
+
+def test_resync_and_discontinuity_warnings_are_throttled(monkeypatch):
+    """These matched every ffmpeg line and were logged unthrottled: a burst at
+    the 60 pkt/s input rate could roll the whole 50 MB events history over in
+    about an hour. Counts stay exact; event lines are capped at one per 60 s."""
+    calls = []
+    monkeypatch.setattr(receiver, "log_warn", lambda event, data: calls.append((event, data)))
+    receiver._last_throttled_warn_mono.clear()
+    now = [5000.0]
+    monkeypatch.setattr(receiver.time, "monotonic", lambda: now[0])
+
+    counters = _new_counters()
+    counters["clock_resync_count"] = 0
+    counters["input_discontinuity_count"] = 0
+    buf = io.StringIO()
+    for _ in range(100):
+        receiver._process_ffmpeg_line("[aresample @ 0x1] Resyncing, timestamp jump", buf, counters,
+                                      correlation_id="cid-1")
+        receiver._process_ffmpeg_line("[in @ 0x2] DTS discontinuity in stream 0", buf, counters,
+                                      correlation_id="cid-1")
+        now[0] += 0.1  # 10 s in total
+
+    assert counters["clock_resync_count"] == 100
+    assert counters["input_discontinuity_count"] == 100
+    assert [e for e, _ in calls] == ["stream_clock_resync", "stream_input_discontinuity"]
+
+    now[0] += 60.0
+    receiver._process_ffmpeg_line("[aresample @ 0x1] Resyncing again", buf, counters, correlation_id="cid-1")
+    assert calls[-1][0] == "stream_clock_resync"
+    assert calls[-1][1]["count_so_far"] == 101
+    assert calls[-1][1]["correlation_id"] == "cid-1"
+    assert len(calls) == 3
