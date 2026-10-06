@@ -71,3 +71,6 @@ docs/*
 # Windows audio driver artifacts
 agent/VBCABLE_Driver_Pack45/
 agent/VBCABLE_Setup_x64.exe
+
+# Local generated assets (marketing images, scratch output)
+output/
