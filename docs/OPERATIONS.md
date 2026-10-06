@@ -113,15 +113,22 @@ remove that override too; environment values replace `config.json` on restart.
 
 ## Analyzing a Pulled Field Dump
 
-Pull logs/DB from a device (adjust host/path):
+Pull logs and a consistent DB snapshot from a device (read-only; config.json
+and .env are not copied):
 
 ```bash
-rsync -avz admin@<host>:announceflow/logs/ ./dump/logs/
-rsync -avz admin@<host>:announceflow/announceflow.log* ./dump/
-rsync -avz admin@<host>:announceflow/announceflow.db* ./dump/
+scripts/pull_dump.sh <host> ~/announceflow-dumps
 ```
 
-Then, from inside `./dump/`:
+Usage report (active days, stream hours and quality, music, announcements,
+panel logins) for one or more dumps; works on pre-v2.4.0 devices too:
+
+```bash
+python3 scripts/usage_report.py --dir ~/announceflow-dumps/<host>-<date> \
+  [--dir ...] [--since 2026-07-01] [--json report.json]
+```
+
+Then, from inside the dump directory:
 
 ```bash
 python3 /path/to/repo/diagnose.py 100000 --dir .          # health scoreboard
