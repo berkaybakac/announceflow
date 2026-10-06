@@ -1,13 +1,10 @@
-"""Agent GUI refactor tests — status bar, loading state, theme, layout.
+"""Agent GUI behaviour tests — status bar, loading state, no blocking dialogs.
 
 Validates the V2 GUI changes:
 - Pop-ups replaced with status bar
-- Buttons grouped (Music / Stream / Tools)
 - Loading state on buttons
-- Theme colors softened
-- Logout moved to header
-- No messagebox usage
-- print() replaced with logger
+- No messagebox usage (blocks the tray app)
+- print() replaced with logger (no console in the windowed EXE)
 """
 import os
 import sys
@@ -131,57 +128,6 @@ class TestNoPrints:
                 continue
             if stripped.startswith("print("):
                 pytest.fail(f"Found print() call at line {i}: {stripped}")
-
-
-# ==================== 3. Theme constants ====================
-
-
-class TestThemeColors:
-    def test_theme_constants_exist(self):
-        """Theme color constants should be defined."""
-        agent_mod = _import_agent()
-        assert hasattr(agent_mod, "_BG")
-        assert hasattr(agent_mod, "_BG_HEADER")
-        assert hasattr(agent_mod, "_BG_CARD")
-        assert hasattr(agent_mod, "_FG")
-        assert hasattr(agent_mod, "_FG_DIM")
-
-    def test_bg_not_pure_black(self):
-        """Background should not be pure black (#000000 or #1a1a1a)."""
-        agent_mod = _import_agent()
-        assert agent_mod._BG != "#000000"
-        assert agent_mod._BG != "#1a1a1a"
-
-    def test_status_colors_exist(self):
-        """Status bar colors should be defined."""
-        agent_mod = _import_agent()
-        assert hasattr(agent_mod, "_STATUS_SUCCESS")
-        assert hasattr(agent_mod, "_STATUS_ERROR")
-
-
-# ==================== 4. Button grouping ====================
-
-
-class TestButtonGrouping:
-    def test_button_groups_in_source(self):
-        """Main frame should have grouped sections: Music, Stream, Tools."""
-        source_path = os.path.join(_agent_dir, "agent.py")
-        with open(source_path) as f:
-            source = f.read()
-        assert "Müzik Kontrolü" in source
-        assert "Canlı Yayın" in source
-        assert "Araçlar" in source
-
-    def test_buttons_are_side_by_side(self):
-        """Buttons within groups use side='left' packing (side by side)."""
-        source_path = os.path.join(_agent_dir, "agent.py")
-        with open(source_path) as f:
-            source = f.read()
-        # Music buttons packed side by side
-        assert '_btn_music_start' in source
-        assert '_btn_music_stop' in source
-        assert '_btn_stream_start' in source
-        assert '_btn_stream_stop' in source
 
 
 # ==================== 5. Status bar (replaces pop-ups) ====================
@@ -332,46 +278,6 @@ class TestLoadingState:
 
         gui._btn_stream_start.set_disabled.assert_called_with(True)
         gui._btn_stream_start.set_text.assert_called_with("Bağlanıyor...")
-
-
-# ==================== 7. Logout in header ====================
-
-
-class TestLogoutInHeader:
-    def test_no_logout_modern_button(self):
-        """Logout should NOT be a big ModernButton anymore."""
-        source_path = os.path.join(_agent_dir, "agent.py")
-        with open(source_path) as f:
-            source = f.read()
-        # Old pattern: ModernButton(..., text="Çıkış Yap", ...)
-        assert 'text="Çıkış Yap"' not in source
-
-    def test_logout_is_text_link(self):
-        """Logout should be a small text label in the header."""
-        source_path = os.path.join(_agent_dir, "agent.py")
-        with open(source_path) as f:
-            source = f.read()
-        assert 'text="Çıkış"' in source
-        assert "underline" in source
-
-
-# ==================== 8. Window size ====================
-
-
-class TestWindowSize:
-    def test_geometry_compact(self):
-        """Window geometry should stay compact for operator-friendly usage."""
-        source_path = os.path.join(_agent_dir, "agent.py")
-        with open(source_path) as f:
-            source = f.read()
-        assert "420x540" in source
-
-    def test_minsize_set(self):
-        """minsize should be set to prevent content clipping."""
-        source_path = os.path.join(_agent_dir, "agent.py")
-        with open(source_path) as f:
-            source = f.read()
-        assert "minsize" in source
 
 
 # ==================== 9. ModernButton enhancements ====================

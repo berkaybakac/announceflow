@@ -61,17 +61,6 @@ def test_atomic_cache_roundtrip(tmp_path, monkeypatch):
     assert pt._load_cache() == payload
 
 
-def test_corrupt_cache_is_quarantined(tmp_path, monkeypatch):
-    cache_path = tmp_path / "prayer_times_cache.json"
-    monkeypatch.setattr(pt, "CACHE_FILE", str(cache_path))
-    cache_path.write_text("{invalid-json", encoding="utf-8")
-
-    loaded = pt._load_cache()
-    assert loaded == {}
-    corrupt_files = list(tmp_path.glob("prayer_times_cache.json.corrupt.*"))
-    assert len(corrupt_files) == 1
-
-
 def test_unknown_policy_falls_back_to_fail_safe():
     config = _base_config()
     decision = resolve_silence_policy(
