@@ -44,6 +44,7 @@ _APP_TS = re.compile(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3})(Z?)")
 _KV = re.compile(r"(\w+)=(\S+)")
 _SCHEDULED_PLAY = re.compile(r"\[source\] (recurring|one-time) play -> (.+?) \(schedule_id=")
 _MANUAL_PLAY = re.compile(r"\[source\] manual play -> (.+?) \(media_id=")
+_AGENT_ID = re.compile(r"agent-[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 
 
 def _rotated(path: str) -> list[str]:
@@ -132,7 +133,11 @@ def build_report(dump_dir: str, since: datetime, until: datetime, tz: ZoneInfo) 
     active_days: dict[str, set] = defaultdict(set)
 
     # ── Live stream sessions (ffmpeg receiver summaries) ──────────────────────
-    sessions = []
+    # One stream can span several receiver segments with the same
+    # correlation_id (paused for an announcement or prayer, then resumed),
+    # so segments are summed per correlation_id.
+    segments = 0
+    by_cid: dict[str, dict] = {}
     for line in _read_lines(_rotated(os.path.join(dump_dir, "logs", "stream_receiver_ffmpeg.log"))):
         t = _local_time(line)
         if t is None:
@@ -145,14 +150,16 @@ def build_report(dump_dir: str, since: datetime, until: datetime, tz: ZoneInfo) 
         start = t - timedelta(seconds=duration)
         if not in_range(start):
             continue
-        sessions.append({
-            "start": start,
-            "duration": duration,
-            "xrun": int(kv.get("alsa_xrun", 0) or 0),
-            "udp_overrun": int(kv.get("udp_overrun", 0) or 0),
-        })
+        segments += 1
+        cid = kv.get("correlation_id") or f"segment-{segments}"
+        sess = by_cid.setdefault(cid, {"start": start, "duration": 0.0, "xrun": 0, "udp_overrun": 0})
+        sess["start"] = min(sess["start"], start)
+        sess["duration"] += duration
+        sess["xrun"] += int(kv.get("alsa_xrun", 0) or 0)
+        sess["udp_overrun"] += int(kv.get("udp_overrun", 0) or 0)
         active_days["stream"].add(start.date())
 
+    sessions = list(by_cid.values())
     real = [s for s in sessions if s["duration"] >= REAL_SESSION_SECONDS]
     real_hours = sum(s["duration"] for s in real) / 3600.0
 
@@ -163,6 +170,8 @@ def build_report(dump_dir: str, since: datetime, until: datetime, tz: ZoneInfo) 
     manual_announcements = 0
     boots = 0
     failed_logins = 0
+    music_paused_for_prayer = 0
+    sender_pcs: set[str] = set()
     for line in _read_lines(_rotated(os.path.join(dump_dir, "announceflow.log"))):
         t = _app_log_time(line, tz)
         if t is None:
@@ -172,6 +181,9 @@ def build_report(dump_dir: str, since: datetime, until: datetime, tz: ZoneInfo) 
             continue
         if "StreamService: heartbeat expired" in line:
             heartbeat_lost += 1
+            sender_pcs.update(_AGENT_ID.findall(line))
+        elif "Prayer time - saving playlist state" in line:
+            music_paused_for_prayer += 1
         elif "[player] Playing next track" in line:
             playlist_tracks += 1
             active_days["music"].add(t.date())
@@ -192,6 +204,7 @@ def build_report(dump_dir: str, since: datetime, until: datetime, tz: ZoneInfo) 
 
     # ── Events: panel logins, music hours from daily playlist summaries ──────
     logins = 0
+    prayer_silence_windows = 0
     music_hours_by_date: dict[str, float] = {}
     for line in _read_lines(_rotated(os.path.join(dump_dir, "logs", "events.jsonl"))):
         try:
@@ -203,10 +216,15 @@ def build_report(dump_dir: str, since: datetime, until: datetime, tz: ZoneInfo) 
             continue
         seen("events.jsonl", t)
         event = obj.get("event")
+        data = obj.get("data") or {}
+        if in_range(t) and isinstance(data, dict):
+            sender_pcs.update(_AGENT_ID.findall(json.dumps(data)))
         if event == "login" and in_range(t):
             logins += 1
+        elif event == "policy_decision" and in_range(t):
+            if data.get("policy") == "prayer" and data.get("silence_active"):
+                prayer_silence_windows += 1
         elif event == "playlist_daily_summary":
-            data = obj.get("data") or {}
             day = str(data.get("date", ""))
             try:
                 day_dt = datetime.strptime(day, "%Y-%m-%d")
@@ -223,13 +241,17 @@ def build_report(dump_dir: str, since: datetime, until: datetime, tz: ZoneInfo) 
         last = min(until, max(c[1] for c in covered))
         days_in_period = (last.date() - first.date()).days + 1
 
+    data_since = min((c[0] for c in covered), default=None)
+
     return {
         "device": os.path.basename(os.path.normpath(dump_dir)),
+        "data_since": data_since.date().isoformat() if data_since else None,
         "period": {"since": since.date().isoformat(), "until": until.date().isoformat(),
                    "days_with_data": days_in_period},
         "active_days": len(all_days),
         "stream": {
             "sessions": len(sessions),
+            "receiver_segments": segments,
             "sessions_10min_plus": len(real),
             "days": len(active_days["stream"]),
             "hours": round(sum(s["duration"] for s in sessions) / 3600.0, 1),
@@ -238,6 +260,7 @@ def build_report(dump_dir: str, since: datetime, until: datetime, tz: ZoneInfo) 
             "xrun_per_hour": round(sum(s["xrun"] for s in real) / real_hours, 1) if real_hours else None,
             "udp_overrun_total": sum(s["udp_overrun"] for s in sessions),
             "ended_by_heartbeat_loss": heartbeat_lost,
+            "sender_pcs": len(sender_pcs),
         },
         "music": {
             "days": len(active_days["music"]),
@@ -249,6 +272,10 @@ def build_report(dump_dir: str, since: datetime, until: datetime, tz: ZoneInfo) 
             "scheduled_played": scheduled_announcements,
             "manual_played": manual_announcements,
             "days": len(active_days["announcement"]),
+        },
+        "prayer": {
+            "music_paused_for_prayer": music_paused_for_prayer,
+            "prayer_silence_windows": prayer_silence_windows,
         },
         "panel": {"logins": logins, "failed_logins": failed_logins},
         "boots": boots,
@@ -267,9 +294,10 @@ def render_markdown(reports: list[dict]) -> str:
         s, m, a = r["stream"], r["music"], r["announcements"]
         out.append(f"## {r['device']}  ({r['period']['since']} → {r['period']['until']})")
         out.append("")
-        out.append(f"- Active days: **{r['active_days']}** of {_fmt(r['period']['days_with_data'])} days with data")
-        out.append(f"- Live stream: **{s['hours']} h** over {s['sessions_10min_plus']} sessions ≥10 min "
-                   f"({s['days']} days, avg {_fmt(s['avg_session_minutes'])} min)")
+        out.append(f"- Active days: **{r['active_days']}** of {_fmt(r['period']['days_with_data'])} days with data"
+                   f" (evidence since {_fmt(r['data_since'])})")
+        out.append(f"- Live stream: **{s['hours']} h** in {s['sessions']} sessions, {s['sessions_10min_plus']} of them ≥10 min "
+                   f"({s['days']} days, avg {_fmt(s['avg_session_minutes'])} min, {s['sender_pcs']} sender PC(s))")
         clean = "–" if s["clean_session_pct"] is None else f"{s['clean_session_pct']}%"
         out.append(f"  - Clean sessions: {clean} · ALSA xrun/h: {_fmt(s['xrun_per_hour'])} · "
                    f"UDP overruns: {s['udp_overrun_total']} · ended by sender loss: {s['ended_by_heartbeat_loss']}")
@@ -277,6 +305,9 @@ def render_markdown(reports: list[dict]) -> str:
                    + (f", {m['hours_from_daily_summaries']} h in {m['daily_summary_days']} summarised days"
                       if m["daily_summary_days"] else ""))
         out.append(f"- Announcements played: {a['scheduled_played']} scheduled, {a['manual_played']} manual ({a['days']} days)")
+        p = r["prayer"]
+        out.append(f"- Prayer-time automation: music paused {p['music_paused_for_prayer']}×"
+                   f" · prayer silence windows (events): {p['prayer_silence_windows']}")
         out.append(f"- Panel logins: {r['panel']['logins']} (failed: {r['panel']['failed_logins']}) · boots: {r['boots']}")
         if r["usage_sessions_v2_4"]:
             parts = ", ".join(f"{k}: {v['sessions']} sessions / {v['hours']:.1f} h"
@@ -289,7 +320,8 @@ def render_markdown(reports: list[dict]) -> str:
         out.append("")
         out.append(f"- Devices: {len(reports)} · stream hours: {round(sum(r['stream']['hours'] for r in reports), 1)}"
                    f" · playlist tracks: {sum(r['music']['playlist_tracks'] for r in reports)}"
-                   f" · announcements: {sum(r['announcements']['scheduled_played'] + r['announcements']['manual_played'] for r in reports)}")
+                   f" · announcements: {sum(r['announcements']['scheduled_played'] + r['announcements']['manual_played'] for r in reports)}"
+                   f" · prayer music pauses: {sum(r['prayer']['music_paused_for_prayer'] for r in reports)}")
         out.append("")
     return "\n".join(out)
 

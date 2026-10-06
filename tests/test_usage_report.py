@@ -36,6 +36,8 @@ def dump(tmp_path):
         "2026-09-01 09:00:00.100 [receiver] correlation_id=a resolved_alsa_device=plughw:1,0 port=5800\n"
         "2026-09-01 09:00:01.000 [alsa @ 0x1] ALSA buffer xrun.\n"
         + _summary("2026-09-01 11:00:00.000", "a", 7200.0, 1)      # 2 h, clean
+        # same session resumed after an announcement: one stream, two receiver segments
+        + _summary("2026-09-01 11:10:00.000", "a", 540.0, 1)
         + _summary("2026-09-02 10:30:00.000", "b", 1800.0, 30)     # 30 min, clicks
         + _summary("2026-09-02 12:00:30.000", "c", 30.0, 0)        # blip, not "real"
     )
@@ -45,7 +47,8 @@ def dump(tmp_path):
     (d / "announceflow.log").write_text(
         # v2.3.5: naive local time
         "2026-09-01 09:00:05.483 - INFO - [scheduler] [source] recurring play -> anons.mp3 (schedule_id=1)\n"
-        "2026-09-01 10:59:59.000 - WARNING - [services.stream_service] StreamService: heartbeat expired (device=x, cid=a)\n"
+        "2026-09-01 10:59:59.000 - WARNING - [services.stream_service] StreamService: heartbeat expired (device=agent-11111111-2222-3333-4444-555555555555, cid=a)\n"
+        "2026-09-01 13:04:00.000 - INFO - [scheduler] Prayer time - saving playlist state (index=0, tracks=2, active=True)\n"
         "2026-09-01 12:00:00.000 - INFO - [player] Playing next track: 1/2\n"
         "2026-09-01 12:03:00.000 - INFO - [player] Playing next track: 2/2\n"
         "2026-09-01 12:05:00.000 - INFO - [routes.player_routes] [source] manual play -> song.mp3 (media_id=1)\n"
@@ -57,6 +60,12 @@ def dump(tmp_path):
     )
     events = [
         {"ts": "2026-09-02T07:00:00.000Z", "event": "login", "data": {"username": "admin"}},
+        {"ts": "2026-09-02T10:00:00.000Z", "event": "policy_decision",
+         "data": {"policy": "prayer", "silence_active": True}},
+        {"ts": "2026-09-02T10:08:00.000Z", "event": "policy_decision",
+         "data": {"policy": "none", "silence_active": False}},
+        {"ts": "2026-09-02T11:00:00.000Z", "event": "stream_sender_running_changed",
+         "data": {"device_id": "agent-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "sender_running": True}},
         {"ts": "2026-09-02T21:00:00.000Z", "event": "playlist_daily_summary",
          "data": {"date": "2026-09-01", "play_hours": 1.5, "tracks_played": 30}},
         {"ts": "2026-09-02T21:00:00.000Z", "event": "announcement_queue_health", "data": {}},
@@ -81,16 +90,24 @@ def _report(dump, since="2026-09-01", until="2026-09-30"):
     )
 
 
-def test_stream_metrics(dump):
+def test_stream_metrics_group_receiver_segments_by_correlation_id(dump):
     s = _report(dump)["stream"]
-    assert s["sessions"] == 3                 # Aug 20 session is before --since
-    assert s["sessions_10min_plus"] == 2
+    assert s["receiver_segments"] == 4        # Aug 20 segment is before --since
+    assert s["sessions"] == 3                 # a (2 segments), b, c
+    assert s["sessions_10min_plus"] == 2      # a, b
     assert s["days"] == 2
-    assert s["hours"] == round((7200 + 1800 + 30) / 3600, 1)
-    assert s["avg_session_minutes"] == 75.0   # (120 + 30) / 2
-    assert s["clean_session_pct"] == 50       # 1 of 2 real sessions <= 2 xruns
-    assert s["xrun_per_hour"] == round(31 / 2.5, 1)
+    assert s["hours"] == round((7200 + 540 + 1800 + 30) / 3600, 1)
+    assert s["avg_session_minutes"] == round((7740 + 1800) / 2 / 60, 1)
+    assert s["clean_session_pct"] == 50       # a: 2 xruns total (clean), b: 30
+    assert s["xrun_per_hour"] == round(32 / ((7740 + 1800) / 3600), 1)
     assert s["ended_by_heartbeat_loss"] == 1
+    assert s["sender_pcs"] == 2
+
+
+def test_prayer_automation_and_data_since(dump):
+    r = _report(dump)
+    assert r["prayer"] == {"music_paused_for_prayer": 1, "prayer_silence_windows": 1}
+    assert r["data_since"] == "2026-08-20"    # oldest evidence, regardless of --since
 
 
 def test_announcements_use_media_type_and_both_time_formats(dump):
