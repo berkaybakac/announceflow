@@ -981,11 +981,79 @@ def _ping_sender_loop(sender_ip: str, stop_event: threading.Event) -> None:
             
         time.sleep(10)
 
+def _parse_proc_net_udp(text: str, port: int) -> tuple[int, int]:
+    """(drops, rx_queue bytes) of the UDP socket bound to `port`; -1 if absent."""
+    want = f":{port:04X}"
+    for line in (text or "").splitlines()[1:]:
+        cols = line.split()
+        if len(cols) < 13 or not cols[1].upper().endswith(want):
+            continue
+        try:
+            rx_queue = int(cols[4].split(":")[1], 16)
+            drops = int(cols[-1])
+        except (IndexError, ValueError):
+            return -1, -1
+        return drops, rx_queue
+    return -1, -1
+
+
+def _parse_schedstat_run_delay_ns(text: str) -> int:
+    """/proc/<pid>/schedstat: 'exec_ns wait_ns timeslices' -> wait_ns."""
+    try:
+        return int((text or "").split()[1])
+    except (IndexError, ValueError):
+        return -1
+
+
+def _parse_throttled(text: str) -> str:
+    """'throttled=0x50005' -> '0x50005' (under-voltage/throttling bits)."""
+    text = (text or "").strip()
+    return text.split("=", 1)[1] if "=" in text else ""
+
+
+def _read_text(path: str) -> str:
+    try:
+        with open(path) as f:
+            return f.read()
+    except OSError:
+        return ""
+
+
+def _read_udp_socket_stats(port: int) -> tuple[int, int]:
+    for path in ("/proc/net/udp", "/proc/net/udp6"):
+        drops, rx_queue = _parse_proc_net_udp(_read_text(path), port)
+        if drops >= 0:
+            return drops, rx_queue
+    return -1, -1
+
+
+def _read_run_delay_ns(pid: int) -> int:
+    return _parse_schedstat_run_delay_ns(_read_text(f"/proc/{pid}/schedstat"))
+
+
+def _read_throttled() -> str:
+    try:
+        out = subprocess.run(
+            ["vcgencmd", "get_throttled"], capture_output=True, text=True, timeout=2
+        )
+        return _parse_throttled(out.stdout)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def _read_cpu_freq_mhz() -> int:
+    raw = _read_text("/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq").strip()
+    return int(raw) // 1000 if raw.isdigit() else -1
+
+
 def _emit_memory_probe_sample(
     ffmpeg_pid: int,
     counters: Dict[str, Any],
     correlation_id: str,
     started_mono: float,
+    *,
+    port: Optional[int] = None,
+    state: Optional[Dict[str, Any]] = None,
 ) -> None:
     """One unconditional memory sample — independent of xrun events.
 
@@ -994,21 +1062,37 @@ def _emit_memory_probe_sample(
     be told apart. Split by process (ffmpeg vs. this receiver), so a real
     leak shows up as a trend even on sessions that never trip an xrun.
     See backlog.md P0.
+
+    Also samples what tells the causes of an xrun apart on every probe:
+    socket drops / rx_queue (input or network gap), ffmpeg run-queue wait
+    since the previous probe (Pi CPU starvation), throttling bits
+    (under-voltage) and CPU clock. Each source degrades to -1 / "" alone.
     """
     try:
         snap = _read_proc_stat_snapshot()
-        _safe_log_system(
-            "stream_memory_probe",
-            {
-                "correlation_id": correlation_id,
-                "elapsed_s": round(time.monotonic() - started_mono, 1),
-                "mem_available_mb": snap.get("mem_available_mb", -1),
-                "ffmpeg_rss_mb": _read_process_rss_mb(ffmpeg_pid),
-                "receiver_rss_mb": _read_process_rss_mb(os.getpid()),
-                "alsa_xrun_so_far": counters.get("alsa_xrun", 0),
-                "udp_overrun_so_far": counters.get("udp_overrun", 0),
-            },
-        )
+        data = {
+            "correlation_id": correlation_id,
+            "elapsed_s": round(time.monotonic() - started_mono, 1),
+            "mem_available_mb": snap.get("mem_available_mb", -1),
+            "ffmpeg_rss_mb": _read_process_rss_mb(ffmpeg_pid),
+            "receiver_rss_mb": _read_process_rss_mb(os.getpid()),
+            "alsa_xrun_so_far": counters.get("alsa_xrun", 0),
+            "udp_overrun_so_far": counters.get("udp_overrun", 0),
+        }
+        if port is not None:
+            state = state if state is not None else {}
+            data["udp_drops"], data["udp_rx_queue"] = _read_udp_socket_stats(port)
+            run_delay = _read_run_delay_ns(ffmpeg_pid)
+            previous = state.get("run_delay_ns")
+            data["ffmpeg_run_delay_ms_delta"] = (
+                round((run_delay - previous) / 1e6, 1)
+                if run_delay >= 0 and previous is not None and previous >= 0
+                else -1
+            )
+            state["run_delay_ns"] = run_delay
+            data["throttled"] = _read_throttled()
+            data["cpu_mhz"] = _read_cpu_freq_mhz()
+        _safe_log_system("stream_memory_probe", data)
     except Exception as exc:
         _emit_internal_diag("memory_probe_failed", f"memory_probe_failed error={exc}")
 
@@ -1019,10 +1103,14 @@ def _periodic_memory_probe_loop(
     correlation_id: str,
     started_mono: float,
     stop_event: threading.Event,
+    port: Optional[int] = None,
 ) -> None:
     """Fixed-cadence (~20s) wrapper around `_emit_memory_probe_sample`."""
+    state: Dict[str, Any] = {}
     while not stop_event.wait(20.0):
-        _emit_memory_probe_sample(ffmpeg_pid, counters, correlation_id, started_mono)
+        _emit_memory_probe_sample(
+            ffmpeg_pid, counters, correlation_id, started_mono, port=port, state=state
+        )
 
 
 def _health_receiver_loop(port: int, stop_event: threading.Event) -> None:
@@ -1235,7 +1323,7 @@ def main():
 
     memory_probe_thread = threading.Thread(
         target=_periodic_memory_probe_loop,
-        args=(proc.pid, counters, correlation_id, started_mono, health_stop_event),
+        args=(proc.pid, counters, correlation_id, started_mono, health_stop_event, port),
         daemon=True,
     )
     memory_probe_thread.start()

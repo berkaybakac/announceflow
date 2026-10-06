@@ -627,3 +627,59 @@ class TestMemoryProbe:
 
         assert len(calls) == 1
         assert calls[0][1]["ffmpeg_rss_mb"] == -1
+
+
+class TestMemoryProbeDiagnostics:
+    """Signals that separate input/network gaps from Pi starvation, on every
+    probe (clean sessions too), not only when an xrun fires."""
+
+    _UDP = (
+        "   sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode ref pointer drops\n"
+        "  270: 00000000:CA27 00000000:0000 07 00000000:00000000 00:00000000 00000000   101        0 6069 2 00000000d9dfb1f2 0\n"
+        "  301: 00000000:16A8 00000000:0000 07 00000000:00001F40 00:00000000 00000000  1000        0 7777 2 00000000aaaaaaaa 12\n"
+    )
+
+    def test_parse_proc_net_udp_finds_port_drops_and_rx_queue(self):
+        from _stream_receiver import _parse_proc_net_udp
+        assert _parse_proc_net_udp(self._UDP, 5800) == (12, 0x1F40)
+        assert _parse_proc_net_udp(self._UDP, 9999) == (-1, -1)
+        assert _parse_proc_net_udp("garbage", 5800) == (-1, -1)
+
+    def test_parse_schedstat_run_delay(self):
+        from _stream_receiver import _parse_schedstat_run_delay_ns
+        assert _parse_schedstat_run_delay_ns("9449271 177605 4\n") == 177605
+        assert _parse_schedstat_run_delay_ns("") == -1
+
+    def test_parse_throttled(self):
+        from _stream_receiver import _parse_throttled
+        assert _parse_throttled("throttled=0x50005\n") == "0x50005"
+        assert _parse_throttled("") == ""
+
+    def test_probe_includes_diagnostics_and_run_delay_delta(self, monkeypatch):
+        import _stream_receiver as mod
+        calls = []
+        monkeypatch.setattr(mod, "_safe_log_system", lambda event, data: calls.append((event, data)))
+        monkeypatch.setattr(mod, "_read_udp_socket_stats", lambda port: (3, 0))
+        delays = iter([1_000_000_000, 1_250_000_000])
+        monkeypatch.setattr(mod, "_read_run_delay_ns", lambda pid: next(delays))
+        monkeypatch.setattr(mod, "_read_throttled", lambda: "0x0")
+        monkeypatch.setattr(mod, "_read_cpu_freq_mhz", lambda: 1400)
+
+        state = {}
+        for _ in range(2):
+            mod._emit_memory_probe_sample(999999999, {"alsa_xrun": 0}, "cid", time.monotonic(),
+                                          port=5800, state=state)
+
+        first, second = calls[0][1], calls[1][1]
+        assert first["udp_drops"] == 3 and first["udp_rx_queue"] == 0
+        assert first["ffmpeg_run_delay_ms_delta"] == -1     # no previous sample yet
+        assert second["ffmpeg_run_delay_ms_delta"] == 250.0
+        assert second["throttled"] == "0x0" and second["cpu_mhz"] == 1400
+
+    def test_probe_survives_unreadable_sources(self, monkeypatch):
+        import _stream_receiver as mod
+        calls = []
+        monkeypatch.setattr(mod, "_safe_log_system", lambda event, data: calls.append((event, data)))
+        mod._emit_memory_probe_sample(999999999, {}, "cid", time.monotonic(), port=5800, state={})
+        assert calls and calls[0][0] == "stream_memory_probe"
+        assert "udp_drops" in calls[0][1]
