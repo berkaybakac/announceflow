@@ -1043,6 +1043,7 @@ class TestHeartbeatRoute:
             sender_mem_available_mb=None,
             sender_wifi_signal_pct=None,
             sender_wifi_ssid=None,
+            agent_version=None,
         )
 
     @patch("routes.stream_routes._stream_service")
@@ -1111,6 +1112,7 @@ class TestHeartbeatRoute:
             sender_mem_available_mb=None,
             sender_wifi_signal_pct=None,
             sender_wifi_ssid=None,
+            agent_version=None,
         )
 
     @patch("routes.stream_routes._stream_service")
@@ -1135,6 +1137,7 @@ class TestHeartbeatRoute:
             sender_mem_available_mb=None,
             sender_wifi_signal_pct=None,
             sender_wifi_ssid=None,
+            agent_version=None,
         )
 
     @patch("routes.stream_routes._stream_service")
@@ -1165,6 +1168,7 @@ class TestHeartbeatRoute:
             sender_mem_available_mb=None,
             sender_wifi_signal_pct=None,
             sender_wifi_ssid=None,
+            agent_version=None,
         )
 
     @patch("routes.stream_routes._stream_service")
@@ -1184,6 +1188,7 @@ class TestHeartbeatRoute:
                 "X-Stream-Sender-Mem-Available-Mb": "1536",
                 "X-Stream-Sender-Wifi-Signal-Pct": "64",
                 "X-Stream-Sender-Wifi-Ssid": "Store-WLAN",
+                "X-Stream-Agent-Version": "v2.5.0-1a2b3c4",
             },
         )
         mock_svc.heartbeat.assert_called_once_with(
@@ -1199,6 +1204,7 @@ class TestHeartbeatRoute:
             sender_mem_available_mb=1536,
             sender_wifi_signal_pct=64,
             sender_wifi_ssid="Store-WLAN",
+            agent_version="v2.5.0-1a2b3c4",
         )
 
 
@@ -1347,3 +1353,41 @@ class TestHeartbeatGapTelemetry:
 
         svc.heartbeat(device_id="dev-2")
         assert self._events(mock_log_system, "stream_agent_heartbeat_returned") == []
+
+
+
+class TestAgentVersionTelemetry:
+    def _versions(self, mock_log_system):
+        return [c.args[1] for c in mock_log_system.call_args_list
+                if c.args and c.args[0] == "stream_agent_version"]
+
+    @patch("services.stream_service.log_system")
+    def test_logs_version_on_first_sight_and_on_change_only(self, mock_log_system, mock_manager, mock_player):
+        svc = _make_service(mock_manager, mock_player)
+        svc.heartbeat(device_id="pc-1", agent_version="v2.4.0-aaaaaaa")
+        svc.heartbeat(device_id="pc-1", agent_version="v2.4.0-aaaaaaa")
+        svc.heartbeat(device_id="pc-1", agent_version="v2.5.0-bbbbbbb")
+
+        assert self._versions(mock_log_system) == [
+            {"device_id": "pc-1", "agent_version": "v2.4.0-aaaaaaa", "previous": None},
+            {"device_id": "pc-1", "agent_version": "v2.5.0-bbbbbbb", "previous": "v2.4.0-aaaaaaa"},
+        ]
+
+    @patch("services.stream_service.log_system")
+    def test_old_exe_without_header_is_reported_once_as_unreported(self, mock_log_system, mock_manager, mock_player):
+        svc = _make_service(mock_manager, mock_player)
+        svc.heartbeat(device_id="pc-old")
+        svc.heartbeat(device_id="pc-old")
+        assert self._versions(mock_log_system) == [
+            {"device_id": "pc-old", "agent_version": "unreported", "previous": None},
+        ]
+
+    @patch("routes.stream_routes._stream_service")
+    def test_route_rejects_unsafe_version_header(self, mock_svc, client):
+        mock_svc.heartbeat.return_value = {
+            "accepted": True, "reason": None,
+            "status": StreamStatus(active=True, state="live").to_dict(), "control": {"command": None},
+        }
+        client.post("/api/stream/heartbeat",
+                    headers={"X-Stream-Device-Id": "dev-1", "X-Stream-Agent-Version": "v1 <script>" + "x" * 100})
+        assert mock_svc.heartbeat.call_args.kwargs["agent_version"] is None

@@ -205,6 +205,7 @@ def build_report(dump_dir: str, since: datetime, until: datetime, tz: ZoneInfo) 
     # ── Events: panel logins, music hours from daily playlist summaries ──────
     logins = 0
     prayer_silence_windows = 0
+    agent_versions: dict[str, tuple[datetime, str]] = {}  # device -> (seen at, version)
     music_hours_by_date: dict[str, float] = {}
     for line in _read_lines(_rotated(os.path.join(dump_dir, "logs", "events.jsonl"))):
         try:
@@ -221,6 +222,10 @@ def build_report(dump_dir: str, since: datetime, until: datetime, tz: ZoneInfo) 
             sender_pcs.update(_AGENT_ID.findall(json.dumps(data)))
         if event == "login" and in_range(t):
             logins += 1
+        elif event == "stream_agent_version" and in_range(t):
+            device = str(data.get("device_id") or "")
+            if device and (device not in agent_versions or t >= agent_versions[device][0]):
+                agent_versions[device] = (t, str(data.get("agent_version") or "unreported"))
         elif event == "policy_decision" and in_range(t):
             if data.get("policy") == "prayer" and data.get("silence_active"):
                 prayer_silence_windows += 1
@@ -261,6 +266,8 @@ def build_report(dump_dir: str, since: datetime, until: datetime, tz: ZoneInfo) 
             "udp_overrun_total": sum(s["udp_overrun"] for s in sessions),
             "ended_by_heartbeat_loss": heartbeat_lost,
             "sender_pcs": len(sender_pcs),
+            # Latest EXE build seen per PC ("unreported" = EXE built before version reporting).
+            "agent_versions": {device: version for device, (_, version) in sorted(agent_versions.items())},
         },
         "music": {
             "days": len(active_days["music"]),
@@ -301,6 +308,9 @@ def render_markdown(reports: list[dict]) -> str:
         clean = "–" if s["clean_session_pct"] is None else f"{s['clean_session_pct']}%"
         out.append(f"  - Clean sessions: {clean} · ALSA xrun/h: {_fmt(s['xrun_per_hour'])} · "
                    f"UDP overruns: {s['udp_overrun_total']} · ended by sender loss: {s['ended_by_heartbeat_loss']}")
+        if s["agent_versions"]:
+            out.append("  - Sender agent versions: " + ", ".join(
+                f"{device[:14]}… {version}" for device, version in s["agent_versions"].items()))
         out.append(f"- Music: {m['days']} days, {m['playlist_tracks']} playlist tracks"
                    + (f", {m['hours_from_daily_summaries']} h in {m['daily_summary_days']} summarised days"
                       if m["daily_summary_days"] else ""))

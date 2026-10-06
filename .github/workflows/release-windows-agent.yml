@@ -26,6 +26,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r agent/requirements-agent.txt
 
+      - name: Stamp agent version
+        shell: pwsh
+        run: |
+          $sha = "${{ github.sha }}".Substring(0, 7)
+          $ver = "${{ github.ref_name }}-$sha"
+          Set-Content -Path agent/_version.py -Value "AGENT_VERSION = `"$ver`"" -Encoding utf8
+          Get-Content agent/_version.py
+
       - name: Build EXE
         working-directory: agent
         run: |

@@ -64,6 +64,10 @@ def dump(tmp_path):
          "data": {"policy": "prayer", "silence_active": True}},
         {"ts": "2026-09-02T10:08:00.000Z", "event": "policy_decision",
          "data": {"policy": "none", "silence_active": False}},
+        {"ts": "2026-09-02T10:30:00.000Z", "event": "stream_agent_version",
+         "data": {"device_id": "agent-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "agent_version": "unreported", "previous": None}},
+        {"ts": "2026-09-02T12:00:00.000Z", "event": "stream_agent_version",
+         "data": {"device_id": "agent-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "agent_version": "v2.5.0-1a2b3c4", "previous": "unreported"}},
         {"ts": "2026-09-02T11:00:00.000Z", "event": "stream_sender_running_changed",
          "data": {"device_id": "agent-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee", "sender_running": True}},
         {"ts": "2026-09-02T21:00:00.000Z", "event": "playlist_daily_summary",
@@ -150,3 +154,11 @@ def test_missing_sources_do_not_crash(tmp_path):
     assert r["stream"]["sessions"] == 0
     assert r["stream"]["clean_session_pct"] is None
     assert r["period"]["days_with_data"] is None
+
+
+def test_latest_agent_version_per_sender_pc(dump):
+    r = _report(dump)
+    assert r["stream"]["agent_versions"] == {
+        "agent-aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee": "v2.5.0-1a2b3c4"
+    }
+    assert "v2.5.0-1a2b3c4" in usage_report.render_markdown([r])

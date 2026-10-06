@@ -52,6 +52,11 @@ _CREATE_NO_WINDOW = 0x08000000 if os.name == "nt" else 0
 logger = logging.getLogger(__name__)
 stream_logger = logging.getLogger("agent.stream")
 
+try:
+    from _version import AGENT_VERSION
+except ImportError:  # pragma: no cover - only if the file is missing from a build
+    AGENT_VERSION = "dev"
+
 
 # --------------- Logging Setup ---------------
 
@@ -986,6 +991,7 @@ class AnnounceFlowAgent:
             headers["X-Stream-Sender-Wifi-Signal-Pct"] = str(sender_wifi_signal_pct)
         if isinstance(sender_wifi_ssid, str) and sender_wifi_ssid.strip():
             headers["X-Stream-Sender-Wifi-Ssid"] = sender_wifi_ssid.strip()[:128]
+        headers["X-Stream-Agent-Version"] = AGENT_VERSION
 
         response = self._request(
             "POST",
@@ -1157,7 +1163,7 @@ class AgentGUI:
     def run(self):
         """Run the GUI application."""
         self.root = tk.Tk()
-        self.root.title("StatekSound")
+        self.root.title(f"StatekSound {AGENT_VERSION}")
         self.root.geometry("420x540")
         self.root.minsize(400, 500)
 

@@ -431,6 +431,26 @@ class TestStreamApiDetailedWrappers:
         assert result["http_status"] == 200
 
 
+class TestAgentVersionReporting:
+    """The Pi must be able to tell which EXE build each PC runs."""
+
+    def test_heartbeat_sends_agent_version_header(self):
+        agent_mod = _import_agent()
+        agent = agent_mod.AnnounceFlowAgent.__new__(agent_mod.AnnounceFlowAgent)
+        agent.device_id = "dev-version-1"
+        response = MagicMock()
+        response.ok = True
+        response.status_code = 200
+        response.json.return_value = {"success": True, "status": {"state": "live"}}
+        agent._request = MagicMock(return_value=response)
+
+        agent.send_heartbeat_with_details()
+
+        headers = agent._request.call_args.kwargs["headers"]
+        assert headers["X-Stream-Agent-Version"] == agent_mod.AGENT_VERSION
+        assert agent_mod.AGENT_VERSION  # "dev" for source runs, CI stamps builds
+
+
 class TestGuiUsesDetailedStreamApi:
     """Ensure GUI stream jobs use detailed API wrappers."""
 

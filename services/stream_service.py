@@ -1496,6 +1496,7 @@ class StreamService:
         sender_mem_available_mb: Optional[int] = None,
         sender_wifi_signal_pct: Optional[int] = None,
         sender_wifi_ssid: Optional[str] = None,
+        agent_version: Optional[str] = None,
     ) -> dict:
         """Process agent heartbeat and return control-plane envelope.
 
@@ -1556,6 +1557,18 @@ class StreamService:
                     }
                     self._agent_registry[request_device_id] = meta
                 meta["last_seen_at"] = now_epoch
+                # EXEs older than the version header report nothing.
+                reported_version = agent_version or "unreported"
+                if meta.get("agent_version") != reported_version:
+                    log_system(
+                        "stream_agent_version",
+                        {
+                            "device_id": request_device_id,
+                            "agent_version": reported_version,
+                            "previous": meta.get("agent_version"),
+                        },
+                    )
+                    meta["agent_version"] = reported_version
                 expired = self._heartbeat_expired_at.pop(request_device_id, None)
                 if expired is not None:
                     expired_at, expired_cid = expired

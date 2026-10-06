@@ -15,6 +15,7 @@ V1 API contract (PI4_STREAM_V1_SCOPE.md section 4):
 """
 import logging
 import math
+import re
 from typing import Optional
 
 from flask import Blueprint, jsonify, request
@@ -23,6 +24,9 @@ from logger import log_system
 from services.audio_alert_service import clamp_window_minutes, get_audio_alerts
 from services.stream_service import get_stream_service
 from utils.helpers import _json_error, _json_success, login_required
+
+# e.g. "v2.5.0-1a2b3c4", "main-1a2b3c4", "dev"; anything else is dropped.
+_AGENT_VERSION_RE = re.compile(r"[A-Za-z0-9._+-]{1,64}")
 
 stream_bp = Blueprint("stream", __name__)
 logger = logging.getLogger(__name__)
@@ -253,6 +257,9 @@ def stream_heartbeat():
     )
     if sender_wifi_ssid and len(sender_wifi_ssid) > 128:
         sender_wifi_ssid = sender_wifi_ssid[:128]
+    agent_version = request.headers.get("X-Stream-Agent-Version", "").strip() or None
+    if agent_version and not _AGENT_VERSION_RE.fullmatch(agent_version):
+        agent_version = None
 
     result = _stream_service.heartbeat(
         device_id=device_id,
@@ -267,6 +274,7 @@ def stream_heartbeat():
         sender_mem_available_mb=sender_mem_available_mb,
         sender_wifi_signal_pct=sender_wifi_signal_pct,
         sender_wifi_ssid=sender_wifi_ssid,
+        agent_version=agent_version,
     )
     return _json_success(
         status=result.get("status"),
