@@ -4,6 +4,7 @@ Raspberry Pi optimized audio playback using mpg123.
 Falls back to pygame for development on Mac/Windows.
 """
 import platform
+import re
 import os
 import logging
 import subprocess
@@ -51,6 +52,26 @@ def _detect_backend():
     return None
 
 
+def _read_asound_cards() -> str:
+    try:
+        with open("/proc/asound/cards") as f:
+            return f.read()
+    except OSError:
+        return ""
+
+
+def _alsa_card_name(device: str, cards_text: str) -> str:
+    """Card id ("vc4hdmi", "Headphones") for 'plughw:1,0' / 'hw:Name,0'; '' if unknown."""
+    if ":" not in (device or ""):
+        return ""
+    card = device.split(":", 1)[1].split(",", 1)[0].strip()
+    for line in cards_text.splitlines():
+        m = re.match(r"^\s*(\d+)\s+\[([^\]]+)\]", line)
+        if m and card in (m.group(1), m.group(2).strip()):
+            return m.group(2).strip()
+    return ""
+
+
 AUDIO_BACKEND = _detect_backend()
 logger.info(f"Audio backend: {AUDIO_BACKEND}")
 
@@ -90,6 +111,7 @@ class AudioPlayer:
         self._playlist_loop: bool = True  # Loop playlist when reaching end
         self._playlist_active: bool = False  # Whether playlist mode is on
         self._alsa_device_candidates: list = []
+        self._hdmi_warned_devices: set = set()
         self._alsa_card_candidates: list = []
 
         if platform.system() == "Linux":
@@ -101,6 +123,19 @@ class AudioPlayer:
             import pygame
 
             pygame.mixer.music.set_volume(self._volume / 100.0)
+
+    def _warn_if_hdmi_device(self, device: str) -> None:
+        """Log once per device when playback lands on an HDMI card.
+
+        With no display attached that is silent output with no error (Pi OS
+        trixie: card 0 = HDMI, jack = card 1 unless .env pins it).
+        """
+        if device in self._hdmi_warned_devices:
+            return
+        card = _alsa_card_name(device, _read_asound_cards())
+        if "hdmi" in card.lower():
+            self._hdmi_warned_devices.add(device)
+            log_error("audio_device_hdmi_selected", {"device": device, "card": card})
 
     def _build_alsa_device_candidates(self) -> list:
         """Build ALSA device candidates for mpg123 playback."""
@@ -550,6 +585,7 @@ class AudioPlayer:
                     self._process = proc
                     if device:
                         logger.info(f"Using ALSA device: {device}")
+                        self._warn_if_hdmi_device(device)
                     break
 
                 try:
