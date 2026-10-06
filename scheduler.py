@@ -1865,20 +1865,13 @@ class Scheduler:
                 interval = schedule["interval_minutes"]
 
                 if self._is_time_in_range(current_time, start_time, end_time):
-                    # Check if enough time has passed since last trigger
-                    last_trigger = self._last_recurring_triggers.get(schedule_id)
-                    if last_trigger is None:
-                        # First trigger - check if we're at a valid interval point
-                        should_trigger = self._is_interval_point(
-                            current_time, start_time, interval
-                        )
-                    else:
-                        elapsed_seconds = (now - last_trigger).total_seconds()
-                        # Keep tolerance small (scheduler tick scale), not minute scale.
-                        # Minute-scale tolerance causes "2 min" jobs to run every ~1 min.
-                        tolerance_seconds = max(2, int(self.check_interval) + 2)
-                        if elapsed_seconds >= (interval * 60) - tolerance_seconds:
-                            should_trigger = True
+                    # Always anchor to the start + k*interval grid. Measuring from
+                    # the previous actual fire let every fire land one tick
+                    # earlier than the last (~4 min early by evening for 30 min).
+                    # Same-minute repeats are blocked by the 55 s guard below.
+                    should_trigger = self._is_interval_point(
+                        current_time, start_time, interval
+                    )
 
             # Trigger if conditions met
             if should_trigger:

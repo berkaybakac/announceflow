@@ -80,24 +80,40 @@ def test_recurring_specific_times_fire_once_per_minute_on_listed_days(clock, ann
     assert seen == []
 
 
-def test_recurring_interval_drifts_earlier_each_fire(clock, announcement_id):
-    """Current behaviour (backlog BL-RECURRING-INTERVAL-DRIFT), NOT desired.
-
-    After the first fire, interval schedules re-fire once
-    `elapsed >= interval*60 - (check_interval + 2)` measured from the
-    previous *actual* fire, so every fire lands one tick (10 s) earlier than
-    the last. Over a day a 30-min schedule ends ~4 min early and a 5-min one
-    fires 149 times instead of 145. Field devices only use specific times
-    today. When this is fixed, flip this test to the grid times.
-    """
+def test_recurring_interval_fires_on_grid_points(clock, announcement_id):
+    """Interval schedules fire on start + k*interval. They used to re-fire one
+    tick early relative to the previous actual fire, drifting ~10 s earlier
+    every time (a 30-min schedule ran ~4 min early by evening)."""
     sid = db.add_recurring_schedule(announcement_id, [5, 6], "10:00", "18:00", 30, None, None)
     sched = Scheduler()
 
     seen = _run(sched, clock, SATURDAY.replace(hour=9, minute=55), SATURDAY.replace(hour=11, minute=5))
     assert seen == [
         ("10:00", "recurring", sid),
-        ("10:29", "recurring", sid),  # 10:29:50
-        ("10:59", "recurring", sid),  # 10:59:40
+        ("10:30", "recurring", sid),
+        ("11:00", "recurring", sid),
+    ]
+
+
+def test_recurring_interval_full_day_has_no_drift(clock, announcement_id):
+    sid = db.add_recurring_schedule(announcement_id, [5], "09:00", "21:00", 5, None, None)
+    sched = Scheduler()
+
+    seen = _run(sched, clock, SATURDAY.replace(hour=8, minute=59), SATURDAY.replace(hour=21, minute=1))
+    times = [t for t, _, s in seen if s == sid]
+    assert len(times) == 145                       # 09:00, 09:05, ..., 21:00
+    assert times[0] == "09:00" and times[-1] == "21:00"
+    assert all(int(t[3:]) % 5 == 0 for t in times)
+
+
+def test_recurring_interval_overnight_window(clock, announcement_id):
+    sid = db.add_recurring_schedule(announcement_id, [5, 6], "22:00", "06:00", 60, None, None)
+    sched = Scheduler()
+
+    seen = _run(sched, clock, SATURDAY.replace(hour=21, minute=55),
+                SATURDAY.replace(hour=6, minute=5) + timedelta(days=1))
+    assert [t for t, _, s in seen if s == sid] == [
+        "22:00", "23:00", "00:00", "01:00", "02:00", "03:00", "04:00", "05:00", "06:00",
     ]
 
 
