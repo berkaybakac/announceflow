@@ -940,6 +940,14 @@ class Scheduler:
             time.monotonic() + float(self._announcement_gap_seconds)
         )
         self._announcement_last_block_reason = None
+        # How long it actually played vs the file length: a cut-short
+        # announcement (e.g. a player race at a track boundary) is otherwise
+        # indistinguishable from a normal finish. 3 s slack for start latency
+        # and the 10 s tick that notices the end.
+        started_ts = float(current.get("started_ts") or 0.0)
+        played_s = round(max(0.0, time.time() - started_ts), 1) if started_ts else None
+        expected_s = int(current.get("expected_duration_seconds") or 0)
+        cut_short = bool(expected_s > 0 and played_s is not None and played_s < expected_s - 3)
         log_schedule(
             "announcement_queue_finish",
             {
@@ -947,6 +955,9 @@ class Scheduler:
                 "is_one_time": is_one_time,
                 "source": current.get("source", "unknown"),
                 "queue_size": len(self._announcement_queue),
+                "played_s": played_s,
+                "expected_s": expected_s,
+                "cut_short": cut_short,
             },
         )
 

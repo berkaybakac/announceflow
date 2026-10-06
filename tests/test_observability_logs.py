@@ -716,3 +716,37 @@ class TestSchedulerTickDuration:
         sched._record_tick_duration(12.5)
         assert calls[-1] == ("scheduler_tick_slow",
                              {"duration_s": 12.5, "check_interval": 10, "slow_ticks_since_last_log": 2})
+
+
+class TestAnnouncementPlayedDuration:
+    """A queued announcement can be cut short (e.g. a track-boundary race in
+    the player); the finish event must show how long it actually played."""
+
+    def _finish(self, monkeypatch, started_ago, expected):
+        sched = Scheduler(check_interval_seconds=10)
+        calls = []
+        monkeypatch.setattr("scheduler.log_schedule", lambda event, data: calls.append((event, data)))
+        monkeypatch.setattr("scheduler.get_player", lambda: MagicMock(_playback_session=2, is_playing=False))
+        monkeypatch.setattr("scheduler.time.time", lambda: 1_000_000.0)
+        sched._announcement_current = {
+            "schedule_id": 7, "is_one_time": False, "source": "recurring",
+            "playback_session": 1, "started_ts": 1_000_000.0 - started_ago,
+            "expected_duration_seconds": expected, "dedupe_key": "recurring:7:x",
+        }
+        sched._mark_announcement_complete_if_done()
+        (event, data), = [c for c in calls if c[0] == "announcement_queue_finish"]
+        return data
+
+    def test_cut_short_announcement_is_flagged(self, monkeypatch):
+        data = self._finish(monkeypatch, started_ago=4.0, expected=12)
+        assert data["played_s"] == 4.0
+        assert data["expected_s"] == 12
+        assert data["cut_short"] is True
+
+    def test_full_announcement_is_not_flagged(self, monkeypatch):
+        data = self._finish(monkeypatch, started_ago=12.6, expected=12)
+        assert data["cut_short"] is False
+
+    def test_unknown_duration_is_not_flagged(self, monkeypatch):
+        data = self._finish(monkeypatch, started_ago=4.0, expected=0)
+        assert data["cut_short"] is False
