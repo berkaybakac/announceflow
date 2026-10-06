@@ -136,6 +136,17 @@ def test_start_receiver_sets_correlation_id_env(monkeypatch, fake_popen):
     assert mgr.stop_receiver() is True
 
 
+def test_start_receiver_tells_child_not_to_rotate_event_log(monkeypatch, fake_popen):
+    """Only the main process may rotate events.jsonl (backlog BL-EVENTS-DUAL-ROTATE)."""
+    monkeypatch.delenv("ANNOUNCEFLOW_EVENT_LOG_NO_ROTATE", raising=False)
+    mgr = StreamManager(port=5800)
+    assert mgr.start_receiver(correlation_id="cid-rot") is True
+    assert fake_popen["env"]["ANNOUNCEFLOW_EVENT_LOG_NO_ROTATE"] == "1"
+    import os
+    assert "ANNOUNCEFLOW_EVENT_LOG_NO_ROTATE" not in os.environ
+    assert mgr.stop_receiver() is True
+
+
 def test_start_receiver_without_correlation_id_does_not_set_env(monkeypatch, fake_popen):
     monkeypatch.delenv("ANNOUNCEFLOW_STREAM_CORRELATION_ID", raising=False)
     mgr = StreamManager(port=5800)

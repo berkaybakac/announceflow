@@ -81,7 +81,7 @@ import json
 import os
 import logging
 from datetime import datetime, timezone
-from logging.handlers import RotatingFileHandler
+from logging.handlers import RotatingFileHandler, WatchedFileHandler
 from typing import Any, Dict, Optional
 
 
@@ -135,9 +135,15 @@ _EVENT_LOG_MAX_BYTES = _parse_positive_int_env(
 _EVENT_LOG_BACKUP_COUNT = _parse_positive_int_env(
     "ANNOUNCEFLOW_EVENT_LOG_BACKUP_COUNT", 10
 )
-_event_handler = RotatingFileHandler(
-    EVENT_LOG_FILE, maxBytes=_EVENT_LOG_MAX_BYTES, backupCount=_EVENT_LOG_BACKUP_COUNT
-)
+if os.environ.get("ANNOUNCEFLOW_EVENT_LOG_NO_ROTATE", "").strip() == "1":
+    # Child processes (the stream receiver) share events.jsonl with the main
+    # process. Only the main process rotates it; a child just appends to
+    # whatever file currently has that name, reopening after a rotation.
+    _event_handler = WatchedFileHandler(EVENT_LOG_FILE)
+else:
+    _event_handler = RotatingFileHandler(
+        EVENT_LOG_FILE, maxBytes=_EVENT_LOG_MAX_BYTES, backupCount=_EVENT_LOG_BACKUP_COUNT
+    )
 _event_handler.setFormatter(logging.Formatter("%(message)s"))
 _event_logger.addHandler(_event_handler)
 

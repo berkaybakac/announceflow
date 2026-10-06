@@ -191,6 +191,9 @@ class StreamManager:
                     "_stream_receiver.py",
                 )
                 child_env = os.environ.copy()
+                # The receiver imports logger.py; only this process may
+                # rotate the shared events.jsonl.
+                child_env["ANNOUNCEFLOW_EVENT_LOG_NO_ROTATE"] = "1"
                 if correlation_id:
                     child_env["ANNOUNCEFLOW_STREAM_CORRELATION_ID"] = str(
                         correlation_id
