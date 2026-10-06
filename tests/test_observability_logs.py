@@ -683,3 +683,36 @@ class TestMemoryProbeDiagnostics:
         mod._emit_memory_probe_sample(999999999, {}, "cid", time.monotonic(), port=5800, state={})
         assert calls and calls[0][0] == "stream_memory_probe"
         assert "udp_drops" in calls[0][1]
+
+
+class TestSchedulerTickDuration:
+    """A tick blocked past ~50 s silently skips a specific-time announcement
+    (exact HH:MM match). Measure it before deciding on a fix."""
+
+    def _setup(self, monkeypatch):
+        sched = Scheduler(check_interval_seconds=10)
+        calls = []
+        monkeypatch.setattr("scheduler.log_system", lambda event, data: calls.append((event, data)))
+        now = [10_000.0]
+        monkeypatch.setattr("scheduler.time.monotonic", lambda: now[0])
+        return sched, calls, now
+
+    def test_fast_tick_logs_nothing(self, monkeypatch):
+        sched, calls, _ = self._setup(monkeypatch)
+        sched._record_tick_duration(0.4)
+        assert calls == []
+
+    def test_slow_tick_logged_then_throttled_with_count(self, monkeypatch):
+        sched, calls, now = self._setup(monkeypatch)
+        sched._record_tick_duration(42.0)
+        assert calls == [("scheduler_tick_slow",
+                          {"duration_s": 42.0, "check_interval": 10, "slow_ticks_since_last_log": 1})]
+
+        now[0] += 20
+        sched._record_tick_duration(15.0)   # within 60 s: counted, not logged
+        assert len(calls) == 1
+
+        now[0] += 45
+        sched._record_tick_duration(12.5)
+        assert calls[-1] == ("scheduler_tick_slow",
+                             {"duration_s": 12.5, "check_interval": 10, "slow_ticks_since_last_log": 2})

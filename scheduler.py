@@ -121,6 +121,12 @@ class Scheduler:
         self._media_type_audited: bool = False
         # Per-tick guard: at most one _play_media call succeeds per scheduler tick.
         self._tick_media_dispatched: bool = False
+        # Slow-tick telemetry: a tick blocked past the minute skips
+        # specific-time announcements (exact HH:MM match).
+        self._slow_tick_threshold_seconds: float = 10.0
+        self._slow_tick_log_interval_seconds: float = 60.0
+        self._slow_tick_last_log_monotonic: Optional[float] = None
+        self._slow_ticks_since_log: int = 0
 
     def start(self):
         """Start the scheduler background thread."""
@@ -1454,9 +1460,30 @@ class Scheduler:
                 self._stream_resume_worker_in_progress = False
             raise
 
+    def _record_tick_duration(self, duration_s: float) -> None:
+        """Log ticks slower than the threshold; at most one line per minute."""
+        if duration_s < self._slow_tick_threshold_seconds:
+            return
+        self._slow_ticks_since_log += 1
+        now = time.monotonic()
+        last = self._slow_tick_last_log_monotonic
+        if last is not None and now - last < self._slow_tick_log_interval_seconds:
+            return
+        log_system(
+            "scheduler_tick_slow",
+            {
+                "duration_s": round(duration_s, 1),
+                "check_interval": self.check_interval,
+                "slow_ticks_since_last_log": self._slow_ticks_since_log,
+            },
+        )
+        self._slow_tick_last_log_monotonic = now
+        self._slow_ticks_since_log = 0
+
     def _run_loop(self):
         """Main scheduler loop."""
         while self._running:
+            tick_started = time.monotonic()
             try:
                 self._tick_media_dispatched = False
                 config = self._get_cached_config()
@@ -1502,6 +1529,7 @@ class Scheduler:
             except Exception as e:
                 logger.exception("Scheduler error: %s", e)
 
+            self._record_tick_duration(time.monotonic() - tick_started)
             time.sleep(self.check_interval)
 
     def _check_one_time_schedules(
