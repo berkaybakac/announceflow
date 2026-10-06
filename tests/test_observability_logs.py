@@ -293,6 +293,29 @@ class TestDailyUsageSummary:
         assert playlist_daily["tracks_skipped"] == 2
         assert playlist_daily["play_seconds"] == 600.0
 
+    def test_counts_announcements_actually_played(self, monkeypatch):
+        """Recurring/one-time announcements go through the queue and were not
+        counted anywhere in the daily summary (triggers_recurring only counts
+        scheduled music). Each successful dispatch is one announcement played."""
+        sched = self._make_scheduler()
+        calls = []
+        monkeypatch.setattr("scheduler.log_system", lambda event, data: calls.append((event, data)))
+        monkeypatch.setattr("scheduler.get_player", lambda: MagicMock(_playback_session=1))
+
+        for i in range(2):
+            sched._announcement_queue.append({"dedupe_key": f"recurring:1:{i}", "schedule_id": 1})
+            sched._handle_successful_dispatch(sched._announcement_queue[0])
+
+        sched._daily_current_date = "2026-10-05"
+        monkeypatch.setattr("scheduler.datetime", type("FakeDT", (), {
+            "now": staticmethod(lambda: type("D", (), {"strftime": lambda self, f: "2026-10-06"})()),
+        }))
+        sched._check_daily_usage_summary()
+
+        daily = [entry for entry in calls if entry[0] == "daily_usage_summary"][0][1]
+        assert daily["announcements_played"] == 2
+        assert sched._daily_announcements_played == 0
+
     def test_counters_reset_after_emit(self, monkeypatch):
         """Counters should be zeroed after the summary is emitted."""
         sched = self._make_scheduler()

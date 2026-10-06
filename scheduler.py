@@ -114,6 +114,7 @@ class Scheduler:
         self._daily_current_date: Optional[str] = None
         self._daily_triggers_one_time: int = 0
         self._daily_triggers_recurring: int = 0
+        self._daily_announcements_played: int = 0
         self._daily_prayer_silences: int = 0
         self._daily_working_hours_blocks: int = 0
         self._announcement_enqueue_seq: int = 0
@@ -711,6 +712,9 @@ class Scheduler:
                 "date": self._daily_current_date,
                 "triggers_one_time": self._daily_triggers_one_time,
                 "triggers_recurring": self._daily_triggers_recurring,
+                # Queued announcements actually started (the trigger counters
+                # above only count scheduled music).
+                "announcements_played": self._daily_announcements_played,
                 "prayer_silences": self._daily_prayer_silences,
                 "working_hours_blocks": self._daily_working_hours_blocks,
                 "web_events": get_and_reset_web_event_count(),
@@ -742,6 +746,7 @@ class Scheduler:
         self._daily_current_date = today
         self._daily_triggers_one_time = 0
         self._daily_triggers_recurring = 0
+        self._daily_announcements_played = 0
         self._daily_prayer_silences = 0
         self._daily_working_hours_blocks = 0
 
@@ -1011,6 +1016,7 @@ class Scheduler:
         item["playback_session"] = getattr(get_player(), "_playback_session", None)
         item["started_ts"] = time.time()
         self._announcement_current = item
+        self._daily_announcements_played += 1
 
     def _process_announcement_queue(
         self,
