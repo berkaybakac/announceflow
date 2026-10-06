@@ -20,13 +20,14 @@ class _StopMainLoop(Exception):
     pass
 
 
-def _run_main_boot(monkeypatch, silence_policy=None):
+def _run_main_boot(monkeypatch, silence_policy=None, player=None, signal_handlers=None):
     """Run main() up to the web server start with a fake player/scheduler."""
     policy = silence_policy or {"silence_active": False, "policy": None}
     log_system = MagicMock()
     log_error = MagicMock()
-    player = MagicMock()
+    player = player if player is not None else MagicMock()
     scheduler = MagicMock()
+    handlers = signal_handlers if signal_handlers is not None else {}
 
     monkeypatch.setattr(main_mod, "setup_logging", lambda: MagicMock())
     monkeypatch.setattr(
@@ -42,7 +43,7 @@ def _run_main_boot(monkeypatch, silence_policy=None):
     monkeypatch.setattr(main_mod, "resolve_silence_policy", lambda *_a, **_k: dict(policy))
     monkeypatch.setattr(main_mod, "_is_port_available", lambda _port: True)
     monkeypatch.setattr(main_mod.time, "sleep", lambda _x: None)
-    monkeypatch.setattr(main_mod.signal, "signal", lambda *_a: None)
+    monkeypatch.setattr(main_mod.signal, "signal", lambda sig, fn: handlers.__setitem__(sig, fn))
 
     monkeypatch.setenv("ANNOUNCEFLOW_DEV_RELOAD", "1")
     fake_app = MagicMock()
@@ -119,6 +120,64 @@ def test_all_files_missing_logs_failure_and_does_not_play(monkeypatch, temp_db, 
     player.apply_playlist_state.assert_not_called()
     player.play_next.assert_not_called()
     log_error.assert_any_call("playlist_restore_failed", {"reason": "files_not_found"})
+
+
+def test_service_restart_keeps_playing_playlist_for_next_boot(monkeypatch, temp_db, tracks):
+    """systemctl restart / deploy (SIGTERM) must not erase the playlist intent.
+
+    Only an operator stop should; a restart should come back playing, the
+    same way a power loss already does.
+    """
+    import signal as signal_mod
+
+    from player import AudioPlayer
+
+    played = []
+
+    def fake_play(self, file_path, *args, **kwargs):
+        played.append(file_path)
+        self.is_playing = True
+        self.current_file = file_path
+        return True
+
+    monkeypatch.setattr(AudioPlayer, "play", fake_play)
+    real_player = AudioPlayer()
+    real_player.apply_playlist_state(playlist=tracks, index=-1, loop=True,
+                                     runtime_active=True, db_active=True)
+    real_player.play_next()
+    real_player.play_next()  # playing track index 1
+
+    fake_stream_mod = types.ModuleType("services.stream_service")
+    fake_stream_mod.get_stream_service = lambda: MagicMock()
+    monkeypatch.setitem(sys.modules, "services.stream_service", fake_stream_mod)
+    monkeypatch.setattr(main_mod.sys, "exit", MagicMock(side_effect=SystemExit(0)))
+
+    handlers = {}
+    _run_main_boot(monkeypatch, player=real_player, signal_handlers=handlers)
+    with pytest.raises(SystemExit):
+        handlers[signal_mod.SIGTERM](signal_mod.SIGTERM, None)
+
+    assert real_player.is_playing is False, "shutdown still stops playback"
+    state = db.get_playlist_state()
+    assert state["active"] is True
+    assert state["playlist"] == tracks
+
+    # Next boot resumes it.
+    player2, _, _, _ = _run_main_boot(monkeypatch)
+    player2.play_next.assert_called_once_with()
+
+
+def test_operator_stop_is_still_remembered_across_restart(monkeypatch, temp_db, tracks):
+    from player import AudioPlayer
+
+    monkeypatch.setattr(AudioPlayer, "play", lambda self, *a, **k: True)
+    p = AudioPlayer()
+    p.apply_playlist_state(playlist=tracks, index=-1, loop=True,
+                           runtime_active=True, db_active=True)
+    p.stop_playlist()
+
+    player2, _, _, _ = _run_main_boot(monkeypatch)
+    player2.play_next.assert_not_called()
 
 
 def test_inactive_playlist_is_not_restored(monkeypatch, temp_db, tracks):

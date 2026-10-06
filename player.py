@@ -717,8 +717,14 @@ class AudioPlayer:
             )
         return True
 
-    def stop(self) -> bool:
-        """Stop playback safely."""
+    def stop(self, persist_inactive: bool = True) -> bool:
+        """Stop playback safely.
+
+        ``persist_inactive=False`` is for process shutdown (SIGTERM on
+        restart/deploy): playback stops, but the saved playlist intent is
+        kept so the next boot resumes it, as it already does after a power
+        loss. Every other caller keeps the default and records the stop.
+        """
         # 1. Update state FIRST to prevent UI race conditions
         with self._lock:
             was_playing = self.is_playing
@@ -754,7 +760,8 @@ class AudioPlayer:
             self._playlist_active = False
 
         # Persist stopped state to database (prevents auto-resume on restart)
-        db.save_playlist_state(active=False)
+        if persist_inactive:
+            db.save_playlist_state(active=False)
 
         # 2. Kill process safely
         if AUDIO_BACKEND == "mpg123" and self._process:

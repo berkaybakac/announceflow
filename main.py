@@ -245,7 +245,8 @@ def main():
             logger.debug("WebStream: shutdown error: %s", exc)
 
         scheduler.stop()
-        player.stop()
+        # Keep the saved playlist intent: a restart/deploy should resume music.
+        player.stop(persist_inactive=False)
         sys.exit(0)
 
     signal.signal(signal.SIGINT, graceful_exit)

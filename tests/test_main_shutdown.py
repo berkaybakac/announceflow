@@ -105,7 +105,7 @@ def test_graceful_exit_stops_stream_scheduler_and_player(monkeypatch):
         reason="process_signal_SIGTERM",
     )
     state["scheduler"].stop.assert_called_once_with()
-    state["player"].stop.assert_called_once_with()
+    state["player"].stop.assert_called_once_with(persist_inactive=False)
     state["log_system"].assert_any_call("shutdown", {"signal": "SIGTERM"})
     exit_mock.assert_called_once_with(0)
 
@@ -129,7 +129,7 @@ def test_graceful_exit_continues_when_stream_stop_raises(monkeypatch):
 
     # Shutdown flow should continue even if stream stop raises.
     state["scheduler"].stop.assert_called_once_with()
-    state["player"].stop.assert_called_once_with()
+    state["player"].stop.assert_called_once_with(persist_inactive=False)
     state["log_system"].assert_any_call("shutdown", {"signal": "SIGINT"})
     exit_mock.assert_called_once_with(0)
     assert any(
