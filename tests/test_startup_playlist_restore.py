@@ -167,6 +167,50 @@ def test_service_restart_keeps_playing_playlist_for_next_boot(monkeypatch, temp_
     player2.play_next.assert_called_once_with()
 
 
+def test_mpg123_killed_by_shutdown_signal_does_not_advance_playlist(monkeypatch, temp_db, tracks):
+    """systemd (KillMode=control-group) SIGTERMs mpg123 together with us.
+
+    Seen on a Pi: the monitor saw mpg123 exit, treated it as a normal track
+    end and started the *next* track (~3 s of audio during shutdown) and
+    saved the advanced index, so the restart skipped a track.
+    """
+    import signal as signal_mod
+
+    from player import AudioPlayer
+
+    played = []
+
+    def fake_play(self, file_path, *args, **kwargs):
+        played.append(file_path)
+        self.is_playing = True
+        self.current_file = file_path
+        return True
+
+    monkeypatch.setattr(AudioPlayer, "play", fake_play)
+    real_player = AudioPlayer()
+
+    handlers = {}
+    db.save_playlist_state(playlist=tracks, index=0, loop=True, active=True)
+    _run_main_boot(monkeypatch, player=real_player, signal_handlers=handlers)
+    assert real_player.current_file == tracks[0]
+    played.clear()
+
+    # mpg123 dies from the same SIGTERM while shutdown is still running.
+    stream_service = MagicMock()
+    stream_service.stop.side_effect = lambda **_k: real_player.on_track_end()
+    fake_stream_mod = types.ModuleType("services.stream_service")
+    fake_stream_mod.get_stream_service = lambda: stream_service
+    monkeypatch.setitem(sys.modules, "services.stream_service", fake_stream_mod)
+    monkeypatch.setattr(main_mod.sys, "exit", MagicMock(side_effect=SystemExit(0)))
+
+    with pytest.raises(SystemExit):
+        handlers[signal_mod.SIGTERM](signal_mod.SIGTERM, None)
+
+    assert played == [], "no track may start during shutdown"
+    state = db.get_playlist_state()
+    assert (state["active"], state["index"]) == (True, 0)
+
+
 def test_operator_stop_is_still_remembered_across_restart(monkeypatch, temp_db, tracks):
     from player import AudioPlayer
 

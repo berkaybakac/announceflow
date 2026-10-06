@@ -229,6 +229,11 @@ def main():
         logger.info("Kapatma sinyali alındı. Sistem durduruluyor...")
         signal_name = "SIGINT" if signum == signal.SIGINT else "SIGTERM"
 
+        # systemd (KillMode=control-group) SIGTERMs mpg123 together with us;
+        # without this the monitor treats that as a track end and starts the
+        # next track mid-shutdown. Memory-only: the saved intent is untouched.
+        player.apply_playlist_state(runtime_active=False)
+
         # Log playlist session summary before shutdown
         player.log_session_summary()
 
