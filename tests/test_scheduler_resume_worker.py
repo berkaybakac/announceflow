@@ -184,16 +184,23 @@ class TestResumeWorkerEventCoordination:
 
         _patch_worker_deps(monkeypatch, sched, player)
 
-        done = threading.Event()
-        done.set()  # Unblock the worker immediately
+        done = threading.Event()  # NOT set: the first worker stays blocked
         sched._announcement_done = done
 
         result1 = sched._start_stream_resume_worker_after_announcement()
-        # Second call while first thread hasn't finished yet (flag still True)
+        # Second call while the first worker is guaranteed to still be running.
+        # (Previously `done` was pre-set, so on a fast runner the first worker
+        # could finish and clear the flag before this call: flaky in CI.)
         result2 = sched._start_stream_resume_worker_after_announcement()
 
         assert result1 is True
         assert result2 is False
+
+        done.set()
+        deadline = time.monotonic() + 2.0
+        while sched._stream_resume_worker_in_progress and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert sched._stream_resume_worker_in_progress is False
 
     def test_resume_worker_calls_stream_resume_on_success(self, monkeypatch):
         """On normal exit (event set, stream alive), resume_after_announcement called."""
